@@ -58,14 +58,76 @@ The sidebar has a one-pixel divider. The main feed is at most 48rem wide. Cards 
 
 The fixed Bot palette identifies Bots. Color never communicates status by itself. Every status needs visible text and an icon with an accessible name.
 
+### Bot builder
+
+`GET /bots/new` uses one server-rendered form in the main column. It separates cosmetic identity from executable behavior:
+
+```text
++------------------------------------------------------------------+
+| New Bot                                                          |
+|                                                                  |
+| Identity                                                         |
+| [palette mark]  Name              [Research helper............]  |
+|                 Short description [Summarizes support cases...]  |
+|                 Shown in the Bot list. It does not change work.  |
+|                                                                  |
+| Purpose                                                          |
+| [Review open support cases for the selected account...........]  |
+|                                                                  |
+| Behavior instructions                                            |
+| [Name blockers, cite case IDs, and do not guess status.........] |
+|                                                                  |
+| Tools                                                            |
+| Support connector                                      Add       |
+|   [ ] Read tools                 Select exact tools               |
+|   [ ] Write tools                Unavailable in this release      |
+|   [ ] Destructive tools          Unavailable in this release      |
+|                                                                  |
+| Tool slots                                      0 of 4 selected  |
+| Code execution [ ] Reviewed JavaScript sandbox                  |
+|                Uses one slot; requires an enabled code policy.  |
+|                                                                  |
+| [Cancel]                                           [Create Bot]  |
++------------------------------------------------------------------+
+```
+
+`Name`, `Short description`, and the fixed-palette mark are cosmetic Bot fields. The short description appears in the roster and does not change behavior or authority. `Purpose` maps to the immutable Bot job. `Behavior instructions` maps to immutable standing instructions. Changing purpose, behavior instructions, selected tool policies, skills, model route, or compute policy appends a Bot revision. It never passes through the cosmetic profile action.
+
+The Bot purpose explains its intended job. It grants nothing. The access form separately asks why this Bot revision may use the selected provider tools and binds that narrower purpose into the expiring grant.
+
+The first release requires at least one active reviewed read-only tool policy when creating a Bot. It creates no connection, provider authorization, or grant. If a selected connector has no usable provider authorization, the new Bot opens in `Needs access` state.
+
+The builder displays `selected_permission_count of max_selected_permissions tool slots`. Code execution consumes one of the four model-tool slots, so selecting an enabled reviewed compute policy leaves at most three provider tools. If no code profile and policy have passed their gates, the code control is unavailable with that reason; the page never invents a profile. The enhancement announces slot-count changes in a polite live region. The server recomputes the limit on submit.
+
+Keep the palette mark for the first release. Do not add an avatar dependency, raw SVG field, image upload, or public avatar request. After the authority path ships, evaluate either an original locally bundled OpenBot icon pack or a pinned self-hosted DiceBear Voxel Bot renderer. [DiceBear core](https://github.com/dicebear/dicebear) is MIT-licensed and the [Voxel Bot style](https://www.dicebear.com/styles/voxel-bot/) is CC0 1.0, but adoption still requires dependency, license, CSP, and generated-SVG review. Use a random opaque Bot seed, not a name or email address. Serve generated images from OpenBot's origin. Keep roster marks static; any later animation is opt-in in the picker or large Bot header and must honor reduced motion.
+
+### Tool permission groups
+
+The builder and Bot access page group connector tools under `Read`, `Write`, and `Destructive`. These groups explain effect and help navigation. They are not grants and never replace exact reviewed organization tool policies.
+
+- `Read` observes provider business data. Disclose incidental provider access logs, timestamps, and quota use.
+- `Write` creates or changes provider business data without deleting it or changing access control.
+- `Destructive` includes deletion, membership or permission changes, security changes, irreversible bulk actions, and any operation the connector review classifies as high impact.
+
+The server owns each classification. A tool with an unknown or argument-dependent effect is unavailable until connector review either restricts its arguments or assigns the highest possible effect. A user cannot lower a tool's classification.
+
+Each category checkbox is a tri-state summary of its exact reviewed children: unchecked means none, indeterminate means some, and checked means all tools in the displayed pinned catalog revision. The category is not separate authority. A bulk change previews the named fixed set before submission, and a later connector release never inherits access. If the group is larger than the remaining tool slots, bulk selection is unavailable and the page directs the owner to exact children. Do not offer a bulk-select shortcut for destructive tools.
+
+The first release begins with no tool selected and permits only reviewed read children. Creating a Bot requires at least one selected read tool. The server-rendered submit remains usable without JavaScript; an invalid POST returns `422` with an error summary and field error. Enhancement may disable and re-enable it while showing the same reason. Write and destructive are unchecked and disabled with `Unavailable in the read-only release`. The page does not draw fake child tools from an unreviewed vendor catalog.
+
+Every selectable child shows its safe display name, effect, incidental effects, enforceable resource scope, outbound fields and destinations, call limit, and grant expiry. Put the pinned connector tool key and schema revision under `Technical details`. If a connector cannot enforce the selected resource scope, disable submission and use the existing `resource_scope_unsupported` copy.
+
+The access page distinguishes selection intent from effective authority. A selected tool can be `Needs connection`, `Needs grant`, `Available`, `Expired`, `Revoked`, `Connector changed`, or `Blocked by organization policy`. The checkbox controls the next immutable Bot revision. The status comes from the current server-side authority chain.
+
 ### Sidebar behavior
 
-The sidebar header contains `New Bot` and a search form. Enter submits `GET /bots`. The optional browser controller waits 200 milliseconds after text composition ends, aborts an older request, keeps focus and selection, and replaces the current history entry. Search text is limited to 128 UTF-8 bytes and matches normalized Bot name and title only.
+The sidebar header contains `New Bot` and a search form. Enter submits `GET /bots`. The optional browser controller waits 200 milliseconds after text composition ends, aborts an older request, keeps focus and selection, and replaces the current history entry. Search text is limited to 128 UTF-8 bytes and matches normalized Bot name and short description only.
 
 Each Bot row shows:
 
 - fixed-palette color mark
 - name
+- short description
 - last activity time
 - one derived status line
 
@@ -90,6 +152,24 @@ A Bot with no earlier run and usable configuration and access is `Ready`. `Needs
 The header shows the Bot mark, name, active revision, and an `Access` control. Under it, ordinary links switch between `Tasks`, `Access`, and `Profile`.
 
 The task feed contains independent confirmations and run summaries in OpenBot commit order. Put a user prompt on the right visually, but keep chronological DOM order. Put confirmation, activity, safe provider-tool and code summaries, result, evidence, and cleanup cards on the left under a run heading.
+
+When a Bot selects a connector but lacks a usable provider authorization, put a server-authored setup card in the feed before the disabled composer:
+
+```text
++------------------------------------------------------------------+
+| OpenBot setup                                                    |
+|                                                                  |
+| This Bot is configured to use Support connector, but no account  |
+| is connected. Connecting an account does not give this Bot       |
+| permission to use it.                                            |
+|                                                                  |
+|                                                     [Connect]    |
++------------------------------------------------------------------+
+```
+
+Label the card `OpenBot setup`, not with the Bot's name. It is control-plane state, never a model response. The action uses the existing connection-setup flow and returns through its stored server-selected path to the Bot access page. Creating the card, opening connection setup, and completing OAuth perform no model or provider-tool call and create no Bot grant.
+
+The server chooses reason-specific copy. `authorization_missing` says no account is connected and offers `Connect`. `authorization_expired` says the authorization expired; `authorization_revoked` says it was revoked; both offer `Reconnect`. `authorization_unusable` says OpenBot cannot use the saved authorization and offers `Reconnect` only after reconciliation proves that a new setup is safe. An uncertain external outcome is not a connection-setup card and never offers a blind retry.
 
 The composer has one multiline field and a `Review task` button. It has no attachment, microphone, mention, schedule, browser, or computer control. Disable it when the Bot lacks a currently usable provider grant. A code-enabled Bot also requires an enabled active profile, active selected compute-policy revision, and unexpired active compute grant. A live confirmation, nonterminal run, or incomplete cleanup also disables the composer. Explain the exact reason beside the control. Do not rely on color or a disabled tooltip.
 
@@ -135,6 +215,14 @@ A successful answer does not hide `Cleanup required`. Render `Cancel run` only w
 Connector code may produce a safe summary that names an allowed provider tool and a record count. A code summary may show language, duration, exit state, and truncated stdout and stderr byte counts. Do not render raw MCP arguments, MCP results, model-written code, model reasoning, vendor bearer references, or decrypted configuration by default.
 
 Final answers are plain text with preserved whitespace. Do not render model Markdown or HTML. A source becomes a link only when reviewed connector code constructs a `SourceReferenceV1` from typed provider identifiers. The connector accepts one canonical HTTPS host, the default port, a defined path grammar, and an allowlist of safe query keys. It rejects unknown query keys, userinfo, fragments, IP literals, nondefault ports, and any normalization change. Model-written citations remain unlinked text.
+
+### Audit and vendor logs
+
+OpenBot's redacted audit view is the normal activity record. A safe tool event may show Bot, run, actor, reviewed tool display name, effect, outcome, duration, request ID, and time. It does not show raw arguments, results, bearer references, provider authorization references, or vendor object IDs. Link run summaries to the existing OpenBot audit event view.
+
+Metorial logs are supplemental vendor observations, not proof that OpenBot authorized a call correctly. A future role-checked organization-owner view may show `Open Metorial dashboard` on the Audit page. The link uses a configured path on the fixed `https://app.metorial.com` origin, includes no vendor object or return-path parameter, displays the hostname, and uses the external-link protections defined below. Metorial must enforce dashboard access with its own account role and session. Do not add a shared credential, an OpenBot proxy, or a deep link until that privileged use case exists.
+
+The first release has one owner role and may render only its owner-only privileged view. When the team permission model is implemented, ordinary users may create and operate Bots within organization-approved policies, request broader access, and view safe OpenBot events for Bots they can access. Only owners and implemented administrators may approve organization tool policies or grants, revoke shared provider authorizations, view all organization audit events, or see the Metorial dashboard-root link. Hiding the link is not a substitute for Metorial-side access control. Do not render a user variant before server-enforced user permissions exist.
 
 ## Mobile layout
 
@@ -189,25 +277,30 @@ Use the same routes and content on desktop and mobile. Do not build a native mob
 - Sensitive HTML and every JSON response use `Cache-Control: no-store`.
 - Account-owned resources return `404` across account boundaries.
 - The browser never infers authority from button state, roster status, or cached view data.
+- Permission groups use `fieldset` and `legend`. Each group names how many exact tools are selected, and an indeterminate state is never the only explanation.
+- Destructive status uses text and an icon as well as color. Effect definitions, tool details, and denial reasons remain visible without hover.
+- A mark beside a visible Bot name has empty alternative text. A mark picker uses native named radio controls.
+- Roster marks remain static. Later animated marks honor `prefers-reduced-motion` and retain a static rendering.
 
 ## Content rules
 
 Say what OpenBot knows and what it does not know.
 
-| Situation                          | Required copy direction                                                                                     |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Connection exists but no Bot grant | `Connected, but this Bot has no access.` Link to the Bot access page.                                       |
-| Resource mapping is unsupported    | `This connector cannot enforce the selected resource scope. The run was not created.`                       |
-| Bot is busy                        | Name the live confirmation, run, or cleanup obligation. Do not say only `Unavailable`.                      |
-| Confirmation expired or changed    | State that no run started and ask the user to review again.                                                 |
-| Cancellation requested             | Say that OpenBot denied new calls. Do not claim a vendor call already in flight was undone.                 |
-| Outcome is uncertain               | Use `Outcome unknown`. Do not relabel it `Failed`.                                                          |
-| Cleanup is incomplete              | Keep the cleanup warning visible even if an answer exists.                                                  |
-| Audit chain verifies               | Say the application chain verifies from its stored start. Do not call it immutable or non-repudiable.       |
-| Provider write requested           | State that provider business-data writes are not supported in the read-only release.                        |
-| Code execution enabled             | Name JavaScript, the Cloudflare destination, ephemeral filesystem, network and DNS limits, and compute cap. |
-| Sandbox cleanup incomplete         | State that files may still exist in an isolated container and keep the Bot slot blocked.                    |
-| Artifact feature absent            | Do not render disabled upload, file, mount, or shared-workspace controls.                                   |
+| Situation                          | Required copy direction                                                                                         |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Connection exists but no Bot grant | `Connected, but this Bot has no access.` Link to the Bot access page.                                           |
+| Connection is missing              | `This Bot is configured to use [connector], but no account is connected.` State that connecting grants nothing. |
+| Resource mapping is unsupported    | `This connector cannot enforce the selected resource scope. The run was not created.`                           |
+| Bot is busy                        | Name the live confirmation, run, or cleanup obligation. Do not say only `Unavailable`.                          |
+| Confirmation expired or changed    | State that no run started and ask the user to review again.                                                     |
+| Cancellation requested             | Say that OpenBot denied new calls. Do not claim a vendor call already in flight was undone.                     |
+| Outcome is uncertain               | Use `Outcome unknown`. Do not relabel it `Failed`.                                                              |
+| Cleanup is incomplete              | Keep the cleanup warning visible even if an answer exists.                                                      |
+| Audit chain verifies               | Say the application chain verifies from its stored start. Do not call it immutable or non-repudiable.           |
+| Provider write requested           | State that provider business-data writes are not supported in the read-only release.                            |
+| Code execution enabled             | Name JavaScript, the Cloudflare destination, ephemeral filesystem, network and DNS limits, and compute cap.     |
+| Sandbox cleanup incomplete         | State that files may still exist in an isolated container and keep the Bot slot blocked.                        |
+| Artifact feature absent            | Do not render disabled upload, file, mount, or shared-workspace controls.                                       |
 
 Do not use teammate copy that implies memory or a continuing conversation. `Start a task` is the primary verb. Each task is independent. Do not say `I'll remember`, `hand this to another Bot`, `run every week`, or `always allow`.
 
@@ -215,35 +308,35 @@ Do not use teammate copy that implies memory or a continuing conversation. `Star
 
 All resource IDs are account-scoped UUIDs. Raw bootstrap, reset, and confirmation tokens never appear in a URL.
 
-| Method and path                          | View or behavior                                                                                         |
-| ---------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `GET /`                                  | Route an unbootstrapped install to `/bootstrap`, a signed-out user to `/login`, and an owner to `/bots`. |
-| `GET /login`                             | Email and password form.                                                                                 |
-| `GET /bootstrap`                         | One-time first-owner token and password form.                                                            |
-| `GET /reset`                             | One-time password-reset token and new-password form.                                                     |
-| `GET /bots`                              | Searchable, cursor-paginated Bot roster. Accept `q`, `cursor`, and `limit`.                              |
-| `GET /bots/new`                          | Bot identity, behavior, organization tools, and declarative skills.                                      |
-| `GET /bots/:botId`                       | Task feed, status, and task composer.                                                                    |
-| `GET /bots/:botId/profile`               | Cosmetic profile and immutable behavior revision history.                                                |
-| `GET /bots/:botId/access`                | Connections, grants, allowlist, resource mapping, destinations, limits, purpose, expiry, and revocation. |
-| `GET /bots/:botId/runs/:runId`           | Prompt, timeline, result, cancellation, cleanup, evidence, and audit link.                               |
-| `GET /run-confirmations/:confirmationId` | Session-bound five-minute task confirmation.                                                             |
-| `GET /catalog/tools`                     | Organization tool policies and dependency impact.                                                        |
-| `GET /catalog/tools/:policyId`           | Server-derived connector contract and disable impact.                                                    |
-| `GET /catalog/compute`                   | Installation profile, DNS gate state, compute policies, and dependent Bots.                              |
-| `GET /catalog/compute/:policyId`         | Profile digest, admitted data classes, grants, dependent Bots, and disable impact.                       |
-| `GET /catalog/skills`                    | Skills, current defaults, disabled revisions, and dependent Bots.                                        |
-| `GET /catalog/skills/new`                | Declarative skill form.                                                                                  |
-| `GET /catalog/skills/:skillId`           | Skill revisions, requested tools, and disable impact.                                                    |
-| `GET /connections`                       | Reviewed connector, setup state, provider authorization, and dependent grants.                           |
-| `GET /connections/new`                   | OAuth scope and connection-versus-authority explanation.                                                 |
-| `GET /connection-setups/:setupId`        | Pending, complete, expired, or failed setup.                                                             |
-| `GET /connections/:authorizationId`      | Provider version, observed revocation, and dependent grants.                                             |
-| `GET /oauth/metorial/callback`           | Verify one-time OAuth state and finish setup.                                                            |
-| `GET /audit`                             | Filtered, cursor-paginated redacted audit events.                                                        |
-| `GET /audit/events/:eventId`             | Canonical redacted event, chain position, and verifier result.                                           |
-| `GET /cleanup-obligations/:obligationId` | Attempts, safe error, retry timing, and observed vendor state.                                           |
-| `GET /settings`                          | Read-only installation profile, jurisdiction, retention, active key IDs, and version.                    |
+| Method and path                          | View or behavior                                                                                                                                                                                                               |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /`                                  | Route an unbootstrapped install to `/bootstrap`, a signed-out user to `/login`, and an owner to `/bots`.                                                                                                                       |
+| `GET /login`                             | Email and password form.                                                                                                                                                                                                       |
+| `GET /bootstrap`                         | One-time first-owner token and password form.                                                                                                                                                                                  |
+| `GET /reset`                             | One-time password-reset token and new-password form.                                                                                                                                                                           |
+| `GET /bots`                              | Searchable, cursor-paginated Bot roster. Accept `q`, `cursor`, and `limit`.                                                                                                                                                    |
+| `GET /bots/new`                          | Cosmetic name, short description and palette mark; immutable purpose and behavior instructions; exact reviewed read-only tools; declarative skills; optional enabled reviewed compute policy and visible tool-slot accounting. |
+| `GET /bots/:botId`                       | Task feed, status, and task composer.                                                                                                                                                                                          |
+| `GET /bots/:botId/profile`               | Cosmetic profile and immutable behavior revision history.                                                                                                                                                                      |
+| `GET /bots/:botId/access`                | Connections, grants, allowlist, resource mapping, destinations, limits, purpose, expiry, and revocation.                                                                                                                       |
+| `GET /bots/:botId/runs/:runId`           | Prompt, timeline, result, cancellation, cleanup, evidence, and audit link.                                                                                                                                                     |
+| `GET /run-confirmations/:confirmationId` | Session-bound five-minute task confirmation.                                                                                                                                                                                   |
+| `GET /catalog/tools`                     | Organization tool policies and dependency impact.                                                                                                                                                                              |
+| `GET /catalog/tools/:policyId`           | Server-derived connector contract and disable impact.                                                                                                                                                                          |
+| `GET /catalog/compute`                   | Installation profile, DNS gate state, compute policies, and dependent Bots.                                                                                                                                                    |
+| `GET /catalog/compute/:policyId`         | Profile digest, admitted data classes, grants, dependent Bots, and disable impact.                                                                                                                                             |
+| `GET /catalog/skills`                    | Skills, current defaults, disabled revisions, and dependent Bots.                                                                                                                                                              |
+| `GET /catalog/skills/new`                | Declarative skill form.                                                                                                                                                                                                        |
+| `GET /catalog/skills/:skillId`           | Skill revisions, requested tools, and disable impact.                                                                                                                                                                          |
+| `GET /connections`                       | Reviewed connector, setup state, provider authorization, and dependent grants.                                                                                                                                                 |
+| `GET /connections/new`                   | OAuth scope and connection-versus-authority explanation.                                                                                                                                                                       |
+| `GET /connection-setups/:setupId`        | Pending, complete, expired, or failed setup.                                                                                                                                                                                   |
+| `GET /connections/:authorizationId`      | Provider version, observed revocation, and dependent grants.                                                                                                                                                                   |
+| `GET /oauth/metorial/callback`           | Verify one-time OAuth state and finish setup.                                                                                                                                                                                  |
+| `GET /audit`                             | Filtered, cursor-paginated redacted audit events.                                                                                                                                                                              |
+| `GET /audit/events/:eventId`             | Canonical redacted event, chain position, and verifier result.                                                                                                                                                                 |
+| `GET /cleanup-obligations/:obligationId` | Attempts, safe error, retry timing, and observed vendor state.                                                                                                                                                                 |
+| `GET /settings`                          | Read-only installation profile, jurisdiction, retention, active key IDs, and version.                                                                                                                                          |
 
 ### Browser action index
 
@@ -302,22 +395,22 @@ Better Auth lives behind a committed allowlist under `/api/auth/*`. The initial 
 
 Page handlers serialize allowlisted view objects. They never send database rows to templates.
 
-| Contract                 | Used by                      | Required content                                                                                                                             |
-| ------------------------ | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `BotRosterViewV1`        | Bot list and shared sidebar  | Query state, cursor links, `BotListItemV1` rows, and allowed top-level actions.                                                              |
-| `BotWorkspaceViewV1`     | Bot task page                | Bot identity, active revision, feed items, composer availability, denial reason, and navigation.                                             |
-| `RunConfirmationViewV1`  | Confirmation page            | Exact disclosure snapshot, expiry, stale state, and server-derived actions.                                                                  |
-| `RunDetailViewV1`        | Run detail                   | Prompt, three status dimensions, timeline page, plain-text result, evidence, cleanup, `can_cancel`, and `cancel_reason`.                     |
-| `RunPollPageV1`          | Two-second polling           | Run version, execution, cleanup, evidence and result state, new items, and next cursor.                                                      |
-| `BotAccessViewV1`        | Bot access page              | Connections, provider grants, separate compute grant, resource mapping, destinations, limits, purpose, expiry, and impact-safe mutations.    |
-| `ConnectionDetailViewV1` | Connection detail            | Provider version, safe authorization state, dependent grants, and revocation impact.                                                         |
-| `CatalogViewV1`          | Tool and skill catalog pages | Immutable revision identity, lifecycle, dependency counts, and server-derived actions.                                                       |
-| `ComputeCatalogViewV1`   | Compute catalog pages        | Signed approval-lease status and expiry, profile and policy lifecycle, limits, admitted classes, dependent Bots, and server-derived actions. |
-| `AuditEventViewV1`       | Audit event page             | Redacted canonical event, stream position, stored digests, and verifier result.                                                              |
+| Contract                 | Used by                      | Required content                                                                                                                                                                                                            |
+| ------------------------ | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BotRosterViewV1`        | Bot list and shared sidebar  | Query state, cursor links, `BotListItemV1` rows, and allowed top-level actions.                                                                                                                                             |
+| `BotWorkspaceViewV1`     | Bot task page                | Bot identity, active revision, server-authored setup or run feed items, composer availability, denial reason, and navigation.                                                                                               |
+| `RunConfirmationViewV1`  | Confirmation page            | Exact disclosure snapshot, expiry, stale state, and server-derived actions.                                                                                                                                                 |
+| `RunDetailViewV1`        | Run detail                   | Prompt, three status dimensions, timeline page, plain-text result, evidence, cleanup, `can_cancel`, and `cancel_reason`.                                                                                                    |
+| `RunPollPageV1`          | Two-second polling           | Run version, execution, cleanup, evidence and result state, new items, and next cursor.                                                                                                                                     |
+| `BotAccessViewV1`        | Bot access page              | Exact tool selections grouped by server-owned effect, effective authority status, connections, provider grants, separate compute grant, resource mapping, destinations, limits, purpose, expiry, and impact-safe mutations. |
+| `ConnectionDetailViewV1` | Connection detail            | Provider version, safe authorization state, dependent grants, and revocation impact.                                                                                                                                        |
+| `CatalogViewV1`          | Tool and skill catalog pages | Immutable revision identity, lifecycle, dependency counts, and server-derived actions.                                                                                                                                      |
+| `ComputeCatalogViewV1`   | Compute catalog pages        | Signed approval-lease status and expiry, profile and policy lifecycle, limits, admitted classes, dependent Bots, and server-derived actions.                                                                                |
+| `AuditEventViewV1`       | Audit event page             | Redacted canonical event, stream position, stored digests, and verifier result.                                                                                                                                             |
 
-Every view includes `available_actions` and stable denial reasons from the server. No view may contain an encrypted content field, credential, MCP URL, Metorial reference, bearer capability, password material, raw tool argument, or raw tool result.
+Every view includes `available_actions` and stable denial reasons from the server. No ordinary-user view may contain an encrypted content field, credential, MCP URL, Metorial reference, bearer capability, password material, raw tool argument, or raw tool result. A future owner/admin provider-activity use case may return only a fixed configured Metorial Logs root after a fresh role check; the view schema alone is not authorization.
 
-`BotListItemV1` contains only `bot_id`, `name`, `title`, `palette_color_id`, `active_revision_id`, `presentation_status`, `last_activity_at`, and `usable_grant_count`.
+`BotListItemV1` contains only `bot_id`, `name`, `short_description`, nullable `icon`, `palette_color_id`, `active_revision_id`, `presentation_status`, `last_activity_at`, and `usable_grant_count`.
 
 `BotFeedItemV1` is a tagged union for a live confirmation or completed run summary. `RunEventItemV1` covers lifecycle, safe tool summary, result, cleanup warning, and stable error. `SourceReferenceV1` contains connector provenance, a safe label, the displayed hostname, and the canonical URL produced by the connector's typed identifier mapping.
 

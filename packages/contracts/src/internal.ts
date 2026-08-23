@@ -1,4 +1,5 @@
 export * from "./catalog.js";
+export * from "./bot-permissions.js";
 export * from "./errors.js";
 export * from "./ids.js";
 export * from "./json-schema.js";

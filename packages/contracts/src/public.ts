@@ -17,6 +17,28 @@ export {
     type RequestedRunLimitsV1,
 } from "./catalog.js";
 export {
+    AdminProviderActivityViewV1Schema,
+    BotPermissionGroupsViewV1Schema,
+    ConnectionRequiredCardV1Schema,
+    CreateBotCommandV1Schema,
+    OrganizationRoleV1Schema,
+    PermissionGroupViewV1Schema,
+    PermissionItemViewV1Schema,
+    ToolEffectV1Schema,
+    ToolExecutionModeV1Schema,
+    UpdateBotProfileCommandV1Schema,
+    type AdminProviderActivityViewV1,
+    type BotPermissionGroupsViewV1,
+    type ConnectionRequiredCardV1,
+    type CreateBotCommandV1,
+    type OrganizationRoleV1,
+    type PermissionGroupViewV1,
+    type PermissionItemViewV1,
+    type ToolEffectV1,
+    type ToolExecutionModeV1,
+    type UpdateBotProfileCommandV1,
+} from "./bot-permissions.js";
+export {
     DENY_CODES_V1,
     DenyCodeV1Schema,
     ERROR_CODES_V1,

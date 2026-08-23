@@ -31,3 +31,22 @@ This is a probe candidate, not a released route. A real request must still prove
 Metorial Search is the blocked first probe candidate because it requires no operator-supplied provider auth config and reads public web data. Public documentation proves that sessions accept per-provider tool allowlists and return an MCP connection URL. It does not publish an installation's deployment ID, pinned provider version, exact tool keys, canonical schemas, result limits, or cleanup behavior. A dedicated environment must supply those literals and two independent MCP calls before the candidate can pass. The candidate admits only public or synthetic probe input and cannot serve the normal owner-prompt path. The first-connector gate still returns `connector_evidence_incomplete`.
 
 The candidate uses the `global_public_read_only` resource rule. Its `operator_supplied_provider_auth_config_present: false` flag and target class are descriptive until the policy compiler binds them to an opaque verified `first_connector` decision with exact signed claims. It cannot admit organization data or claim resource-level isolation. Other connectors require a `connector_specific` rule with a reviewed argument mapper, provider enforcement, and a sibling-target denial. Metorial resource URI filters alone do not satisfy that rule.
+
+Metorial's dashboard groups provider tools as read-only, write, and destructive. Its underlying provider-tool contract supplies nullable `readOnly` and `destructive` booleans, not an authoritative category enum. OpenBot stores a normalized `read_only` copy and accepts only internally consistent combinations. Read is raw `readOnly: true` with `destructive` absent or false. Write is raw `readOnly: false` with `destructive` absent or false. Destructive is raw `readOnly: false` with `destructive: true`. Missing, null, contradictory, unknown, or drifted metadata becomes `unclassified` and stays disabled until a new connector release supplies sufficient classification evidence. A composite tool receives the highest effect of any operation it can perform.
+
+Bot permission revisions pin the exact tool key, provider deployment and version, connector release, schema digest, policy revision, and policy digest. The three display groups only bulk-edit those policies. Every Metorial session uses literal `tool_keys` filters for each provider. OpenBot rejects an omitted filter, `allow_all`, tool or resource regex, prompt filters, and parent-filter override state. It checks returned filter equality and exact MCP `tools/list` equality. Effective access is the intersection of the organization ceiling, Bot revision, user connection grant, and current provider tool set. Provider changes can remove access but never add it without review.
+
+OpenBot's redacted audit is authoritative for the product. Metorial session and tool-call logs supplement it with provider execution detail. Normal users do not receive Metorial dashboard access, vendor record identifiers, or raw logged payloads. A future role-checked owner/admin view may follow one configured path on the fixed `https://app.metorial.com` origin. Metorial does not document a stable URL for an individual log record, so OpenBot does not construct one.
+
+Primary sources:
+
+- [Provider concepts](https://metorial.com/docs/concepts-providers)
+- [Provider skills and dashboard tool groups](https://metorial.com/docs/product-provider-skills)
+- [Provider tools API](https://metorial.com/api/provider-tools)
+- [Generated provider-tool type](https://github.com/metorial/metorial-node/blob/main/sdk/gen/src/mt_2026_01_01_magnetar/resources/providers/tools/get.ts)
+- [Generated session-create type](https://github.com/metorial/metorial-node/blob/main/sdk/gen/src/mt_2026_01_01_magnetar/resources/sessions/create.ts)
+- [Metorial tool tag declaration](https://github.com/metorial/metorial/blob/main/packages/provider/src/action/action.ts)
+- [Jira comment tool classifications](https://github.com/metorial/metorial/blob/main/integrations/jira/src/tools/manage-comments.ts)
+- [Monitoring](https://metorial.com/docs/concepts-monitoring)
+- [Activity review](https://metorial.com/docs/review-activity)
+- [Tool calls API](https://metorial.com/api/tool-calls)

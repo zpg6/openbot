@@ -33,29 +33,47 @@ This record separates public documentation, local repository observations, and d
 Metorial documents these capabilities:
 
 - A session attaches one or more provider deployments and returns a `connection_url` for MCP clients.
-- Each attached provider accepts an allow filter with literal tool keys.
+- Provider setup groups tools as read-only, write, and destructive for review in the dashboard.
+- The underlying provider-tool record exposes nullable `readOnly` and `destructive` booleans rather than one authoritative three-value category. OpenBot accepts only a known boolean `readOnly`, records its exact true/false source state, and records whether `destructive` was true, false, or omitted before normalization.
+- Each attached provider accepts exact literal `tool_keys` filters. The generated session contract also supports regex, resource, prompt, and `allow_all` forms. Returned or composed filters can carry parent-filter override state. OpenBot adopts none of those broader forms.
 - A session may have multiple independent MCP or direct-tool connections.
 - A provider deployment combines a provider version, configuration, and optional auth configuration.
 - OAuth setup sessions return an auth-config reference after completion.
-- Session messages include input and output. OpenBot therefore must not import them by default.
+- Tool-call records include tool, session, provider, connection, agent, actor, consumer, identity, input, output, status, error, and timing fields. OpenBot therefore must not import raw payloads by default.
 
 Sources:
 
 - [Sessions](https://metorial.com/docs/concepts-sessions)
 - [OAuth](https://metorial.com/docs/sdk-oauth)
 - [Provider concepts](https://metorial.com/docs/concepts-providers)
+- [Provider skills and dashboard tool groups](https://metorial.com/docs/product-provider-skills)
+- [Provider tools API](https://metorial.com/api/provider-tools)
+- [Generated provider-tool type](https://github.com/metorial/metorial-node/blob/main/sdk/gen/src/mt_2026_01_01_magnetar/resources/providers/tools/get.ts)
+- [Generated session-create type](https://github.com/metorial/metorial-node/blob/main/sdk/gen/src/mt_2026_01_01_magnetar/resources/sessions/create.ts)
+- [Metorial tool tag declaration](https://github.com/metorial/metorial/blob/main/packages/provider/src/action/action.ts)
+- [Jira comment tool classifications](https://github.com/metorial/metorial/blob/main/integrations/jira/src/tools/manage-comments.ts)
+- [Monitoring](https://metorial.com/docs/concepts-monitoring)
+- [Activity review](https://metorial.com/docs/review-activity)
+- [Tool calls API](https://metorial.com/api/tool-calls)
+- [Generated tool-call type](https://github.com/metorial/metorial-node/blob/main/sdk/gen/src/mt_2026_01_01_magnetar/resources/tool-calls/get.ts)
 - [Metorial glossary](https://metorial.com/docs/glossary)
 - [Metorial API reference](https://metorial.com/api)
 
 ### What documentation does not establish
 
-Public docs do not provide the installation-specific deployment ID, selected provider version, exact read-only tool keys, canonical input and output schemas, OAuth scopes, resource-level enforcement, incidental effects, result limits, or bearer cleanup semantics needed by OpenBot.
+Public docs do not provide the installation-specific deployment ID, selected provider version, exact read-only tool keys, canonical input and output schemas, OAuth scopes, resource-level enforcement, incidental effects, result limits, or bearer cleanup semantics needed by OpenBot. They do not establish that provider-supplied tool tags are complete or correct. The tag fields are nullable, and the provider source permits omission. A tool filter covers a whole tool, not an operation or argument hidden inside a composite tool.
 
 Metorial's catalog advertises more than 1,000 integrations, but catalog breadth is not evidence that one exact tool is read-only or resource-scoped. No catalog marketing label closes the connector gate.
+
+The monitoring documentation names dashboard views for sessions, connections, tool calls, provider runs, errors, alerts, and auth events. It does not document a stable dashboard URL for one session or tool call. OpenBot must not construct an undocumented deep link.
 
 ### Adoption result
 
 `metorial-search` is the first probe candidate because Metorial documents it as requiring no operator-supplied provider auth config. It is a public-web reader, not an organization-resource connector. The candidate therefore uses the `global_public_read_only` resource rule and admits only public or synthetic probe input. Its `operator_supplied_provider_auth_config_present: false` flag and target class are descriptive, not authority. Before policy implementation, the compiler must bind them to an opaque verified `first_connector` decision whose signed claims name the exact deployment, tool key, schemas, resource rule, and admitted classes. It cannot serve the normal owner-prompt path. It remains blocked until a dedicated Metorial environment supplies a pinned deployment, one literal query-only tool key, canonical input and output schema digests, read-only tag readback, bounded results, two independent MCP calls, and cleanup observations.
+
+OpenBot derives display groups only from internally consistent Metorial tags. Raw `readOnly: true` with `destructive` absent or false maps to read. Raw `readOnly: false` with `destructive` absent or false maps to write. Raw `readOnly: false` with `destructive: true` maps to destructive. Missing tags, a null `readOnly`, contradictory values, an unknown shape, or a changed provider, specification, schema, or tool identity maps to `unclassified`. Unclassified tools remain disabled until a new connector release supplies sufficient classification evidence. If one tool contains several operations, OpenBot assigns the highest effect and cannot expose a safer operation separately without a narrower provider tool.
+
+The saved permission pins the exact tool key, provider deployment and version, connector release, schema digest, policy revision, and policy digest. Read, write, and destructive controls are bulk-edit views over those policies, not runtime authority. Every session supplies literal `tool_keys` for each provider. OpenBot rejects a missing filter, `allow_all`, every regex filter, and every parent-filter override. It checks both returned filter equality and exact MCP `tools/list` equality before exposing tools. The runtime set is the intersection of the organization ceiling, Bot revision, user's connected account grant, and current provider tool set. A provider update may narrow that intersection. It may never add a tool without a new review.
 
 An organization connector uses the separate `connector_specific` resource rule. Metorial resource URI filters select MCP resources; they do not prove that a tool argument is limited to one repository, mailbox, drive, channel, or account. That proof requires a reviewed argument mapper plus provider-side enforcement and a sibling-target denial. An unsupported mapping returns `resource_scope_unsupported` before session creation.
 
@@ -64,6 +82,8 @@ The management probe sends `Metorial-Version: 2026-01-01-magnetar` and records t
 The cleanup probe must create a second client before cleanup, request cleanup, and then show what that second client can do. Until it passes, OpenBot may say that its gateway denied later calls. It may not say Metorial revoked the bearer URL.
 
 The confirmation names Metorial and the connector provider as disclosure destinations. OpenBot's local retention setting does not remove input or output already recorded by either vendor.
+
+OpenBot keeps its own redacted audit entry for every attempted call. Raw Metorial input and output remain supplemental vendor logs. A future role-checked owner/admin view may show one configured path on the fixed `https://app.metorial.com` origin. It must not expose vendor record IDs, synthesize a record deep link, or expose Metorial management credentials, auth-config references, connection URLs, or session client secrets to a normal user.
 
 ## OpenRouter
 

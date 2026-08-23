@@ -96,6 +96,19 @@ export const ArtifactRuntimeLimitsV1Schema = z
     .strict();
 export type ArtifactRuntimeLimitsV1 = z.infer<typeof ArtifactRuntimeLimitsV1Schema>;
 
+export const RequestedRunLimitsV1Schema = z
+    .object({
+        max_model_turns: z.number().int().positive().max(5),
+        max_tool_calls: z.number().int().positive().max(2),
+        max_code_executions: z.number().int().nonnegative().max(1),
+        max_code_execution_ms: z.number().int().positive().max(15_000),
+        max_model_output_tokens_per_request: z.number().int().positive().max(2_048),
+        max_runtime_wall_time_ms: z.number().int().positive().max(240_000),
+        max_estimated_run_cost_usd_micros: z.number().int().positive().max(250_000),
+    })
+    .strict();
+export type RequestedRunLimitsV1 = z.infer<typeof RequestedRunLimitsV1Schema>;
+
 export const RuntimeLimitsV1Schema = z
     .object({
         schema_version: z.literal(1),

@@ -18,6 +18,7 @@ import {
     ERROR_CODES_V1,
     JsonSchemaSubsetV1Schema,
     JsonValueSchema,
+    MetorialToolEffectTagsV1Schema,
     ModelRouteV1Schema,
     UnverifiedManifestExtensionEnvelopeV1Schema,
     OrganizationToolPolicyV1Schema,
@@ -28,6 +29,8 @@ import {
     PersistedUserContentDataClassV1Schema,
     RuntimeLimitsV1Schema,
     classifyUserAuthoredContentV1,
+    classifyMetorialToolEffectV1,
+    botToolPolicySelectionMatchesPolicyV1,
     computeLimitsAreNarrowerOrEqualV1,
     computeAuthorityChainMatchesV1,
     verifyCompilerManifestExtensionEnvelopeV1,
@@ -200,6 +203,51 @@ describe("bounded JSON Schema subset", () => {
 });
 
 describe("versioned contracts", () => {
+    it("normalizes reviewed Metorial effect tags without a nullable stored value", () => {
+        expect(
+            classifyMetorialToolEffectV1({
+                read_only: true,
+                read_only_source: "true",
+                destructive: false,
+                destructive_source: "omitted",
+            })
+        ).toBe("read");
+        expect(
+            classifyMetorialToolEffectV1({
+                read_only: false,
+                read_only_source: "false",
+                destructive: false,
+                destructive_source: "omitted",
+            })
+        ).toBe("write");
+        expect(
+            classifyMetorialToolEffectV1({
+                read_only: false,
+                read_only_source: "false",
+                destructive: true,
+                destructive_source: "true",
+            })
+        ).toBe("destructive");
+        expect(
+            classifyMetorialToolEffectV1({
+                read_only: true,
+                read_only_source: "true",
+                destructive: true,
+                destructive_source: "true",
+            })
+        ).toBeNull();
+        expect(classifyMetorialToolEffectV1(null)).toBeNull();
+        expect(classifyMetorialToolEffectV1({})).toBeNull();
+        expect(classifyMetorialToolEffectV1({ read_only: "false", destructive: false })).toBeNull();
+        expect(
+            MetorialToolEffectTagsV1Schema.safeParse({
+                read_only: false,
+                read_only_source: "false",
+                destructive: null,
+                destructive_source: "omitted",
+            }).success
+        ).toBe(false);
+    });
     const modelRoute = {
         openrouter_model_id: "vendor/model",
         provider_slug: "vendor",
@@ -357,9 +405,17 @@ describe("versioned contracts", () => {
             provider_version: "2026-08-01",
             tool_key: "records.search",
             display_name: "Search records",
+            consequence_summary: "Reads records from the reviewed scope.",
             canonical_tool_schema: { type: "object", properties: { query: { type: "string" } } },
             tool_schema_digest: digest,
-            effect: "read_only",
+            effect: "read",
+            execution_mode: "direct",
+            metorial_effect_tags: {
+                read_only: true,
+                read_only_source: "true",
+                destructive: false,
+                destructive_source: "false",
+            },
             incidental_effects: [],
             resource_rule: {
                 kind: "connector_specific",
@@ -370,7 +426,7 @@ describe("versioned contracts", () => {
             },
             outbound_data_rule: {
                 data_classes: ["public"],
-                destinations: ["metorial", "connector_provider"],
+                destinations: ["metorial", "connector_provider", "openrouter", "model_provider"],
                 allowed_argument_fields: ["query"],
                 tool_result_may_reach_model: false,
             },
@@ -418,9 +474,17 @@ describe("versioned contracts", () => {
             provider_version: "2026-01-01-magnetar",
             tool_key: "metorial-search.search",
             display_name: "Search the public web",
+            consequence_summary: "Reads results from the public web.",
             canonical_tool_schema: { type: "object", properties: { query: { type: "string" } } },
             tool_schema_digest: digest,
-            effect: "read_only",
+            effect: "read",
+            execution_mode: "direct",
+            metorial_effect_tags: {
+                read_only: true,
+                read_only_source: "true",
+                destructive: false,
+                destructive_source: "false",
+            },
             incidental_effects: ["provider_access_log"],
             resource_rule: {
                 kind: "global_public_read_only",
@@ -477,6 +541,32 @@ describe("versioned contracts", () => {
                 },
             }).success
         ).toBe(false);
+        for (const mutation of [
+            {
+                effect: "write",
+                execution_mode: "proposal_requires_approval",
+                metorial_effect_tags: {
+                    read_only: false,
+                    read_only_source: "false",
+                    destructive: false,
+                    destructive_source: "omitted",
+                },
+            },
+            {
+                effect: "destructive",
+                execution_mode: "proposal_requires_approval",
+                metorial_effect_tags: {
+                    read_only: false,
+                    read_only_source: "false",
+                    destructive: true,
+                    destructive_source: "true",
+                },
+            },
+        ] as const) {
+            expect(OrganizationToolPolicyV1Schema.safeParse({ ...globalPublicPolicy, ...mutation }).success).toBe(
+                false
+            );
+        }
 
         expect(
             OrganizationToolPolicyV1Schema.safeParse({
@@ -583,9 +673,17 @@ describe("versioned contracts", () => {
             provider_version: "2026-08-01",
             tool_key: "records.search",
             display_name: "Search records",
-            canonical_tool_schema: { type: "object" },
+            consequence_summary: "Reads records from the reviewed scope.",
+            canonical_tool_schema: { type: "object", properties: { query: { type: "string" } } },
             tool_schema_digest: digest,
-            effect: "read_only",
+            effect: "read",
+            execution_mode: "direct",
+            metorial_effect_tags: {
+                read_only: true,
+                read_only_source: "true",
+                destructive: false,
+                destructive_source: "false",
+            },
             incidental_effects: ["provider_access_log"],
             resource_rule: {
                 kind: "connector_specific",
@@ -596,7 +694,7 @@ describe("versioned contracts", () => {
             },
             outbound_data_rule: {
                 data_classes: ["public"],
-                destinations: ["metorial", "connector_provider"],
+                destinations: ["metorial", "connector_provider", "openrouter", "model_provider"],
                 allowed_argument_fields: ["query"],
                 tool_result_may_reach_model: true,
             },
@@ -607,6 +705,59 @@ describe("versioned contracts", () => {
             owner_effect_override: "write",
         };
         expect(OrganizationToolPolicyV1Schema.safeParse(policy).success).toBe(false);
+
+        const { owner_effect_override: _ownerEffectOverride, ...reviewedPolicy } = policy;
+        expect(OrganizationToolPolicyV1Schema.safeParse(reviewedPolicy).success).toBe(true);
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...reviewedPolicy,
+                effect: "destructive",
+                execution_mode: "direct",
+            }).success
+        ).toBe(false);
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...reviewedPolicy,
+                effect: "write",
+                execution_mode: "direct",
+                metorial_effect_tags: {
+                    read_only: false,
+                    read_only_source: "false",
+                    destructive: true,
+                    destructive_source: "true",
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...reviewedPolicy,
+                metorial_effect_tags: {
+                    read_only: false,
+                    read_only_source: "false",
+                    destructive: false,
+                    destructive_source: "true",
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...reviewedPolicy,
+                metorial_effect_tags: {
+                    read_only: true,
+                    read_only_source: "true",
+                    destructive: false,
+                    destructive_source: "false",
+                    arbitrary_tag: true,
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...reviewedPolicy,
+                effect: "destructive",
+                execution_mode: "proposal_requires_approval",
+            }).success
+        ).toBe(true);
     });
 
     it("keeps public policy commands narrower than stored authority", () => {
@@ -623,10 +774,103 @@ describe("versioned contracts", () => {
         expect(
             CreateOrganizationToolPolicyCommandV1Schema.safeParse({
                 ...command,
-                effect: "read_only",
+                effect: "read",
+                execution_mode: "direct",
+                metorial_effect_tags: {
+                    read_only: true,
+                    read_only_source: "true",
+                    destructive: false,
+                    destructive_source: "false",
+                },
                 policy_digest: digest,
             }).success
         ).toBe(false);
+    });
+
+    it("matches every pinned Bot permission field to one active organization policy", () => {
+        const policy = OrganizationToolPolicyV1Schema.parse({
+            schema_version: 1,
+            organization_tool_policy_id: ids.policy,
+            account_id: ids.account,
+            revision_number: 3,
+            lifecycle: "active",
+            dependency_revocation_fence: 2,
+            connector_release_id: ids.connector,
+            provider_deployment_id: ids.deployment,
+            provider_version: "2026-08-01",
+            tool_key: "records.search",
+            display_name: "Search records",
+            consequence_summary: "Reads records from the reviewed scope.",
+            canonical_tool_schema: { type: "object", properties: { query: { type: "string" } } },
+            tool_schema_digest: digest,
+            effect: "read",
+            execution_mode: "direct",
+            metorial_effect_tags: {
+                read_only: true,
+                read_only_source: "true",
+                destructive: false,
+                destructive_source: "false",
+            },
+            incidental_effects: [],
+            resource_rule: {
+                kind: "connector_specific",
+                mapping_key: "public_dataset",
+                mapping_version: 1,
+                canonical_scope: { dataset: "public" },
+                scope_digest: digest,
+            },
+            outbound_data_rule: {
+                data_classes: ["public"],
+                destinations: ["metorial", "connector_provider"],
+                allowed_argument_fields: ["query"],
+                tool_result_may_reach_model: false,
+            },
+            reviewer: "connector-release",
+            reviewed_at: 1,
+            created_at: 1,
+            policy_digest: digest,
+        });
+        const selection = {
+            organization_tool_policy_id: ids.policy,
+            policy_revision: 3,
+            policy_digest: digest,
+            tool_key: "records.search",
+            display_name: "Search records",
+            consequence_summary: "Reads records from the reviewed scope.",
+            effect: "read",
+            execution_mode: "direct",
+        } as const;
+        const expected = { account_id: ids.account, connector_release_id: ids.connector } as const;
+
+        expect(botToolPolicySelectionMatchesPolicyV1(selection, policy, expected)).toBe(true);
+        for (const substitution of [
+            { policy_revision: 2 },
+            { policy_digest: "1".repeat(64) },
+            { tool_key: "records.delete" },
+            { display_name: "Delete records" },
+            { consequence_summary: "Deletes records." },
+            { effect: "write", execution_mode: "proposal_requires_approval" },
+        ] as const) {
+            expect(botToolPolicySelectionMatchesPolicyV1({ ...selection, ...substitution }, policy, expected)).toBe(
+                false
+            );
+        }
+        expect(botToolPolicySelectionMatchesPolicyV1(selection, { ...policy, lifecycle: "disabled" }, expected)).toBe(
+            false
+        );
+        expect(
+            botToolPolicySelectionMatchesPolicyV1(selection, policy, {
+                ...expected,
+                connector_release_id: "01890f3e-7b42-7cc1-98c3-4f760f7c9148",
+            })
+        ).toBe(false);
+        const hostileSelection = new Proxy(selection, {
+            ownKeys: () => {
+                throw new Error("hostile selection");
+            },
+        });
+        expect(() => botToolPolicySelectionMatchesPolicyV1(hostileSelection, policy, expected)).not.toThrow();
+        expect(botToolPolicySelectionMatchesPolicyV1(hostileSelection, policy, expected)).toBe(false);
     });
 
     it("does not let public commands lower user-authored content classification", () => {
@@ -684,7 +928,7 @@ describe("versioned contracts", () => {
             schema_version: 1,
             bot_id: ids.bot,
             expected_bot_version: 1,
-            job: "Read public records",
+            purpose: "Read public records",
             standing_instructions: "Return a short factual summary.",
             organization_tool_policy_ids: [ids.policy],
             skill_revision_ids: [],
@@ -719,7 +963,7 @@ describe("versioned contracts", () => {
             }).success
         ).toBe(false);
         expect(CreateBotRevisionCommandV1Schema.safeParse({ ...command, allow_fallbacks: true }).success).toBe(false);
-        expect(CreateBotRevisionCommandV1Schema.safeParse({ ...command, job_data_class: "public" }).success).toBe(
+        expect(CreateBotRevisionCommandV1Schema.safeParse({ ...command, purpose_data_class: "public" }).success).toBe(
             false
         );
     });
@@ -737,9 +981,17 @@ describe("versioned contracts", () => {
             provider_version: "2026-08-01",
             tool_key: "records.search",
             display_name: "Search records",
+            consequence_summary: "Reads records from the reviewed scope.",
             canonical_tool_schema: { description: "x".repeat(128 * 1024) },
             tool_schema_digest: digest,
-            effect: "read_only",
+            effect: "read",
+            execution_mode: "direct",
+            metorial_effect_tags: {
+                read_only: true,
+                read_only_source: "true",
+                destructive: false,
+                destructive_source: "false",
+            },
             incidental_effects: [],
             resource_rule: {
                 kind: "connector_specific",
@@ -808,7 +1060,7 @@ describe("versioned contracts", () => {
             prompt: { plaintext_digest: digest, data_class: "organization" },
             bot_configuration: {
                 bot_revision_digest: digest,
-                job: { plaintext_digest: digest, data_class: "organization" },
+                purpose: { plaintext_digest: digest, data_class: "organization" },
                 standing_instructions: { plaintext_digest: digest, data_class: "organization" },
             },
             tools: [
@@ -817,6 +1069,8 @@ describe("versioned contracts", () => {
                     policy_revision_number: 1,
                     display_name: "Search records",
                     tool_key: "records.search",
+                    effect: "read",
+                    execution_mode: "direct",
                     tool_schema_digest: digest,
                     policy_digest: digest,
                     resource_display_label: "Public test dataset",
@@ -839,6 +1093,18 @@ describe("versioned contracts", () => {
             snapshot_digest: digest,
         };
         expect(DisclosureSnapshotV1Schema.safeParse(snapshot).success).toBe(true);
+        expect(
+            DisclosureSnapshotV1Schema.safeParse({
+                ...snapshot,
+                tools: [
+                    {
+                        ...snapshot.tools[0],
+                        effect: "write",
+                        execution_mode: "proposal_requires_approval",
+                    },
+                ],
+            }).success
+        ).toBe(false);
         const withoutCandidate: Record<string, unknown> = { ...snapshot };
         delete withoutCandidate["candidate_run_id"];
         expect(DisclosureSnapshotV1Schema.safeParse(withoutCandidate).success).toBe(false);
@@ -927,14 +1193,25 @@ describe("versioned contracts", () => {
             bot_id: ids.bot,
             account_id: ids.account,
             revision_number: 1,
-            job_content_id: "01890f3e-7b42-7cc1-98c3-4f760f7c9144",
-            job_plaintext_digest: digest,
-            job_data_class: "organization",
+            purpose_content_id: "01890f3e-7b42-7cc1-98c3-4f760f7c9144",
+            purpose_plaintext_digest: digest,
+            purpose_data_class: "organization",
             standing_instructions_content_id: "01890f3e-7b42-7cc1-98c3-4f760f7c9145",
             standing_instructions_plaintext_digest: digest,
             standing_instructions_data_class: "organization",
             prompt_template_version: 1,
-            organization_tool_policy_ids: [ids.policy],
+            tool_policy_selections: [
+                {
+                    organization_tool_policy_id: ids.policy,
+                    policy_revision: 1,
+                    policy_digest: digest,
+                    tool_key: "records.search",
+                    display_name: "Search records",
+                    consequence_summary: "Reads records from the reviewed scope.",
+                    effect: "read",
+                    execution_mode: "direct",
+                },
+            ],
             skill_revision_ids: [],
             connector_release_id: ids.connector,
             model_route: modelRoute,

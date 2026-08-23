@@ -1,5 +1,11 @@
 import { z } from "zod";
 import {
+    PinnedBotPermissionV1Schema,
+    ToolEffectV1Schema,
+    ToolExecutionModeV1Schema,
+    type ToolEffectV1,
+} from "./bot-permissions.js";
+import {
     AccountIdSchema,
     BotIdSchema,
     BotRevisionIdSchema,
@@ -20,9 +26,11 @@ import { JsonSchemaSubsetV1Schema } from "./json-schema.js";
 import {
     CodeExecutionLimitsV1Schema,
     NarrowedCodeExecutionLimitsV1Schema,
+    RequestedRunLimitsV1Schema,
     RuntimeLimitsV1Schema,
     type CodeExecutionLimitsV1,
     type NarrowedCodeExecutionLimitsV1,
+    type RequestedRunLimitsV1,
     type RuntimeLimitsV1,
 } from "./limits.js";
 import { UnverifiedManifestExtensionEnvelopeV1Schema } from "./manifest-extensions.js";
@@ -135,6 +143,43 @@ export const OutboundDataRuleV1Schema = z
     });
 export type OutboundDataRuleV1 = z.infer<typeof OutboundDataRuleV1Schema>;
 
+export const MetorialToolEffectTagsV1Schema = z
+    .object({
+        read_only: z.boolean(),
+        read_only_source: z.enum(["true", "false"]),
+        destructive: z.boolean(),
+        destructive_source: z.enum(["true", "false", "omitted"]),
+    })
+    .strict()
+    .superRefine((tags, context) => {
+        if ((tags.read_only_source === "true") !== tags.read_only) {
+            context.addIssue({
+                code: "custom",
+                path: ["read_only_source"],
+                message: "Normalized read-only value must match its raw source state",
+            });
+        }
+        if ((tags.destructive_source === "true") !== tags.destructive) {
+            context.addIssue({
+                code: "custom",
+                path: ["destructive_source"],
+                message: "Normalized destructive value must match its raw source state",
+            });
+        }
+    });
+export type MetorialToolEffectTagsV1 = z.infer<typeof MetorialToolEffectTagsV1Schema>;
+
+export const classifyMetorialToolEffectV1 = (input: unknown): ToolEffectV1 | null => {
+    try {
+        const tags = MetorialToolEffectTagsV1Schema.safeParse(input);
+        if (!tags.success || (tags.data.read_only && tags.data.destructive)) return null;
+        if (tags.data.read_only) return "read";
+        return tags.data.destructive ? "destructive" : "write";
+    } catch {
+        return null;
+    }
+};
+
 export const OrganizationToolPolicyV1Schema = z
     .object({
         schema_version: z.literal(1),
@@ -148,9 +193,12 @@ export const OrganizationToolPolicyV1Schema = z
         provider_version: utf8String({ minBytes: 1, maxBytes: 128 }),
         tool_key: utf8String({ minBytes: 1, maxBytes: 256 }),
         display_name: AuthorityDisplayLabelV1Schema,
+        consequence_summary: AuthorityDisplayLabelV1Schema,
         canonical_tool_schema: CanonicalToolSchemaV1Schema,
         tool_schema_digest: Sha256DigestSchema,
-        effect: z.literal("read_only"),
+        effect: ToolEffectV1Schema,
+        execution_mode: ToolExecutionModeV1Schema,
+        metorial_effect_tags: MetorialToolEffectTagsV1Schema,
         incidental_effects: z
             .array(z.enum(["provider_access_log", "provider_access_timestamp", "provider_quota"]))
             .max(3)
@@ -166,7 +214,31 @@ export const OrganizationToolPolicyV1Schema = z
     })
     .strict()
     .superRefine((policy, context) => {
+        const metorialEffect = classifyMetorialToolEffectV1(policy.metorial_effect_tags);
+        const effectRank: Record<ToolEffectV1, number> = { read: 0, write: 1, destructive: 2 };
+        if (metorialEffect === null || effectRank[policy.effect] < effectRank[metorialEffect]) {
+            context.addIssue({
+                code: "custom",
+                path: ["effect"],
+                message: "Reviewed effect cannot be unclassified or less severe than the Metorial tags",
+            });
+        }
+        const expectedExecutionMode = policy.effect === "read" ? "direct" : "proposal_requires_approval";
+        if (policy.execution_mode !== expectedExecutionMode) {
+            context.addIssue({
+                code: "custom",
+                path: ["execution_mode"],
+                message: "Execution mode must match the reviewed tool effect",
+            });
+        }
         if (policy.resource_rule.kind === "global_public_read_only") {
+            if (policy.effect !== "read" || policy.execution_mode !== "direct") {
+                context.addIssue({
+                    code: "custom",
+                    path: ["effect"],
+                    message: "A global public read-only tool must remain a read operation",
+                });
+            }
             const allowedDataClasses = new Set<string>(policy.resource_rule.allowed_data_classes);
             if (policy.outbound_data_rule.data_classes.some(dataClass => !allowedDataClasses.has(dataClass))) {
                 context.addIssue({
@@ -220,6 +292,40 @@ export const OrganizationToolPolicyV1Schema = z
 export type OrganizationToolPolicyV1 = z.infer<typeof OrganizationToolPolicyV1Schema>;
 export const StoredOrganizationToolPolicyV1Schema = OrganizationToolPolicyV1Schema;
 export type StoredOrganizationToolPolicyV1 = OrganizationToolPolicyV1;
+
+export const botToolPolicySelectionMatchesPolicyV1 = (
+    selectionInput: unknown,
+    policyInput: unknown,
+    expectedInput: unknown
+): boolean => {
+    try {
+        const selection = PinnedBotPermissionV1Schema.safeParse(selectionInput);
+        const policy = OrganizationToolPolicyV1Schema.safeParse(policyInput);
+        const expected = z
+            .object({
+                account_id: AccountIdSchema,
+                connector_release_id: ConnectorReleaseIdSchema,
+            })
+            .strict()
+            .safeParse(expectedInput);
+        if (!selection.success || !policy.success || !expected.success) return false;
+        return (
+            policy.data.lifecycle === "active" &&
+            policy.data.account_id === expected.data.account_id &&
+            policy.data.connector_release_id === expected.data.connector_release_id &&
+            selection.data.organization_tool_policy_id === policy.data.organization_tool_policy_id &&
+            selection.data.policy_revision === policy.data.revision_number &&
+            selection.data.policy_digest === policy.data.policy_digest &&
+            selection.data.tool_key === policy.data.tool_key &&
+            selection.data.display_name === policy.data.display_name &&
+            selection.data.consequence_summary === policy.data.consequence_summary &&
+            selection.data.effect === policy.data.effect &&
+            selection.data.execution_mode === policy.data.execution_mode
+        );
+    } catch {
+        return false;
+    }
+};
 
 export const CreateOrganizationToolPolicyCommandV1Schema = z
     .object({
@@ -554,6 +660,9 @@ export const computeAuthorityChainMatchesV1 = (
     );
 };
 
+export const BotToolPolicySelectionV1Schema = PinnedBotPermissionV1Schema;
+export type BotToolPolicySelectionV1 = z.infer<typeof BotToolPolicySelectionV1Schema>;
+
 export const BotRevisionV1Schema = z
     .object({
         schema_version: z.literal(1),
@@ -561,14 +670,20 @@ export const BotRevisionV1Schema = z
         bot_id: BotIdSchema,
         account_id: AccountIdSchema,
         revision_number: PositiveVersionSchema,
-        job_content_id: ConfigurationContentIdSchema,
-        job_plaintext_digest: Sha256DigestSchema,
-        job_data_class: PersistedUserContentDataClassV1Schema,
+        purpose_content_id: ConfigurationContentIdSchema,
+        purpose_plaintext_digest: Sha256DigestSchema,
+        purpose_data_class: PersistedUserContentDataClassV1Schema,
         standing_instructions_content_id: ConfigurationContentIdSchema,
         standing_instructions_plaintext_digest: Sha256DigestSchema,
         standing_instructions_data_class: PersistedUserContentDataClassV1Schema,
         prompt_template_version: PositiveVersionSchema,
-        organization_tool_policy_ids: nonemptyUnique(OrganizationToolPolicyIdSchema, 4),
+        tool_policy_selections: z
+            .array(BotToolPolicySelectionV1Schema)
+            .min(1)
+            .max(4)
+            .refine(values => new Set(values.map(value => value.organization_tool_policy_id)).size === values.length, {
+                message: "Tool policy selections must be unique",
+            }),
         skill_revision_ids: z
             .array(SkillRevisionIdSchema)
             .max(4)
@@ -597,10 +712,10 @@ export const BotRevisionV1Schema = z
     })
     .strict()
     .superRefine((revision, context) => {
-        if (revision.compute_selection !== null && revision.organization_tool_policy_ids.length > 3) {
+        if (revision.compute_selection !== null && revision.tool_policy_selections.length > 3) {
             context.addIssue({
                 code: "custom",
-                path: ["organization_tool_policy_ids"],
+                path: ["tool_policy_selections"],
                 message: "Code execution consumes one of the four exposed tool slots",
             });
         }
@@ -634,25 +749,14 @@ export type BotRevisionV1 = z.infer<typeof BotRevisionV1Schema>;
 export const StoredBotRevisionV1Schema = BotRevisionV1Schema;
 export type StoredBotRevisionV1 = BotRevisionV1;
 
-export const RequestedRunLimitsV1Schema = z
-    .object({
-        max_model_turns: z.number().int().positive().max(5),
-        max_tool_calls: z.number().int().positive().max(2),
-        max_code_executions: z.number().int().nonnegative().max(1),
-        max_code_execution_ms: z.number().int().positive().max(15_000),
-        max_model_output_tokens_per_request: z.number().int().positive().max(2_048),
-        max_runtime_wall_time_ms: z.number().int().positive().max(240_000),
-        max_estimated_run_cost_usd_micros: z.number().int().positive().max(250_000),
-    })
-    .strict();
-export type RequestedRunLimitsV1 = z.infer<typeof RequestedRunLimitsV1Schema>;
+export { RequestedRunLimitsV1Schema, type RequestedRunLimitsV1 };
 
 export const CreateBotRevisionCommandV1Schema = z
     .object({
         schema_version: z.literal(1),
         bot_id: BotIdSchema,
         expected_bot_version: PositiveVersionSchema,
-        job: utf8String({ minBytes: 1, maxBytes: 4 * 1024 }),
+        purpose: utf8String({ minBytes: 1, maxBytes: 512 }),
         standing_instructions: utf8String({ minBytes: 1, maxBytes: 32 * 1024 }),
         organization_tool_policy_ids: nonemptyUnique(OrganizationToolPolicyIdSchema, 4),
         skill_revision_ids: z
@@ -711,7 +815,7 @@ export const DisclosureSnapshotV1Schema = z
         bot_configuration: z
             .object({
                 bot_revision_digest: Sha256DigestSchema,
-                job: z
+                purpose: z
                     .object({
                         plaintext_digest: Sha256DigestSchema,
                         data_class: DataClassV1Schema,
@@ -733,6 +837,8 @@ export const DisclosureSnapshotV1Schema = z
                         policy_revision_number: PositiveVersionSchema,
                         display_name: AuthorityDisplayLabelV1Schema,
                         tool_key: utf8String({ minBytes: 1, maxBytes: 256 }),
+                        effect: ToolEffectV1Schema,
+                        execution_mode: ToolExecutionModeV1Schema,
                         tool_schema_digest: Sha256DigestSchema,
                         policy_digest: Sha256DigestSchema,
                         resource_display_label: SafeDisplayLabelSchema,
@@ -869,9 +975,18 @@ export const DisclosureSnapshotV1Schema = z
         const possibleClasses = new Set(snapshot.possible_data_classes);
         const destinations = new Set(snapshot.disclosure_destinations);
         const incidentalEffects = new Set(snapshot.incidental_effects);
+        for (const [index, tool] of snapshot.tools.entries()) {
+            if (tool.effect !== "read" || tool.execution_mode !== "direct") {
+                context.addIssue({
+                    code: "custom",
+                    path: ["tools", index, "effect"],
+                    message: "The read-only runtime cannot disclose a provider mutation tool",
+                });
+            }
+        }
         const sourceClasses = new Set([
             snapshot.prompt.data_class,
-            snapshot.bot_configuration.job.data_class,
+            snapshot.bot_configuration.purpose.data_class,
             snapshot.bot_configuration.standing_instructions.data_class,
             ...snapshot.skills.map(skill => skill.instruction_data_class),
             ...snapshot.tools.flatMap(tool => tool.possible_data_classes),

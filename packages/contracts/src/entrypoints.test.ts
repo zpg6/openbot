@@ -7,6 +7,10 @@ describe("contract entrypoints", () => {
     it("keeps the root entrypoint route-safe", () => {
         expect(Object.keys(rootContracts).sort()).toEqual(Object.keys(publicContracts).sort());
         expect(publicContracts).not.toHaveProperty("StoredOrganizationToolPolicyV1Schema");
+        expect(publicContracts).not.toHaveProperty("botToolPolicySelectionMatchesPolicyV1");
+        expect(publicContracts).not.toHaveProperty("BotV1Schema");
+        expect(publicContracts).not.toHaveProperty("BotProfileV1Schema");
+        expect(publicContracts).not.toHaveProperty("BotPermissionSelectionV1Schema");
         expect(publicContracts).not.toHaveProperty("RuntimeLimitsV1Schema");
         expect(publicContracts).not.toHaveProperty("verifyCompilerManifestExtensionEnvelopeV1");
         expect(publicContracts).not.toHaveProperty("classifyUserAuthoredContentV1");
@@ -16,6 +20,10 @@ describe("contract entrypoints", () => {
 
     it("requires the explicit internal entrypoint for authority records", () => {
         expect(internalContracts).toHaveProperty("StoredOrganizationToolPolicyV1Schema");
+        expect(internalContracts).toHaveProperty("botToolPolicySelectionMatchesPolicyV1");
+        expect(internalContracts).toHaveProperty("BotV1Schema");
+        expect(internalContracts).toHaveProperty("BotProfileV1Schema");
+        expect(internalContracts).toHaveProperty("BotPermissionSelectionV1Schema");
         expect(internalContracts).toHaveProperty("RuntimeLimitsV1Schema");
         expect(internalContracts).toHaveProperty("verifyCompilerManifestExtensionEnvelopeV1");
         expect(internalContracts).toHaveProperty("computeAuthorityChainMatchesV1");
