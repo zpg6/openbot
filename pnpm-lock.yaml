@@ -121,6 +121,28 @@ importers:
         specifier: 'catalog:'
         version: 4.1.11(@types/node@22.19.21)
 
+  packages/d1-probe-operator:
+    dependencies:
+      '@openbot/gate-attestation':
+        specifier: workspace:*
+        version: link:../gate-attestation
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.21
+      tsx:
+        specifier: 'catalog:'
+        version: 4.23.12
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@22.19.21)(tsx@4.23.12)
+
   packages/d1-probes:
     devDependencies:
       '@cloudflare/vitest-plugin':

@@ -1,0 +1,21 @@
+{
+    "name": "@openbot/d1-probe-operator",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "plan": "node --import tsx src/cli.ts",
+        "typecheck": "tsc -b --pretty false",
+        "test": "vitest run --root ../.. packages/d1-probe-operator/src"
+    },
+    "dependencies": {
+        "@openbot/gate-attestation": "workspace:*",
+        "zod": "catalog:"
+    },
+    "devDependencies": {
+        "@types/node": "catalog:",
+        "tsx": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:"
+    }
+}

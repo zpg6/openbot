@@ -5,6 +5,7 @@
         { "path": "./packages/domain" },
         { "path": "./packages/db-d1" },
         { "path": "./packages/d1-probes" },
+        { "path": "./packages/d1-probe-operator" },
         { "path": "./packages/gate-attestation" },
         { "path": "./packages/gate-evidence" },
         { "path": "./packages/gate-signer" },

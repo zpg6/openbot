@@ -62,6 +62,9 @@ function checkManifest(file, manifest, catalog) {
             if (name === "@openbot/gate-signer" && !file.startsWith("packages/gate-signer/")) {
                 errors.push(`${file}: offline gate signing code cannot be a product or Worker dependency`);
             }
+            if (name === "@openbot/d1-probe-operator" && !file.startsWith("packages/d1-probe-operator/")) {
+                errors.push(`${file}: D1 probe operator code cannot be a product or Worker dependency`);
+            }
             if (typeof value !== "string" || !isExactDependency(value)) {
                 errors.push(`${file}: ${field}.${name} must use an exact version, catalog:, or workspace:`);
             } else if (value === "catalog:" && !catalog.has(name)) {
@@ -95,6 +98,30 @@ function checkGateSignerImportBoundary(file, specifier) {
         (resolvedImport === signerRoot || resolvedImport.startsWith(`${signerRoot}${path.sep}`));
     if (packageImport || resolvesIntoSigner) {
         errors.push(`${file}: offline private-key signing code cannot enter product, authority, or Worker code`);
+    }
+}
+
+function checkD1ProbeOperatorImportBoundary(file, specifier) {
+    if (file.startsWith("packages/d1-probe-operator/")) return;
+    const packageImport =
+        specifier === "@openbot/d1-probe-operator" || specifier.startsWith("@openbot/d1-probe-operator/");
+    const resolvedImport = specifier.startsWith(".") ? path.resolve(path.dirname(file), specifier) : null;
+    const operatorRoot = path.resolve("packages/d1-probe-operator");
+    const resolvesIntoOperator =
+        resolvedImport !== null &&
+        (resolvedImport === operatorRoot || resolvedImport.startsWith(`${operatorRoot}${path.sep}`));
+    if (packageImport || resolvesIntoOperator) {
+        errors.push(`${file}: D1 probe resource and cleanup code cannot enter product, authority, or Worker code`);
+    }
+}
+
+function checkD1ProbeOperatorNetworkBoundary(file, content, imports) {
+    if (!file.startsWith("packages/d1-probe-operator/")) return;
+    const forbiddenImport = imports.find(specifier =>
+        /^(?:node:)?(?:dgram|dns|http|http2|https|net|tls)$|^(?:undici|wrangler)$/u.test(specifier)
+    );
+    if (forbiddenImport !== undefined || /\bfetch\s*\(/u.test(content)) {
+        errors.push(`${file}: D1 probe preflight and lifecycle code must remain network-free`);
     }
 }
 
@@ -156,6 +183,33 @@ if (errors.length !== beforeSignerImportSelfTest + 1) {
 }
 errors.splice(beforeSignerImportSelfTest, 1);
 
+const beforeOperatorManifestSelfTest = errors.length;
+checkManifest(
+    "apps/<self-test>/package.json",
+    { dependencies: { "@openbot/d1-probe-operator": "workspace:*" } },
+    workspaceCatalog
+);
+if (errors.length !== beforeOperatorManifestSelfTest + 1) {
+    errors.push("D1 probe operator manifest-boundary self-test did not reject a product dependency");
+}
+errors.splice(beforeOperatorManifestSelfTest, 1);
+
+const beforeOperatorImportSelfTest = errors.length;
+checkD1ProbeOperatorImportBoundary("apps/<self-test>/entry.ts", "../../packages/d1-probe-operator/src/lifecycle.ts");
+if (errors.length !== beforeOperatorImportSelfTest + 1) {
+    errors.push("D1 probe operator import-boundary self-test did not reject a relative product import");
+}
+errors.splice(beforeOperatorImportSelfTest, 1);
+
+const beforeOperatorNetworkSelfTest = errors.length;
+checkD1ProbeOperatorNetworkBoundary("packages/d1-probe-operator/<self-test>.ts", 'import "node:https";', [
+    "node:https",
+]);
+if (errors.length !== beforeOperatorNetworkSelfTest + 1) {
+    errors.push("D1 probe operator network-boundary self-test did not reject a network import");
+}
+errors.splice(beforeOperatorNetworkSelfTest, 1);
+
 const forbiddenFiles = files.filter(file => /(?:entry\.(?:mysql|postgres)\.ts|artifact-gateway)/u.test(file));
 for (const file of forbiddenFiles) errors.push(`${file}: deferred profile or artifact entrypoint exists`);
 
@@ -178,6 +232,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
             specifier === "@openbot/gate-attestation/internal" &&
             !file.startsWith("packages/gate-attestation/") &&
             !file.startsWith("packages/gate-signer/") &&
+            !file.startsWith("packages/d1-probe-operator/") &&
             file !== "tests/workers/gate-attestation.test.ts"
         ) {
             errors.push(`${file}: verified gate decisions may enter only an explicitly reviewed authority boundary`);
@@ -191,6 +246,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
         }
         checkD1ProbeImportBoundary(file, specifier);
         checkGateSignerImportBoundary(file, specifier);
+        checkD1ProbeOperatorImportBoundary(file, specifier);
         if (specifier === "drizzle-orm" || specifier.startsWith("drizzle-orm/")) {
             const allowedD1Imports = new Set([
                 "drizzle-orm/d1/driver",
@@ -205,6 +261,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
             errors.push(`${file}: deferred database or vendor dependency imported: ${specifier}`);
         }
     }
+    checkD1ProbeOperatorNetworkBoundary(file, content, imports);
 
     if (
         (file.startsWith("apps/") || file.startsWith("packages/")) &&
