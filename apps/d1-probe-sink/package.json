@@ -1,0 +1,16 @@
+{
+    "name": "@openbot/d1-probe-sink",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "typecheck": "tsc -b --pretty false"
+    },
+    "dependencies": {
+        "@openbot/d1-probe-rpc": "workspace:*"
+    },
+    "devDependencies": {
+        "@cloudflare/workers-types": "catalog:",
+        "typescript": "catalog:"
+    }
+}

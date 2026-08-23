@@ -1,0 +1,17 @@
+{
+    "$schema": "../../node_modules/wrangler/config-schema.json",
+    "name": "openbot-d1-probe-sink-local-only",
+    "main": "entry.ts",
+    "compatibility_date": "2026-08-22",
+    "workers_dev": false,
+    "preview_urls": false,
+    "observability": { "enabled": false },
+    "version_metadata": { "binding": "VERSION_METADATA" },
+    "d1_databases": [
+        {
+            "binding": "PROBE_DB",
+            "database_name": "openbot-d1-probe-local-only",
+            "database_id": "00000000-0000-0000-0000-000000000000",
+        },
+    ],
+}

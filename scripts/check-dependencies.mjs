@@ -65,6 +65,21 @@ function checkManifest(file, manifest, catalog) {
             if (name === "@openbot/d1-probe-operator" && !file.startsWith("packages/d1-probe-operator/")) {
                 errors.push(`${file}: D1 probe operator code cannot be a product or Worker dependency`);
             }
+            if (
+                name === "@openbot/d1-probe-rpc" &&
+                !file.startsWith("packages/d1-probe-rpc/") &&
+                !file.startsWith("apps/d1-probe-sink/") &&
+                !file.startsWith("apps/d1-probe-writer/")
+            ) {
+                errors.push(`${file}: D1 probe RPC code cannot enter product or authority packages`);
+            }
+            if (
+                (name === "@openbot/d1-probe-sink" || name === "@openbot/d1-probe-writer") &&
+                !file.startsWith("apps/d1-probe-sink/") &&
+                !file.startsWith("apps/d1-probe-writer/")
+            ) {
+                errors.push(`${file}: D1 probe Worker code cannot enter product or authority packages`);
+            }
             if (typeof value !== "string" || !isExactDependency(value)) {
                 errors.push(`${file}: ${field}.${name} must use an exact version, catalog:, or workspace:`);
             } else if (value === "catalog:" && !catalog.has(name)) {
@@ -122,6 +137,48 @@ function checkD1ProbeOperatorNetworkBoundary(file, content, imports) {
     );
     if (forbiddenImport !== undefined || /\bfetch\s*\(/u.test(content)) {
         errors.push(`${file}: D1 probe preflight and lifecycle code must remain network-free`);
+    }
+}
+
+function checkD1ProbeRpcImportBoundary(file, specifier) {
+    if (
+        file.startsWith("packages/d1-probe-rpc/") ||
+        file.startsWith("apps/d1-probe-sink/") ||
+        file.startsWith("apps/d1-probe-writer/") ||
+        file === "tests/unit/d1-probe-rpc-boundary.test.ts"
+    ) {
+        return;
+    }
+    const packageImport = specifier === "@openbot/d1-probe-rpc" || specifier.startsWith("@openbot/d1-probe-rpc/");
+    const resolvedImport = specifier.startsWith(".") ? path.resolve(path.dirname(file), specifier) : null;
+    const rpcRoot = path.resolve("packages/d1-probe-rpc");
+    const resolvesIntoRpc =
+        resolvedImport !== null && (resolvedImport === rpcRoot || resolvedImport.startsWith(`${rpcRoot}${path.sep}`));
+    if (packageImport || resolvesIntoRpc) {
+        errors.push(`${file}: D1 probe RPC code cannot enter product or authority code`);
+    }
+}
+
+function checkD1ProbeWorkerImportBoundary(file, specifier) {
+    if (
+        file.startsWith("apps/d1-probe-sink/") ||
+        file.startsWith("apps/d1-probe-writer/") ||
+        file === "tests/unit/d1-probe-rpc-boundary.test.ts"
+    ) {
+        return;
+    }
+    const packageImport =
+        specifier === "@openbot/d1-probe-sink" ||
+        specifier.startsWith("@openbot/d1-probe-sink/") ||
+        specifier === "@openbot/d1-probe-writer" ||
+        specifier.startsWith("@openbot/d1-probe-writer/");
+    const resolvedImport = specifier.startsWith(".") ? path.resolve(path.dirname(file), specifier) : null;
+    const roots = [path.resolve("apps/d1-probe-sink"), path.resolve("apps/d1-probe-writer")];
+    const resolvesIntoWorker =
+        resolvedImport !== null &&
+        roots.some(root => resolvedImport === root || resolvedImport.startsWith(`${root}${path.sep}`));
+    if (packageImport || resolvesIntoWorker) {
+        errors.push(`${file}: D1 probe Worker code cannot enter product or authority code`);
     }
 }
 
@@ -210,6 +267,42 @@ if (errors.length !== beforeOperatorNetworkSelfTest + 1) {
 }
 errors.splice(beforeOperatorNetworkSelfTest, 1);
 
+const beforeRpcManifestSelfTest = errors.length;
+checkManifest(
+    "apps/<self-test>/package.json",
+    { dependencies: { "@openbot/d1-probe-rpc": "workspace:*" } },
+    workspaceCatalog
+);
+if (errors.length !== beforeRpcManifestSelfTest + 1) {
+    errors.push("D1 probe RPC manifest-boundary self-test did not reject a product dependency");
+}
+errors.splice(beforeRpcManifestSelfTest, 1);
+
+const beforeRpcImportSelfTest = errors.length;
+checkD1ProbeRpcImportBoundary("apps/<self-test>/entry.ts", "../../packages/d1-probe-rpc/src/protocol.ts");
+if (errors.length !== beforeRpcImportSelfTest + 1) {
+    errors.push("D1 probe RPC import-boundary self-test did not reject a product import");
+}
+errors.splice(beforeRpcImportSelfTest, 1);
+
+const beforeProbeWorkerManifestSelfTest = errors.length;
+checkManifest(
+    "apps/<self-test>/package.json",
+    { dependencies: { "@openbot/d1-probe-sink": "workspace:*" } },
+    workspaceCatalog
+);
+if (errors.length !== beforeProbeWorkerManifestSelfTest + 1) {
+    errors.push("D1 probe Worker manifest-boundary self-test did not reject a product dependency");
+}
+errors.splice(beforeProbeWorkerManifestSelfTest, 1);
+
+const beforeProbeWorkerImportSelfTest = errors.length;
+checkD1ProbeWorkerImportBoundary("apps/<self-test>/entry.ts", "../../apps/d1-probe-sink/src/record.ts");
+if (errors.length !== beforeProbeWorkerImportSelfTest + 1) {
+    errors.push("D1 probe Worker import-boundary self-test did not reject a product import");
+}
+errors.splice(beforeProbeWorkerImportSelfTest, 1);
+
 const forbiddenFiles = files.filter(file => /(?:entry\.(?:mysql|postgres)\.ts|artifact-gateway)/u.test(file));
 for (const file of forbiddenFiles) errors.push(`${file}: deferred profile or artifact entrypoint exists`);
 
@@ -247,6 +340,8 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
         checkD1ProbeImportBoundary(file, specifier);
         checkGateSignerImportBoundary(file, specifier);
         checkD1ProbeOperatorImportBoundary(file, specifier);
+        checkD1ProbeRpcImportBoundary(file, specifier);
+        checkD1ProbeWorkerImportBoundary(file, specifier);
         if (specifier === "drizzle-orm" || specifier.startsWith("drizzle-orm/")) {
             const allowedD1Imports = new Set([
                 "drizzle-orm/d1/driver",

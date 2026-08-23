@@ -218,6 +218,15 @@ CREATE TABLE IF NOT EXISTS _openbot_probe_gateway_sink_receipt (
     FOREIGN KEY (claim_id) REFERENCES _openbot_probe_gateway_call(claim_id)
 );
 
+CREATE TABLE IF NOT EXISTS _openbot_probe_external_sink_receipt (
+    receipt_id TEXT PRIMARY KEY,
+    probe_run_id TEXT NOT NULL,
+    writer_role TEXT NOT NULL CHECK (writer_role IN ('writer_a', 'writer_b')),
+    receipt_kind TEXT NOT NULL CHECK (receipt_kind IN ('private_rpc_probe', 'gateway_dispatch', 'destroy_observation')),
+    source_request_digest TEXT NOT NULL,
+    receipt_request_digest TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS _openbot_probe_capacity (
     scenario TEXT PRIMARY KEY,
     maximum INTEGER NOT NULL CHECK (maximum = 4),
@@ -305,6 +314,7 @@ END;
 `;
 
 const resetSql = `
+DELETE FROM _openbot_probe_external_sink_receipt;
 DELETE FROM _openbot_probe_audit_guard;
 DELETE FROM _openbot_probe_audit_event;
 DELETE FROM _openbot_probe_audit_head;

@@ -14,6 +14,9 @@
     ],
     "references": [
         { "path": "./apps/control-plane" },
+        { "path": "./apps/d1-probe-sink" },
+        { "path": "./apps/d1-probe-writer" },
+        { "path": "./packages/d1-probe-rpc" },
         { "path": "./packages/sandbox-protocol" },
         { "path": "./apps/sandbox-runner" }
     ]

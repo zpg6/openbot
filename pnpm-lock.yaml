@@ -95,6 +95,32 @@ importers:
         specifier: 'catalog:'
         version: 4.13.3
 
+  apps/d1-probe-sink:
+    dependencies:
+      '@openbot/d1-probe-rpc':
+        specifier: workspace:*
+        version: link:../../packages/d1-probe-rpc
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20260820.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
+  apps/d1-probe-writer:
+    dependencies:
+      '@openbot/d1-probe-rpc':
+        specifier: workspace:*
+        version: link:../../packages/d1-probe-rpc
+    devDependencies:
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20260820.1
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   apps/orchestrator: {}
 
   apps/runtime: {}
@@ -142,6 +168,19 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.11(@types/node@22.19.21)(tsx@4.23.12)
+
+  packages/d1-probe-rpc:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@22.19.21)
 
   packages/d1-probes:
     devDependencies:
