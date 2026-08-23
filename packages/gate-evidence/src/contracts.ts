@@ -6,14 +6,14 @@ export const Item2DigestV1Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const TimestampSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 
 export const Item2GateIdV1Schema = z.enum([
-    "connector",
+    "first_connector",
     "d1_guarded_create",
     "gateway_reservation",
     "metorial_provisioning",
     "metorial_cleanup",
-    "openrouter",
-    "sandbox",
+    "openrouter_route",
     "runtime_wire_protocol",
+    "sandbox_execution",
     "d1_better_auth",
     "jurisdiction",
 ]);
@@ -231,7 +231,7 @@ const ConnectorToolReportV1Schema = z
 export const UntrustedConnectorProbeReportV1Schema = z
     .object({
         ...commonFields,
-        kind: z.literal("connector"),
+        kind: z.literal("first_connector"),
         identity_digest_algorithm: z.literal("hmac-sha256-v1"),
         metorial_api_version: z.literal("2026-01-01-magnetar"),
         sdk_version: z.string().regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u),
@@ -311,7 +311,7 @@ export const UntrustedMetorialCleanupProbeReportV1Schema = reportSchema("metoria
     "second_client_observation",
     "vendor_limit_recorded",
 ] as const);
-export const UntrustedOpenRouterProbeReportV1Schema = reportSchema("openrouter", [
+export const UntrustedOpenRouterProbeReportV1Schema = reportSchema("openrouter_route", [
     "resolved_model",
     "resolved_provider",
     "routing_strategy_direct",
@@ -331,7 +331,7 @@ export const UntrustedOpenRouterProbeReportV1Schema = reportSchema("openrouter",
     "run_owned_key_deletion",
     "budget_overshoot_behavior",
 ] as const);
-export const UntrustedSandboxProbeReportV1Schema = reportSchema("sandbox", [
+export const UntrustedSandboxProbeReportV1Schema = reportSchema("sandbox_execution", [
     "package_image_match",
     "fixed_argv_launch",
     "enumerated_dns_sentinel_not_observed",

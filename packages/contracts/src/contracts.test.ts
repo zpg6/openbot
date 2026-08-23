@@ -29,7 +29,7 @@ import {
     RuntimeLimitsV1Schema,
     classifyUserAuthoredContentV1,
     computeLimitsAreNarrowerOrEqualV1,
-    computeAuthorityChainIsValidV1,
+    computeAuthorityChainMatchesV1,
     verifyCompilerManifestExtensionEnvelopeV1,
 } from "./internal.js";
 
@@ -249,7 +249,7 @@ describe("versioned contracts", () => {
             languages: ["javascript"],
             admitted_data_classes: ["synthetic"],
             network_policy: "public_internet_blocked_unverified_dns",
-            adoption_evidence: null,
+            adoption_attestation_reference: null,
             filesystem_policy: "ephemeral_per_run",
             package_installation: false,
             interactive_terminal: false,
@@ -403,6 +403,171 @@ describe("versioned contracts", () => {
                 canonical_tool_schema: descriptorHostile,
             })
         ).not.toThrow();
+    });
+
+    it("limits global public tools to public or synthetic data without operator provider auth", () => {
+        const globalPublicPolicy = {
+            schema_version: 1,
+            organization_tool_policy_id: ids.policy,
+            account_id: ids.account,
+            revision_number: 1,
+            lifecycle: "active",
+            dependency_revocation_fence: 0,
+            connector_release_id: ids.connector,
+            provider_deployment_id: ids.deployment,
+            provider_version: "2026-01-01-magnetar",
+            tool_key: "metorial-search.search",
+            display_name: "Search the public web",
+            canonical_tool_schema: { type: "object", properties: { query: { type: "string" } } },
+            tool_schema_digest: digest,
+            effect: "read_only",
+            incidental_effects: ["provider_access_log"],
+            resource_rule: {
+                kind: "global_public_read_only",
+                allowed_data_classes: ["public", "synthetic"],
+                operator_supplied_provider_auth_config_present: false,
+                target_class: "public_web",
+            },
+            outbound_data_rule: {
+                data_classes: ["public", "synthetic"],
+                destinations: ["metorial", "connector_provider"],
+                allowed_argument_fields: ["query"],
+                tool_result_may_reach_model: false,
+            },
+            reviewer: "connector-release",
+            reviewed_at: 1,
+            created_at: 2,
+            policy_digest: digest,
+        } as const;
+
+        expect(OrganizationToolPolicyV1Schema.safeParse(globalPublicPolicy).success).toBe(true);
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...globalPublicPolicy,
+                resource_rule: {
+                    ...globalPublicPolicy.resource_rule,
+                    operator_supplied_provider_auth_config_present: true,
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...globalPublicPolicy,
+                resource_rule: {
+                    ...globalPublicPolicy.resource_rule,
+                    provider_auth_config: { api_key: "operator-secret" },
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...globalPublicPolicy,
+                outbound_data_rule: {
+                    ...globalPublicPolicy.outbound_data_rule,
+                    data_classes: ["organization"],
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...globalPublicPolicy,
+                resource_rule: {
+                    ...globalPublicPolicy.resource_rule,
+                    allowed_data_classes: ["public", "public"],
+                },
+            }).success
+        ).toBe(false);
+
+        expect(
+            OrganizationToolPolicyV1Schema.safeParse({
+                ...globalPublicPolicy,
+                resource_rule: {
+                    kind: "connector_specific",
+                    mapping_key: "account_scope",
+                    mapping_version: 1,
+                    canonical_scope: { account_id: "probe-account" },
+                    scope_digest: digest,
+                },
+                outbound_data_rule: {
+                    ...globalPublicPolicy.outbound_data_rule,
+                    data_classes: ["organization"],
+                },
+            }).success
+        ).toBe(true);
+    });
+
+    it("accepts only a non-authoritative Sandbox attestation reference", () => {
+        const candidate = {
+            schema_version: 1,
+            profile_key: "sandbox-javascript-v1",
+            profile_revision: 1,
+            configuration_digest: digest,
+            profile_digest: digest,
+            display_name: "Isolated code execution",
+            runner_protocol_version: 1,
+            runner_protocol_digest: digest,
+            runner_version: "1.0.0",
+            runner_digest: digest,
+            node_version: "22.19.0",
+            sandbox_sdk_version: "1.0.0-next.1",
+            sandbox_sdk_package_digest: digest,
+            image_digest: digest,
+            instance_type: "lite",
+            adoption_status: "enabled",
+            lifecycle: "active",
+            languages: ["javascript"],
+            admitted_data_classes: ["public", "synthetic"],
+            network_policy: "public_internet_blocked_unverified_dns",
+            adoption_attestation_reference: {
+                schema_version: 1,
+                gate_id: "sandbox_execution",
+                attestation_digest: digest,
+                configuration_digest: digest,
+                valid_until: 60_000,
+            },
+            filesystem_policy: "ephemeral_per_run",
+            package_installation: false,
+            interactive_terminal: false,
+            limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+        } as const;
+
+        expect(CodeExecutionProfileV1Schema.safeParse(candidate).success).toBe(true);
+        expect(
+            CodeExecutionProfileV1Schema.safeParse({
+                ...candidate,
+                adoption_attestation_reference: {
+                    ...candidate.adoption_attestation_reference,
+                    gate_id: "sandbox",
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            CodeExecutionProfileV1Schema.safeParse({
+                ...candidate,
+                adoption_attestation_reference: {
+                    ...candidate.adoption_attestation_reference,
+                    checks: { filesystem_limit: "passed" },
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            CodeExecutionProfileV1Schema.safeParse({
+                ...candidate,
+                adoption_attestation_reference: {
+                    ...candidate.adoption_attestation_reference,
+                    configuration_digest: "1".repeat(64),
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            CodeExecutionProfileV1Schema.safeParse({
+                ...candidate,
+                adoption_evidence: {
+                    reviewed_configuration_digest: digest,
+                    checks: { filesystem_limit: "passed" },
+                },
+            }).success
+        ).toBe(false);
     });
 
     it("rejects owner-authored fields on a server-derived tool policy", () => {
@@ -707,33 +872,12 @@ describe("versioned contracts", () => {
             languages: ["javascript"],
             admitted_data_classes: ["public", "synthetic", "organization"],
             network_policy: "public_internet_blocked_unverified_dns",
-            adoption_evidence: {
+            adoption_attestation_reference: {
                 schema_version: 1,
-                reviewed_configuration_digest: digest,
-                evidence_digest: digest,
-                observed_at: 1,
+                gate_id: "sandbox_execution",
+                attestation_digest: digest,
+                configuration_digest: digest,
                 valid_until: 600_000,
-                cloudflare_platform_fingerprint: "workers-2026-08-22",
-                checks: {
-                    package_image_match: "passed",
-                    fixed_argv_launch: "passed",
-                    enumerated_dns_sentinel_not_observed: "passed",
-                    filesystem_limit: "passed",
-                    process_limit: "passed",
-                    startup_timeout: "passed",
-                    execution_timeout_and_kill: "passed",
-                    teardown_and_destroy: "passed",
-                    repeat_destroy_safe: "passed",
-                    sandbox_lifetime: "passed",
-                    fresh_generation: "passed",
-                    output_backpressure: "passed",
-                    replacement_uncertainty: "passed",
-                    placement: "passed",
-                    installation_capacity: "passed",
-                    private_route: "passed",
-                    secret_sentinel: "passed",
-                    mismatched_package_image_denial: "passed",
-                },
             },
             filesystem_policy: "ephemeral_per_run",
             package_installation: false,
@@ -817,10 +961,10 @@ describe("versioned contracts", () => {
             account_id: ids.account,
             bot_revision_id: ids.revision,
             as_of_ms: 2,
-            cloudflare_platform_fingerprint: "workers-2026-08-22",
+            sandbox_adoption_attestation_digest: digest,
         } as const;
         expect(
-            computeAuthorityChainIsValidV1(
+            computeAuthorityChainMatchesV1(
                 botRevision,
                 parsedCodeExecution,
                 computePolicy,
@@ -829,13 +973,13 @@ describe("versioned contracts", () => {
             )
         ).toBe(true);
         expect(
-            computeAuthorityChainIsValidV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
+            computeAuthorityChainMatchesV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
                 ...expectedComputeAuthority,
                 account_id: "01890f3e-7b42-7cc1-98c3-4f760f7c9199",
             })
         ).toBe(false);
         expect(
-            computeAuthorityChainIsValidV1(
+            computeAuthorityChainMatchesV1(
                 botRevision,
                 parsedCodeExecution,
                 OrganizationComputePolicyV1Schema.parse({ ...computePolicy, policy_digest: "1".repeat(64) }),
@@ -844,31 +988,31 @@ describe("versioned contracts", () => {
             )
         ).toBe(false);
         expect(
-            computeAuthorityChainIsValidV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
+            computeAuthorityChainMatchesV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
                 ...expectedComputeAuthority,
                 as_of_ms: computeGrant.expires_at,
             })
         ).toBe(false);
         expect(
-            computeAuthorityChainIsValidV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
+            computeAuthorityChainMatchesV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
                 ...expectedComputeAuthority,
-                as_of_ms: parsedCodeExecution.adoption_evidence!.valid_until,
+                as_of_ms: parsedCodeExecution.adoption_attestation_reference!.valid_until,
             })
         ).toBe(false);
         expect(
-            computeAuthorityChainIsValidV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
+            computeAuthorityChainMatchesV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
                 ...expectedComputeAuthority,
-                cloudflare_platform_fingerprint: "workers-changed",
+                sandbox_adoption_attestation_digest: "1".repeat(64),
             })
         ).toBe(false);
         const candidateProfile = CodeExecutionProfileV1Schema.parse({
             ...codeExecution,
             adoption_status: "candidate",
             admitted_data_classes: ["synthetic"],
-            adoption_evidence: null,
+            adoption_attestation_reference: null,
         });
         expect(
-            computeAuthorityChainIsValidV1(
+            computeAuthorityChainMatchesV1(
                 botRevision,
                 candidateProfile,
                 computePolicy,

@@ -97,8 +97,26 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
         if (file.startsWith("apps/control-plane/") && specifier === "@openbot/contracts/internal") {
             errors.push(`${file}: the public control plane may import only route-safe OpenBot contracts`);
         }
-        if (specifier === "@openbot/gate-evidence/internal" && !file.startsWith("packages/gate-evidence/")) {
+        if (
+            specifier === "@openbot/gate-evidence/internal" &&
+            !file.startsWith("packages/gate-evidence/") &&
+            !file.startsWith("packages/gate-attestation/")
+        ) {
             errors.push(`${file}: untrusted probe reports cannot enter application authority code`);
+        }
+        if (
+            specifier === "@openbot/gate-attestation/internal" &&
+            !file.startsWith("packages/gate-attestation/") &&
+            file !== "tests/workers/gate-attestation.test.ts"
+        ) {
+            errors.push(`${file}: verified gate decisions may enter only an explicitly reviewed authority boundary`);
+        }
+        if (
+            specifier === "@openbot/gate-attestation/bootstrap" &&
+            !file.startsWith("packages/gate-attestation/") &&
+            file !== "tests/workers/gate-attestation.test.ts"
+        ) {
+            errors.push(`${file}: the operator trust registry may be loaded only at the reviewed bootstrap boundary`);
         }
         if (specifier === "drizzle-orm" || specifier.startsWith("drizzle-orm/")) {
             const allowedD1Imports = new Set([

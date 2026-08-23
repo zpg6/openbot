@@ -1,0 +1,29 @@
+{
+    "name": "@openbot/gate-attestation",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "exports": {
+        "./bootstrap": {
+            "types": "./dist/bootstrap.d.ts",
+            "default": "./src/bootstrap.ts"
+        },
+        "./internal": {
+            "types": "./dist/internal.d.ts",
+            "default": "./src/internal.ts"
+        }
+    },
+    "scripts": {
+        "typecheck": "tsc -b --pretty false",
+        "test": "vitest run --root ../.. packages/gate-attestation/src"
+    },
+    "dependencies": {
+        "@openbot/contracts": "workspace:*",
+        "@openbot/gate-evidence": "workspace:*",
+        "zod": "catalog:"
+    },
+    "devDependencies": {
+        "typescript": "catalog:",
+        "vitest": "catalog:"
+    }
+}

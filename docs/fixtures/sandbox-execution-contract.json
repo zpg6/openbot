@@ -96,7 +96,7 @@
         "configuration_digest": null,
         "profile_digest": null,
         "configuration_digest_semantics": "immutable_execution_configuration",
-        "profile_digest_semantics": "configuration_plus_adoption_status_lifecycle_evidence_and_record_metadata"
+        "profile_digest_semantics": "configuration_plus_adoption_status_lifecycle_attestation_reference_and_record_metadata"
     },
     "adoption_status": {
         "current": "candidate",
@@ -109,6 +109,7 @@
         "enabled": {
             "requires_all_release_blocking_probes": true,
             "requires_dns_authoritative_sentinel_pass": true,
+            "requires_current_signed_gate_attestation": true,
             "allowed_data_classes": ["public", "synthetic", "organization"],
             "denied_data_classes": ["restricted", "unknown"]
         },
@@ -119,20 +120,10 @@
         "current": "active",
         "disabled_result": "deny_probe_and_user_run_cancel_dependents_and_advance_dependency_fences"
     },
-    "adoption_evidence": {
+    "probe_report": {
         "current": null,
-        "required_for_enabled": true,
-        "required_fields": [
-            "schema_version",
-            "reviewed_configuration_digest",
-            "evidence_digest",
-            "observed_at",
-            "valid_until",
-            "cloudflare_platform_fingerprint",
-            "checks"
-        ],
-        "required_check_result": "passed",
-        "checks": [
+        "trusted_for_authorization": false,
+        "required_checks": [
             "package_image_match",
             "fixed_argv_launch",
             "enumerated_dns_sentinel_not_observed",
@@ -152,7 +143,47 @@
             "secret_sentinel",
             "mismatched_package_image_denial"
         ],
-        "expired_or_fingerprint_mismatch_result": "sandbox_profile_not_enabled"
+        "dns_pass_claim_limit": "observed_coverage_for_exact_image_runtime_sdk_configuration_and_attempted_paths_not_universal_proof"
+    },
+    "gate_attestation": {
+        "current": null,
+        "required_for_enabled": true,
+        "gate_id": "sandbox_execution",
+        "signature_algorithm": "ecdsa-p256-sha256-ieee-p1363",
+        "canonical_low_s_signature_required": true,
+        "private_signing_key_location": "outside_repository_and_deployed_workers",
+        "signed_bindings": [
+            "untrusted_report_digest",
+            "probe_definition_digest",
+            "collector_build_digest",
+            "configuration_digest",
+            "installation_digest",
+            "environment_digest",
+            "deployment_digest",
+            "required_check_set_version",
+            "decision",
+            "claims",
+            "attested_at",
+            "valid_until",
+            "signer_key_id"
+        ],
+        "trust_registry_owner": "bootstrap",
+        "registry_generation_owner": "operator_controlled_shared_state",
+        "registry_generation_checked_on_every_verification_and_authorization": true,
+        "stale_verifier_after_generation_advance": "deny",
+        "registry_generation_read_failure": "deny",
+        "clock_owner": "bootstrap",
+        "request_or_profile_may_supply_registry_clock_or_generation": false,
+        "verification_result": "opaque_verifier_generation_bound_decision",
+        "serialized_or_cloned_decision_is_authority": false,
+        "maximum_runtime_approval_lease_ms": 86400000,
+        "profile_reference_fields": ["attestation_digest", "configuration_digest", "valid_until"],
+        "authorization_checks_unexpired_lease_each_time": true,
+        "expiry_result": "sandbox_profile_not_enabled",
+        "historical_signed_bytes_retained_for_audit": true,
+        "historical_signed_bytes_retain_runtime_authority": false,
+        "renewal": "new_signed_envelope_and_atomic_profile_reference_rollout_before_old_lease_expiry",
+        "initial_enablement": "deny_user_code_until_current_profile_reference_is_active"
     },
     "network": {
         "candidate_state": "public_internet_blocked_unverified_dns",
@@ -287,8 +318,15 @@
         "filesystem_limit_enforcement_mechanism",
         "process_limit_enforcement_mechanism",
         "dns_probe_authoritative_zone_and_observation_window",
-        "adoption_evidence_valid_until_policy",
-        "cloudflare_platform_fingerprint"
+        "gate_attestation_signer_key_id",
+        "gate_attestation_trust_registry",
+        "probe_definition_digest",
+        "collector_build_digest",
+        "installation_digest",
+        "environment_digest",
+        "deployment_digest",
+        "required_check_set_version",
+        "attestation_renewal_and_atomic_rollout_process"
     ],
     "required_probes": [
         "runner_argv_and_digest",

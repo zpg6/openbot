@@ -126,26 +126,12 @@ failUnless(
         sameSet(sandboxFixture.record_lifecycle.allowed, ["active", "disabled"]),
     "adoption status and record lifecycle must remain separate"
 );
-for (const field of [
-    "reviewed_configuration_digest",
-    "evidence_digest",
-    "observed_at",
-    "valid_until",
-    "cloudflare_platform_fingerprint",
-    "checks",
-]) {
-    failUnless(
-        sandboxFixture.adoption_evidence.required_fields.includes(field),
-        `sandbox adoption evidence is missing required field ${field}`
-    );
-}
 failUnless(
-    sandboxFixture.adoption_evidence.current === null &&
-        sandboxFixture.adoption_evidence.required_check_result === "passed",
-    "sandbox evidence must stay absent until every typed check passes"
+    sandboxFixture.probe_report.current === null && sandboxFixture.probe_report.trusted_for_authorization === false,
+    "the untrusted Sandbox probe report must not authorize execution"
 );
 failUnless(
-    sameSet(sandboxFixture.adoption_evidence.checks, [
+    sameSet(sandboxFixture.probe_report.required_checks, [
         "package_image_match",
         "fixed_argv_launch",
         "enumerated_dns_sentinel_not_observed",
@@ -165,7 +151,39 @@ failUnless(
         "secret_sentinel",
         "mismatched_package_image_denial",
     ]),
-    "sandbox adoption check names drifted from the typed evidence contract"
+    "Sandbox probe check names drifted from the untrusted report contract"
+);
+failUnless(
+    sandboxFixture.gate_attestation.current === null &&
+        sandboxFixture.gate_attestation.required_for_enabled === true &&
+        sandboxFixture.gate_attestation.gate_id === "sandbox_execution" &&
+        sandboxFixture.gate_attestation.canonical_low_s_signature_required === true &&
+        sandboxFixture.gate_attestation.registry_generation_owner === "operator_controlled_shared_state" &&
+        sandboxFixture.gate_attestation.registry_generation_checked_on_every_verification_and_authorization === true &&
+        sandboxFixture.gate_attestation.stale_verifier_after_generation_advance === "deny" &&
+        sandboxFixture.gate_attestation.registry_generation_read_failure === "deny" &&
+        sandboxFixture.gate_attestation.request_or_profile_may_supply_registry_clock_or_generation === false &&
+        sandboxFixture.gate_attestation.verification_result === "opaque_verifier_generation_bound_decision" &&
+        sandboxFixture.gate_attestation.maximum_runtime_approval_lease_ms === 24 * 60 * 60 * 1_000 &&
+        sandboxFixture.gate_attestation.authorization_checks_unexpired_lease_each_time === true &&
+        sandboxFixture.gate_attestation.historical_signed_bytes_retain_runtime_authority === false,
+    "Sandbox gate-attestation authority drifted"
+);
+failUnless(
+    sameSet(sandboxFixture.gate_attestation.profile_reference_fields, [
+        "attestation_digest",
+        "configuration_digest",
+        "valid_until",
+    ]) &&
+        [
+            "untrusted_report_digest",
+            "configuration_digest",
+            "installation_digest",
+            "environment_digest",
+            "deployment_digest",
+            "required_check_set_version",
+        ].every(field => sandboxFixture.gate_attestation.signed_bindings.includes(field)),
+    "Sandbox attestation bindings drifted"
 );
 failUnless(
     sameSet(sandboxFixture.runtime.allowed_instance_types, ["lite", "basic"]) &&
@@ -293,6 +311,6 @@ if (errors.length > 0) {
     process.exitCode = 1;
 } else {
     console.log(
-        `checked ${routeKeys.length} routes, ${commandIds.length} commands, artifact denies, and sandbox evidence invariants`
+        `checked ${routeKeys.length} routes, ${commandIds.length} commands, artifact denies, and Sandbox authority invariants`
     );
 }

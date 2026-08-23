@@ -10,11 +10,15 @@ describe("contract entrypoints", () => {
         expect(publicContracts).not.toHaveProperty("RuntimeLimitsV1Schema");
         expect(publicContracts).not.toHaveProperty("verifyCompilerManifestExtensionEnvelopeV1");
         expect(publicContracts).not.toHaveProperty("classifyUserAuthoredContentV1");
+        expect(publicContracts).not.toHaveProperty("computeAuthorityChainMatchesV1");
+        expect(publicContracts).not.toHaveProperty("computeAuthorityChainIsValidV1");
     });
 
     it("requires the explicit internal entrypoint for authority records", () => {
         expect(internalContracts).toHaveProperty("StoredOrganizationToolPolicyV1Schema");
         expect(internalContracts).toHaveProperty("RuntimeLimitsV1Schema");
         expect(internalContracts).toHaveProperty("verifyCompilerManifestExtensionEnvelopeV1");
+        expect(internalContracts).toHaveProperty("computeAuthorityChainMatchesV1");
+        expect(internalContracts).not.toHaveProperty("computeAuthorityChainIsValidV1");
     });
 });

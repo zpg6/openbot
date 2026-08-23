@@ -83,7 +83,7 @@
                 "startup_process_teardown_age_run_wall_and_output_limit_probes",
                 "authoritative_dns_sentinel",
                 "enabled_active_profile_record",
-                "complete_dated_adoption_evidence_with_valid_until_and_cloudflare_platform_fingerprint"
+                "signed_current_attestation_bound_to_the_exact_probe_report_configuration_installation_environment_and_deployment"
             ]
         },
         {
@@ -91,6 +91,12 @@
             "owner": "identity_owner",
             "status": "not_run",
             "deny_code": "identity_store_unverified"
+        },
+        {
+            "id": "jurisdiction",
+            "owner": "platform_owner",
+            "status": "not_run",
+            "deny_code": "jurisdiction_unverified"
         },
         {
             "id": "r2_artifact_workspace",

@@ -23,6 +23,7 @@ const expectedRegistryEntries = Object.freeze({
     runtime_wire_protocol: "runtime_protocol_unverified",
     sandbox_execution: "code_execution_unverified",
     d1_better_auth: "identity_store_unverified",
+    jurisdiction: "jurisdiction_unverified",
 } as const);
 
 const GateRegistrySchema = z

@@ -38,7 +38,7 @@ const transcript = (checkId: string, index: number) => ({
     commitment_algorithm: "hmac-sha256-v1" as const,
     commitment_key_id_digest: common.commitment_key_id_digest,
     reference_commitment: index.toString(16).padStart(64, "0"),
-    gate_id: "connector" as const,
+    gate_id: "first_connector" as const,
     check_id: checkId,
     configuration_digest: common.configuration_digest,
     installation_digest: common.installation_digest,
@@ -71,7 +71,7 @@ const specificChecks = [
 
 const connectorReport = (resourceRule: "global" | "specific" = "global") => ({
     ...common,
-    kind: "connector" as const,
+    kind: "first_connector" as const,
     identity_digest_algorithm: "hmac-sha256-v1" as const,
     metorial_api_version: "2026-01-01-magnetar" as const,
     sdk_version: "3.0.9",
@@ -141,6 +141,17 @@ describe("recorded Item 2 blockers", () => {
         expect(inspectRecordedItem2BlockersV1(fixture)).toEqual({
             success: true,
             blockers: RECORDED_ITEM2_CORE_BLOCKERS_V1,
+        });
+    });
+
+    it("rejects a registry that omits the jurisdiction gate", async () => {
+        const fixture = JSON.parse(
+            await readFile(new URL("../../../docs/fixtures/item-2-gates.json", import.meta.url), "utf8")
+        ) as { gates: Array<Record<string, unknown>> };
+        fixture.gates = fixture.gates.filter(gate => gate["id"] !== "jurisdiction");
+        expect(inspectRecordedItem2BlockersV1(fixture)).toEqual({
+            success: false,
+            code: "invalid_gate_registry",
         });
     });
 });
@@ -259,14 +270,14 @@ describe("untrusted probe reports", () => {
         const left = await digestUntrustedProbeReportV1(report, { as_of_ms: asOf });
         const right = await digestUntrustedProbeReportV1(reordered, { as_of_ms: asOf });
         expect(left).toEqual(right);
-        expect(left.success && left.digest).toBe("7e62a7e494c8ce3fa14273e72ba7008221080b28dd7b3bb2b888b0f6b8a4e172");
+        expect(left.success && left.digest).toBe("30d3293083164940ca977702600e0233e14c49622466f524659869e92c060fb4");
     });
 
     it("checks only content integrity and retains the untrusted report name", async () => {
         const report = await withReportDigest(connectorReport());
         const inspected = await inspectUntrustedProbeReportIntegrityV1(report, { as_of_ms: asOf });
         expect(inspected.success).toBe(true);
-        if (inspected.success) expect(inspected.report.kind).toBe("connector");
+        if (inspected.success) expect(inspected.report.kind).toBe("first_connector");
 
         const forged = { ...report, completed_at: completedAt + 1 };
         expect(await inspectUntrustedProbeReportIntegrityV1(forged, { as_of_ms: asOf })).toEqual({

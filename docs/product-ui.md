@@ -302,18 +302,18 @@ Better Auth lives behind a committed allowlist under `/api/auth/*`. The initial 
 
 Page handlers serialize allowlisted view objects. They never send database rows to templates.
 
-| Contract                 | Used by                      | Required content                                                                                                                          |
-| ------------------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `BotRosterViewV1`        | Bot list and shared sidebar  | Query state, cursor links, `BotListItemV1` rows, and allowed top-level actions.                                                           |
-| `BotWorkspaceViewV1`     | Bot task page                | Bot identity, active revision, feed items, composer availability, denial reason, and navigation.                                          |
-| `RunConfirmationViewV1`  | Confirmation page            | Exact disclosure snapshot, expiry, stale state, and server-derived actions.                                                               |
-| `RunDetailViewV1`        | Run detail                   | Prompt, three status dimensions, timeline page, plain-text result, evidence, cleanup, `can_cancel`, and `cancel_reason`.                  |
-| `RunPollPageV1`          | Two-second polling           | Run version, execution, cleanup, evidence and result state, new items, and next cursor.                                                   |
-| `BotAccessViewV1`        | Bot access page              | Connections, provider grants, separate compute grant, resource mapping, destinations, limits, purpose, expiry, and impact-safe mutations. |
-| `ConnectionDetailViewV1` | Connection detail            | Provider version, safe authorization state, dependent grants, and revocation impact.                                                      |
-| `CatalogViewV1`          | Tool and skill catalog pages | Immutable revision identity, lifecycle, dependency counts, and server-derived actions.                                                    |
-| `ComputeCatalogViewV1`   | Compute catalog pages        | Profile adoption evidence and expiry, profile and policy lifecycle, limits, admitted classes, dependent Bots, and server-derived actions. |
-| `AuditEventViewV1`       | Audit event page             | Redacted canonical event, stream position, stored digests, and verifier result.                                                           |
+| Contract                 | Used by                      | Required content                                                                                                                             |
+| ------------------------ | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `BotRosterViewV1`        | Bot list and shared sidebar  | Query state, cursor links, `BotListItemV1` rows, and allowed top-level actions.                                                              |
+| `BotWorkspaceViewV1`     | Bot task page                | Bot identity, active revision, feed items, composer availability, denial reason, and navigation.                                             |
+| `RunConfirmationViewV1`  | Confirmation page            | Exact disclosure snapshot, expiry, stale state, and server-derived actions.                                                                  |
+| `RunDetailViewV1`        | Run detail                   | Prompt, three status dimensions, timeline page, plain-text result, evidence, cleanup, `can_cancel`, and `cancel_reason`.                     |
+| `RunPollPageV1`          | Two-second polling           | Run version, execution, cleanup, evidence and result state, new items, and next cursor.                                                      |
+| `BotAccessViewV1`        | Bot access page              | Connections, provider grants, separate compute grant, resource mapping, destinations, limits, purpose, expiry, and impact-safe mutations.    |
+| `ConnectionDetailViewV1` | Connection detail            | Provider version, safe authorization state, dependent grants, and revocation impact.                                                         |
+| `CatalogViewV1`          | Tool and skill catalog pages | Immutable revision identity, lifecycle, dependency counts, and server-derived actions.                                                       |
+| `ComputeCatalogViewV1`   | Compute catalog pages        | Signed approval-lease status and expiry, profile and policy lifecycle, limits, admitted classes, dependent Bots, and server-derived actions. |
+| `AuditEventViewV1`       | Audit event page             | Redacted canonical event, stream position, stored digests, and verifier result.                                                              |
 
 Every view includes `available_actions` and stable denial reasons from the server. No view may contain an encrypted content field, credential, MCP URL, Metorial reference, bearer capability, password material, raw tool argument, or raw tool result.
 

@@ -72,7 +72,7 @@ const nonemptyUnique = <T extends z.ZodType>(schema: T, maximum: number) =>
             message: "Values must be unique",
         });
 
-export const ResourceRuleV1Schema = z
+const ConnectorSpecificResourceRuleV1Schema = z
     .object({
         kind: z.literal("connector_specific"),
         mapping_key: utf8String({ minBytes: 1, maxBytes: 128 }),
@@ -81,6 +81,20 @@ export const ResourceRuleV1Schema = z
         scope_digest: Sha256DigestSchema,
     })
     .strict();
+
+const GlobalPublicReadOnlyResourceRuleV1Schema = z
+    .object({
+        kind: z.literal("global_public_read_only"),
+        allowed_data_classes: nonemptyUnique(z.enum(["public", "synthetic"]), 2),
+        operator_supplied_provider_auth_config_present: z.literal(false),
+        target_class: z.literal("public_web"),
+    })
+    .strict();
+
+export const ResourceRuleV1Schema = z.discriminatedUnion("kind", [
+    ConnectorSpecificResourceRuleV1Schema,
+    GlobalPublicReadOnlyResourceRuleV1Schema,
+]);
 export type ResourceRuleV1 = z.infer<typeof ResourceRuleV1Schema>;
 
 export const OutboundDataRuleV1Schema = z
@@ -152,6 +166,16 @@ export const OrganizationToolPolicyV1Schema = z
     })
     .strict()
     .superRefine((policy, context) => {
+        if (policy.resource_rule.kind === "global_public_read_only") {
+            const allowedDataClasses = new Set<string>(policy.resource_rule.allowed_data_classes);
+            if (policy.outbound_data_rule.data_classes.some(dataClass => !allowedDataClasses.has(dataClass))) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["outbound_data_rule", "data_classes"],
+                    message: "A global public tool accepts only its declared public or synthetic data classes",
+                });
+            }
+        }
         try {
             const schema = policy.canonical_tool_schema;
             if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
@@ -278,45 +302,16 @@ export type ModelRouteV1 = z.infer<typeof ModelRouteV1Schema>;
 export const CodeLanguageV1Schema = z.enum(["javascript"]);
 export type CodeLanguageV1 = z.infer<typeof CodeLanguageV1Schema>;
 
-const SandboxAdoptionChecksV1Schema = z
-    .object({
-        package_image_match: z.literal("passed"),
-        fixed_argv_launch: z.literal("passed"),
-        enumerated_dns_sentinel_not_observed: z.literal("passed"),
-        filesystem_limit: z.literal("passed"),
-        process_limit: z.literal("passed"),
-        startup_timeout: z.literal("passed"),
-        execution_timeout_and_kill: z.literal("passed"),
-        teardown_and_destroy: z.literal("passed"),
-        repeat_destroy_safe: z.literal("passed"),
-        sandbox_lifetime: z.literal("passed"),
-        fresh_generation: z.literal("passed"),
-        output_backpressure: z.literal("passed"),
-        replacement_uncertainty: z.literal("passed"),
-        placement: z.literal("passed"),
-        installation_capacity: z.literal("passed"),
-        private_route: z.literal("passed"),
-        secret_sentinel: z.literal("passed"),
-        mismatched_package_image_denial: z.literal("passed"),
-    })
-    .strict();
-
-export const SandboxAdoptionEvidenceV1Schema = z
+export const SandboxAdoptionAttestationReferenceV1Schema = z
     .object({
         schema_version: z.literal(1),
-        reviewed_configuration_digest: Sha256DigestSchema,
-        evidence_digest: Sha256DigestSchema,
-        observed_at: EpochMillisecondsSchema,
+        gate_id: z.literal("sandbox_execution"),
+        attestation_digest: Sha256DigestSchema,
+        configuration_digest: Sha256DigestSchema,
         valid_until: EpochMillisecondsSchema,
-        cloudflare_platform_fingerprint: utf8String({ minBytes: 1, maxBytes: 512 }),
-        checks: SandboxAdoptionChecksV1Schema,
     })
-    .strict()
-    .refine(evidence => evidence.valid_until > evidence.observed_at, {
-        message: "Sandbox adoption evidence must expire after it is observed",
-        path: ["valid_until"],
-    });
-export type SandboxAdoptionEvidenceV1 = z.infer<typeof SandboxAdoptionEvidenceV1Schema>;
+    .strict();
+export type SandboxAdoptionAttestationReferenceV1 = z.infer<typeof SandboxAdoptionAttestationReferenceV1Schema>;
 
 export const CodeExecutionProfileV1Schema = z
     .object({
@@ -350,7 +345,7 @@ export const CodeExecutionProfileV1Schema = z
                 message: "Code data classes must be unique",
             }),
         network_policy: z.literal("public_internet_blocked_unverified_dns"),
-        adoption_evidence: SandboxAdoptionEvidenceV1Schema.nullable(),
+        adoption_attestation_reference: SandboxAdoptionAttestationReferenceV1Schema.nullable(),
         filesystem_policy: z.literal("ephemeral_per_run"),
         package_installation: z.literal(false),
         interactive_terminal: z.literal(false),
@@ -360,7 +355,7 @@ export const CodeExecutionProfileV1Schema = z
     .superRefine((profile, context) => {
         const classes = new Set(profile.admitted_data_classes);
         if (profile.adoption_status === "candidate") {
-            if (profile.adoption_evidence !== null || classes.size !== 1 || !classes.has("synthetic")) {
+            if (profile.adoption_attestation_reference !== null || classes.size !== 1 || !classes.has("synthetic")) {
                 context.addIssue({
                     code: "custom",
                     path: ["admitted_data_classes"],
@@ -368,13 +363,13 @@ export const CodeExecutionProfileV1Schema = z
                 });
             }
         } else if (
-            profile.adoption_evidence === null ||
-            profile.adoption_evidence.reviewed_configuration_digest !== profile.configuration_digest
+            profile.adoption_attestation_reference === null ||
+            profile.adoption_attestation_reference.configuration_digest !== profile.configuration_digest
         ) {
             context.addIssue({
                 code: "custom",
-                path: ["adoption_evidence"],
-                message: "An enabled profile requires complete evidence for the reviewed profile digest",
+                path: ["adoption_attestation_reference"],
+                message: "An enabled profile must reference an attestation for its configuration digest",
             });
         }
     });
@@ -500,7 +495,11 @@ export const deriveEffectiveCodeExecutionLimitsV1 = (
     ) as NarrowedCodeExecutionLimitsV1;
 };
 
-export const computeAuthorityChainIsValidV1 = (
+/**
+ * Checks stored record relationships only. Callers must separately verify the referenced
+ * Sandbox attestation before they authorize code execution.
+ */
+export const computeAuthorityChainMatchesV1 = (
     botRevision: BotRevisionV1,
     profile: CodeExecutionProfileV1,
     policy: OrganizationComputePolicyV1,
@@ -509,22 +508,22 @@ export const computeAuthorityChainIsValidV1 = (
         account_id: string;
         bot_revision_id: string;
         as_of_ms: number;
-        cloudflare_platform_fingerprint: string;
+        sandbox_adoption_attestation_digest: string;
     }
 ): boolean => {
     const profileClasses = new Set(profile.admitted_data_classes);
     const selection = botRevision.compute_selection;
-    const evidence = profile.adoption_evidence;
+    const attestationReference = profile.adoption_attestation_reference;
     return (
         selection !== null &&
         botRevision.account_id === expected.account_id &&
         botRevision.bot_revision_id === expected.bot_revision_id &&
         profile.adoption_status === "enabled" &&
         profile.lifecycle === "active" &&
-        evidence !== null &&
-        evidence.reviewed_configuration_digest === profile.configuration_digest &&
-        evidence.valid_until > expected.as_of_ms &&
-        evidence.cloudflare_platform_fingerprint === expected.cloudflare_platform_fingerprint &&
+        attestationReference !== null &&
+        attestationReference.configuration_digest === profile.configuration_digest &&
+        attestationReference.attestation_digest === expected.sandbox_adoption_attestation_digest &&
+        attestationReference.valid_until > expected.as_of_ms &&
         policy.lifecycle === "active" &&
         grant.lifecycle === "active" &&
         policy.account_id === expected.account_id &&
@@ -834,8 +833,8 @@ export const DisclosureSnapshotV1Schema = z
                 effectiveLimits === null ||
                 snapshot.code_execution.profile.adoption_status !== "enabled" ||
                 snapshot.code_execution.profile.lifecycle !== "active" ||
-                snapshot.code_execution.profile.adoption_evidence === null ||
-                snapshot.code_execution.profile.adoption_evidence.valid_until < snapshot.expires_at ||
+                snapshot.code_execution.profile.adoption_attestation_reference === null ||
+                snapshot.code_execution.profile.adoption_attestation_reference.valid_until < snapshot.expires_at ||
                 snapshot.code_execution.compute_grant_expires_at < snapshot.expires_at ||
                 !computeLimitsAreNarrowerOrEqualV1(
                     snapshot.code_execution.compute_policy_limits,
@@ -856,7 +855,7 @@ export const DisclosureSnapshotV1Schema = z
                 context.addIssue({
                     code: "custom",
                     path: ["code_execution"],
-                    message: "Code execution authority is inactive, expired, or broader than its parent",
+                    message: "Code execution references are inactive, expired, or broader than their parent records",
                 });
             }
         }
@@ -864,7 +863,7 @@ export const DisclosureSnapshotV1Schema = z
             context.addIssue({
                 code: "custom",
                 path: ["limits", "max_code_executions"],
-                message: "Code execution count must be zero without disclosed compute authority and one with it",
+                message: "Code execution count must be zero without disclosed compute records and one with them",
             });
         }
         const possibleClasses = new Set(snapshot.possible_data_classes);
@@ -890,7 +889,7 @@ export const DisclosureSnapshotV1Schema = z
                 context.addIssue({
                     code: "custom",
                     path: ["code_execution", "profile", "adoption_status"],
-                    message: "A candidate Sandbox profile cannot authorize a user run",
+                    message: "A candidate Sandbox profile cannot appear in a user-run disclosure",
                 });
             }
             const admitted = new Set(snapshot.code_execution.profile.admitted_data_classes);
