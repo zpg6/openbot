@@ -1,7 +1,13 @@
-import type { D1ProbeReceiptResponseV1, D1ProbeSinkServiceV1, D1ProbeWriterRoleV1 } from "@openbot/d1-probe-rpc";
+import type {
+    D1ProbeGatewayReservationResponseV1,
+    D1ProbeReceiptResponseV1,
+    D1ProbeSinkServiceV1,
+    D1ProbeWriterRoleV1,
+} from "@openbot/d1-probe-rpc";
 import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { forwardProbeReceiptV1 } from "./src/forward.js";
+import { reserveAndDispatchGatewayProbeV1 } from "./src/gateway.js";
 
 interface Env {
     readonly PROBE_DB: D1Database;
@@ -14,6 +20,10 @@ abstract class D1ProbeWriterService extends WorkerEntrypoint<Env> {
 
     recordReceipt(input: unknown): Promise<D1ProbeReceiptResponseV1> {
         return forwardProbeReceiptV1(this.env.PROBE_SINK, this.role, input);
+    }
+
+    reserveGateway(input: unknown): Promise<D1ProbeGatewayReservationResponseV1> {
+        return reserveAndDispatchGatewayProbeV1(this.env.PROBE_DB, this.env.PROBE_SINK, this.role, input);
     }
 }
 

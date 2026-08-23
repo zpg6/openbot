@@ -74,16 +74,19 @@ const responseBase = {
     request_digest: DigestSchema,
 };
 
+export const D1ProbeRecordedReceiptResponseV1Schema = z
+    .object({
+        ...responseBase,
+        status: z.literal("recorded"),
+        error_code: z.null(),
+        receipt_id: OpaqueIdSchema,
+        sink_runtime_version_id: OpaqueIdSchema,
+    })
+    .strict();
+export type D1ProbeRecordedReceiptResponseV1 = z.infer<typeof D1ProbeRecordedReceiptResponseV1Schema>;
+
 export const D1ProbeReceiptResponseV1Schema = z.discriminatedUnion("status", [
-    z
-        .object({
-            ...responseBase,
-            status: z.literal("recorded"),
-            error_code: z.null(),
-            receipt_id: OpaqueIdSchema,
-            sink_runtime_version_id: OpaqueIdSchema,
-        })
-        .strict(),
+    D1ProbeRecordedReceiptResponseV1Schema,
     z
         .object({
             ...responseBase,

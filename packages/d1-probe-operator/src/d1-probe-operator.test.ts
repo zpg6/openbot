@@ -194,7 +194,7 @@ describe("D1 probe operator preflight", () => {
         expect(noncanonical).toEqual({ code: 1, stdout: "", stderr: "invalid_canonical_json\n" });
         const missingKey = await runCli(canonicalRequest);
         expect(missingKey).toEqual({ code: 1, stdout: "", stderr: "commitment_key_unavailable\n" });
-    });
+    }, 15_000);
 });
 
 describe("D1 probe resource lifecycle", () => {

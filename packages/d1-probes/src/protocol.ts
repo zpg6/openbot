@@ -227,6 +227,38 @@ CREATE TABLE IF NOT EXISTS _openbot_probe_external_sink_receipt (
     receipt_request_digest TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS _openbot_probe_external_gateway_budget (
+    probe_run_id TEXT NOT NULL,
+    scenario TEXT NOT NULL,
+    call_kind TEXT NOT NULL CHECK (call_kind IN ('model', 'provider_tool', 'code')),
+    remaining INTEGER NOT NULL CHECK (remaining >= 0 AND remaining <= 1),
+    PRIMARY KEY (probe_run_id, scenario, call_kind)
+);
+
+CREATE TABLE IF NOT EXISTS _openbot_probe_external_gateway_reservation (
+    probe_run_id TEXT NOT NULL,
+    scenario TEXT NOT NULL,
+    call_kind TEXT NOT NULL CHECK (call_kind IN ('model', 'provider_tool', 'code')),
+    call_sequence INTEGER NOT NULL CHECK (call_sequence >= 1),
+    request_id TEXT NOT NULL UNIQUE,
+    writer_role TEXT NOT NULL CHECK (writer_role IN ('writer_a', 'writer_b')),
+    request_variant TEXT NOT NULL CHECK (request_variant IN ('exact', 'substituted')),
+    fault_point TEXT NOT NULL CHECK (fault_point IN ('none', 'reserve_then_crash', 'dispatch_response_lost')),
+    logical_call_id TEXT NOT NULL,
+    attempt_id TEXT NOT NULL UNIQUE,
+    reservation_id TEXT NOT NULL UNIQUE,
+    dispatch_request_digest TEXT NOT NULL,
+    request_digest TEXT NOT NULL,
+    PRIMARY KEY (probe_run_id, scenario, call_kind, call_sequence),
+    UNIQUE (probe_run_id, call_kind, logical_call_id),
+    FOREIGN KEY (probe_run_id, scenario, call_kind)
+        REFERENCES _openbot_probe_external_gateway_budget(probe_run_id, scenario, call_kind)
+);
+
+CREATE TABLE IF NOT EXISTS _openbot_probe_external_gateway_guard (
+    reservation_id TEXT PRIMARY KEY REFERENCES _openbot_probe_external_gateway_reservation(reservation_id)
+);
+
 CREATE TABLE IF NOT EXISTS _openbot_probe_capacity (
     scenario TEXT PRIMARY KEY,
     maximum INTEGER NOT NULL CHECK (maximum = 4),
@@ -315,6 +347,9 @@ END;
 
 const resetSql = `
 DELETE FROM _openbot_probe_external_sink_receipt;
+DELETE FROM _openbot_probe_external_gateway_guard;
+DELETE FROM _openbot_probe_external_gateway_reservation;
+DELETE FROM _openbot_probe_external_gateway_budget;
 DELETE FROM _openbot_probe_audit_guard;
 DELETE FROM _openbot_probe_audit_event;
 DELETE FROM _openbot_probe_audit_head;

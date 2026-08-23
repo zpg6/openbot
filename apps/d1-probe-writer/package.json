@@ -4,13 +4,15 @@
     "private": true,
     "type": "module",
     "scripts": {
-        "typecheck": "tsc -b --pretty false"
+        "typecheck": "tsc -b --pretty false",
+        "test": "vitest run --root ../.. apps/d1-probe-writer/src"
     },
     "dependencies": {
         "@openbot/d1-probe-rpc": "workspace:*"
     },
     "devDependencies": {
         "@cloudflare/workers-types": "catalog:",
-        "typescript": "catalog:"
+        "typescript": "catalog:",
+        "vitest": "catalog:"
     }
 }

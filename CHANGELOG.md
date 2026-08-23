@@ -18,3 +18,4 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 - Offline D1 gate-attestation signing with mandatory report adjudication, canonical low-S P-256 output, a separate reviewer record, and private-key input isolated to file descriptor 3.
 - Private D1 probe preflight planning with HMAC-committed Cloudflare resources, production-database denial, and a fail-closed create and cleanup journal. The command performs no deployment and cannot promote a gate.
 - Private D1 probe receipt RPC with role-pinned writer entrypoints, a non-deduplicating D1 sink, explicit post-call uncertainty, and local-only Worker dry runs. No public probe route or deployment command exists yet.
+- Guarded local-only D1 gateway-reservation writers with exact replay and substitution denial, one post-commit sink call, fixed crash and response-loss faults, and no automatic retry or gate-promotion path.
