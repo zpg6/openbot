@@ -74,6 +74,7 @@ const commonEnvelopeFields = {
     environment_digest: DigestSchema,
     deployment_digest: DigestSchema,
     required_check_set_version: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    operator_review_digest: DigestSchema.optional(),
     attested_at: TimestampSchema,
     valid_until: TimestampSchema,
     signer_key_id: KeyIdSchema,
@@ -203,6 +204,17 @@ const envelopeForGate = <G extends CanonicalGateIdV1>(gateId: G) =>
                     code: "custom",
                     path: ["valid_until"],
                     message: "Attestation lifetime must be positive and at most 24 hours",
+                });
+            }
+            if (
+                (gateId === "d1_guarded_create" || gateId === "gateway_reservation") &&
+                envelope.decision === "passed" &&
+                envelope.operator_review_digest === undefined
+            ) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["operator_review_digest"],
+                    message: "Passed D1 attestations must bind the operator review record",
                 });
             }
         });

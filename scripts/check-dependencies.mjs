@@ -59,6 +59,9 @@ function checkManifest(file, manifest, catalog) {
             if (name === "@openbot/d1-probes" && !file.startsWith("packages/d1-probes/")) {
                 errors.push(`${file}: disposable D1 probe code cannot be a product or authority dependency`);
             }
+            if (name === "@openbot/gate-signer" && !file.startsWith("packages/gate-signer/")) {
+                errors.push(`${file}: offline gate signing code cannot be a product or Worker dependency`);
+            }
             if (typeof value !== "string" || !isExactDependency(value)) {
                 errors.push(`${file}: ${field}.${name} must use an exact version, catalog:, or workspace:`);
             } else if (value === "catalog:" && !catalog.has(name)) {
@@ -79,6 +82,19 @@ function checkD1ProbeImportBoundary(file, specifier) {
         (resolvedImport === probeRoot || resolvedImport.startsWith(`${probeRoot}${path.sep}`));
     if (packageImport || resolvesIntoProbePackage) {
         errors.push(`${file}: disposable D1 probe operations cannot enter product or authority code`);
+    }
+}
+
+function checkGateSignerImportBoundary(file, specifier) {
+    if (file.startsWith("packages/gate-signer/")) return;
+    const packageImport = specifier === "@openbot/gate-signer" || specifier.startsWith("@openbot/gate-signer/");
+    const resolvedImport = specifier.startsWith(".") ? path.resolve(path.dirname(file), specifier) : null;
+    const signerRoot = path.resolve("packages/gate-signer");
+    const resolvesIntoSigner =
+        resolvedImport !== null &&
+        (resolvedImport === signerRoot || resolvedImport.startsWith(`${signerRoot}${path.sep}`));
+    if (packageImport || resolvesIntoSigner) {
+        errors.push(`${file}: offline private-key signing code cannot enter product, authority, or Worker code`);
     }
 }
 
@@ -122,6 +138,24 @@ if (errors.length !== beforeProbeImportSelfTest + 1) {
 }
 errors.splice(beforeProbeImportSelfTest, 1);
 
+const beforeSignerManifestSelfTest = errors.length;
+checkManifest(
+    "apps/<self-test>/package.json",
+    { dependencies: { "@openbot/gate-signer": "workspace:*" } },
+    workspaceCatalog
+);
+if (errors.length !== beforeSignerManifestSelfTest + 1) {
+    errors.push("gate signer manifest-boundary self-test did not reject a product dependency");
+}
+errors.splice(beforeSignerManifestSelfTest, 1);
+
+const beforeSignerImportSelfTest = errors.length;
+checkGateSignerImportBoundary("apps/<self-test>/entry.ts", "../../packages/gate-signer/src/sign.ts");
+if (errors.length !== beforeSignerImportSelfTest + 1) {
+    errors.push("gate signer import-boundary self-test did not reject a relative product import");
+}
+errors.splice(beforeSignerImportSelfTest, 1);
+
 const forbiddenFiles = files.filter(file => /(?:entry\.(?:mysql|postgres)\.ts|artifact-gateway)/u.test(file));
 for (const file of forbiddenFiles) errors.push(`${file}: deferred profile or artifact entrypoint exists`);
 
@@ -135,13 +169,15 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
         if (
             specifier === "@openbot/gate-evidence/internal" &&
             !file.startsWith("packages/gate-evidence/") &&
-            !file.startsWith("packages/gate-attestation/")
+            !file.startsWith("packages/gate-attestation/") &&
+            !file.startsWith("packages/gate-signer/")
         ) {
             errors.push(`${file}: untrusted probe reports cannot enter application authority code`);
         }
         if (
             specifier === "@openbot/gate-attestation/internal" &&
             !file.startsWith("packages/gate-attestation/") &&
+            !file.startsWith("packages/gate-signer/") &&
             file !== "tests/workers/gate-attestation.test.ts"
         ) {
             errors.push(`${file}: verified gate decisions may enter only an explicitly reviewed authority boundary`);
@@ -154,6 +190,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
             errors.push(`${file}: the operator trust registry may be loaded only at the reviewed bootstrap boundary`);
         }
         checkD1ProbeImportBoundary(file, specifier);
+        checkGateSignerImportBoundary(file, specifier);
         if (specifier === "drizzle-orm" || specifier.startsWith("drizzle-orm/")) {
             const allowedD1Imports = new Set([
                 "drizzle-orm/d1/driver",

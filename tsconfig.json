@@ -7,6 +7,7 @@
         { "path": "./packages/d1-probes" },
         { "path": "./packages/gate-attestation" },
         { "path": "./packages/gate-evidence" },
+        { "path": "./packages/gate-signer" },
         { "path": "./packages/sandbox-protocol" },
         { "path": "./apps/capability-gateway" },
         { "path": "./apps/control-plane" },

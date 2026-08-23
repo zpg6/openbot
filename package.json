@@ -21,6 +21,7 @@
         "check:dependencies": "node scripts/check-dependencies.mjs",
         "check:secrets": "node scripts/check-secrets.mjs",
         "check:fixtures": "node scripts/check-fixtures.mjs && node scripts/check-d1-probe-fixture.mjs",
+        "gate:attest:d1": "corepack pnpm --dir packages/gate-signer attest",
         "db:generate:d1": "drizzle-kit generate --config packages/db-d1/drizzle.config.ts",
         "db:migrate:d1:local": "wrangler d1 migrations apply CONTROL_DB_FRESH --local --config apps/control-plane/wrangler.d1.jsonc --env preview",
         "db:migrate:d1:remote": "wrangler d1 migrations apply CONTROL_DB_FRESH --remote --config apps/control-plane/wrangler.d1.jsonc --env production",

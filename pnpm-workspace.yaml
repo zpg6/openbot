@@ -24,6 +24,7 @@ catalog:
     prettier: 3.9.6
     testcontainers: 12.1.0
     typescript: 7.0.2
+    tsx: 4.23.12
     vitest: 4.1.11
     wrangler: 4.125.0
     zod: 4.4.3
