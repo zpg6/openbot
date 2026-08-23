@@ -246,11 +246,15 @@ failUnless(
 failUnless(
     connectorFixture.schema_version === 1 &&
         connectorFixture.status === "blocked" &&
-        connectorFixture.decision === "no_connector_selected" &&
-        connectorFixture.metorial.provider_deployment_id === null &&
+        connectorFixture.decision === "metorial_search_candidate_literals_missing" &&
+        connectorFixture.metorial.api_version_header === "2026-01-01-magnetar" &&
+        connectorFixture.metorial.provider_identifier === "metorial-search" &&
+        connectorFixture.metorial.provider_deployment_id_hmac === null &&
         connectorFixture.metorial.tool_keys.length === 0 &&
-        connectorFixture.metorial.resource_mapping === null,
-    "first connector fixture must remain denied until literal deployment, tool, and resource evidence exists"
+        connectorFixture.metorial.auth_setup.kind === "none" &&
+        connectorFixture.metorial.resource_rule.kind === "global_public_read_only" &&
+        connectorFixture.metorial.resource_rule.operator_supplied_provider_auth_config_present === false,
+    "first connector candidate must remain denied until literal deployment and tool evidence exists"
 );
 failUnless(
     openRouterFixture.schema_version === 1 &&

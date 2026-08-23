@@ -1,21 +1,33 @@
 {
     "schema_version": 1,
-    "recorded_date": "2026-08-22",
+    "recorded_date": "2026-08-23",
     "status": "blocked",
-    "decision": "no_connector_selected",
+    "decision": "metorial_search_candidate_literals_missing",
     "deny_code": "connector_evidence_incomplete",
     "metorial": {
-        "api_version_header": null,
-        "provider_id": null,
-        "provider_deployment_id": null,
-        "provider_version": null,
-        "provider_auth_method_id": null,
+        "api_version_header": "2026-01-01-magnetar",
+        "provider_identifier": "metorial-search",
+        "provider_id_hmac": null,
+        "provider_deployment_id_hmac": null,
+        "provider_version_hmac": null,
+        "provider_auth_method_id_hmac": null,
+        "auth_setup": {
+            "kind": "none",
+            "operator_supplied_provider_auth_config_present": false
+        },
         "oauth_scopes": [],
-        "synthetic_data_setup": null,
+        "planned_probe_input": "dedicated_environment_fixed_public_web_query",
         "tool_keys": [],
-        "tool_schema_digests": [],
-        "resource_mapping": null,
-        "incidental_effects": [],
+        "input_schema_digests": [],
+        "output_schema_digests": [],
+        "descriptor_digests": [],
+        "resource_rule": {
+            "kind": "global_public_read_only",
+            "allowed_data_classes": ["public", "synthetic"],
+            "operator_supplied_provider_auth_config_present": false,
+            "target_class": "public_web"
+        },
+        "incidental_effects": ["provider_access_log", "provider_access_timestamp", "provider_quota"],
         "result_limits": null
     },
     "documentation_supports": {
@@ -28,17 +40,19 @@
         "provider_version_readback",
         "oauth_scope_or_synthetic_account_review",
         "exact_tool_list_and_schema_capture",
-        "positive_resource_scope",
-        "sibling_resource_denial",
+        "global_public_target_validation",
+        "operator_auth_config_absence_readback",
         "two_sequential_calls_with_reconnect",
         "second_client_after_cleanup",
-        "ambiguous_create_reconciliation",
         "result_size_and_classification"
     ],
     "sources": [
+        "https://metorial.com/api",
+        "https://metorial.com/api/provider-deployments",
+        "https://metorial.com/api/provider-tools",
+        "https://metorial.com/api/sessions",
         "https://metorial.com/docs/concepts-sessions",
-        "https://metorial.com/docs/sdk-oauth",
         "https://metorial.com/docs/concepts-providers",
-        "https://metorial.com/docs/glossary"
+        "https://github.com/metorial/metorial-node"
     ]
 }

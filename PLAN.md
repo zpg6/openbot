@@ -485,7 +485,7 @@ Metorial supplies provider deployments, OAuth setup sessions, auth configs, runt
 
 A connection is not authority. A grant binds the account, append-only bot revision, provider authorization, deployment version, tool keys, resource rule, outbound data class, destinations, purpose, limits, expiry, and start-confirmation requirement.
 
-Resource rules are connector-specific. The first connector uses a public or synthetic dataset with no private production data. If it requires OAuth, use a dedicated test account and a provider-side resource scope that the connector test proves. Connection-wide private-data access does not ship in the first release. Unsupported mappings deny the run.
+Resource rules are connector-specific. The blocked first probe candidate is Metorial Search with no operator-supplied provider auth config, a `global_public_read_only` rule, and public or synthetic probe input only. It cannot claim organization-resource isolation or serve the normal owner-prompt path. Another connector must use a dedicated test account and a provider-side scope that a reviewed argument mapper and sibling-target test prove. Connection-wide private-data access does not ship in the first release. Unsupported mappings deny the run.
 
 Every connector defines input fields that may leave OpenBot, maximum lengths, result classification, and whether tool output may return to the model. The gateway validates proposed arguments against those rules. The run confirmation page names Metorial, OpenRouter, the downstream model provider, and the connector provider as disclosure destinations.
 
@@ -639,6 +639,7 @@ packages/
   audit/
   metorial/
   openrouter/
+  gate-evidence/
   sandbox-protocol/
   artifacts/
   capability-protocol/
@@ -671,7 +672,7 @@ The public repository starts with `README.md`, `LICENSE`, `SECURITY.md`, `CONTRI
 
 ## Decisions and gates
 
-A gate is a test whose failure blocks the named implementation. Record pinned versions, verification date, redacted requests, observed responses, and the decision in `docs/vendor-capabilities.md`.
+A gate is a test whose failure blocks the named implementation. Record pinned versions, verification date, redacted requests, observed responses, and the decision in `docs/vendor-capabilities.md`. Probe reports are untrusted input. `packages/gate-evidence` validates report shape, content integrity, and the recorded blocker registry. It cannot attest a report, promote a fixture, or mark a gate passed. Trusted promotion requires a later operator attestation path and a trusted evidence store.
 
 | Gate | Required proof | Closes before | Failure result |
 |---|---|---|---|
@@ -692,10 +693,10 @@ Item 2 is not done until the repository contains literal values for the first co
 
 | Required value | Recorded artifact |
 |---|---|
-| Metorial provider deployment and pinned version | Provider readback and version header |
-| OAuth scope or synthetic-data setup | Connector review and test-account rule |
+| Metorial provider deployment and pinned version | HMAC identity commitments, provider readback, and version header |
+| Auth setup or dedicated probe input | Connector review and test-account rule |
 | Allowed tool keys and canonical schema digests | Signed connector fixture |
-| Resource mapping and incidental effects | Connector contract |
+| Resource rule and incidental effects | Connector contract |
 | OpenRouter model ID, provider slug, ZDR support, and price | Dated route fixture |
 | Sandbox profile key, exact SDK version, matching image digest, instance type, JavaScript runner, DNS result, admitted data classes, and jurisdiction | Dated code-execution fixture and deployed probe |
 | Cloudflare and database data jurisdiction | Installation record and disclosure text |
@@ -712,9 +713,9 @@ Done when the D1 control-plane shell, fake orchestrator, fake capability gateway
 
 ### 2. Settle D1 contracts and blocking gates
 
-Create the ADRs, `docs/threat-model.md`, logical Zod contracts, state transitions, error codes, and disposable vendor and platform probes first. Add a command matrix that names every core mutation's route, actor, idempotency scope, expected version, success response, repeat response, stale response, audit event, and outbox effect. Define the organization catalog, declarative skills, Bot selection, reviewed code-execution profile, live-confirmation slot, run and Sandbox-capacity slots, and a versioned optional manifest-extension envelope before freezing D1 tables. Do not add artifact tables yet. Run the core shared-protocol gates and fix the literal connector, model route, Sandbox profile, and jurisdiction values. Only then write the D1 Drizzle schema, committed migrations, native DO migrations, guarded-run SQL, gateway-reservation SQL, sandbox-command reservation, and typed destroy cleanup. The threat model names each asset, attacker, entry point, control, residual risk, test, and operator-visible failure state. Implement only D1. PostgreSQL and MySQL remain contract targets, not code yet.
+Create the ADRs, `docs/threat-model.md`, logical Zod contracts, state transitions, error codes, and disposable vendor and platform probes first. Add a command matrix that names every core mutation's route, actor, idempotency scope, expected version, success response, repeat response, stale response, audit event, and outbox effect. Define the organization catalog, declarative skills, Bot selection, reviewed code-execution profile, live-confirmation slot, run and Sandbox-capacity slots, and a versioned optional manifest-extension envelope before freezing D1 tables. Do not add artifact tables yet. Use disposable, non-migration D1 SQL fixtures to prove guarded create, gateway reservation, Sandbox capacity, and audit-head contention before schema freeze. These probe tables are test evidence, not product schema. Run the other core gates and fix the literal connector, model route, Sandbox profile, and jurisdiction values. After every freeze gate passes, promote the reviewed operations into the D1 Drizzle schema, committed migrations, native DO migrations, guarded stores, and typed destroy cleanup. The threat model names each asset, attacker, entry point, control, residual risk, test, and operator-visible failure state. Implement only D1. PostgreSQL and MySQL remain contract targets, not code yet.
 
-Check empty migration, fixture upgrade, both deployed D1 create/revoke histories, two-writer model, provider-tool, and code reservations, cross-account foreign keys, duplicate idempotency keys, Sandbox-capacity contention, audit-head contention, DO migration and tombstone replay, Queue send-before-mark crash, DLQ replay, and every numeric limit. Add direct contracts for one live confirmation, concurrent slot claim, run-bound slot release, Sandbox destroy-bound capacity release, status projection at a fixed `as_of_ms`, normalized search, cursor stability, poll views, dependency-specific catalog fences, skill dependency denial, code-profile denial, cross-deployment denial, and an unrelated Bot that remains runnable after another catalog entry is disabled.
+Before schema freeze, run both deployed D1 create/revoke histories, two-writer model, provider-tool, and code reservations, Sandbox-capacity contention, and audit-head contention against disposable probe tables. After promotion, check the empty migration, fixture upgrade, cross-account foreign keys, duplicate idempotency keys, DO migration and tombstone replay, Queue send-before-mark crash, DLQ replay, and every numeric limit. Add direct contracts for one live confirmation, concurrent slot claim, run-bound slot release, Sandbox destroy-bound capacity release, status projection at a fixed `as_of_ms`, normalized search, cursor stability, poll views, dependency-specific catalog fences, skill dependency denial, code-profile denial, cross-deployment denial, and an unrelated Bot that remains runnable after another catalog entry is disabled.
 
 Done when every D1 core gate closes, the six literal connector and route values are committed, and the later database and R2 gates have a named owner and deny result. Item 3 cannot start while a core shared-contract assumption remains implicit.
 

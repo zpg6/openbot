@@ -2,7 +2,7 @@
 
 This record separates public documentation, local repository observations, and deployed probes. A documentation row can justify a design. It cannot close a gate that calls for a real account, concurrent writers, a platform restart, or an observed vendor response.
 
-- Evidence date: 2026-08-22
+- Evidence date: 2026-08-23
 - Item 2 status: blocked
 - Candidate Sandbox data: server-seeded synthetic probe bytes only
 - Enabled Sandbox data ceiling: public, synthetic, or organization; restricted and unknown deny
@@ -10,19 +10,20 @@ This record separates public documentation, local repository observations, and d
 
 ## Gate register
 
-| Gate                  | Owner                    | Documentation status                                               | Deployed status                                            | Deny result                        |
-| --------------------- | ------------------------ | ------------------------------------------------------------------ | ---------------------------------------------------------- | ---------------------------------- |
-| First connector       | vendor integration owner | Metorial session filters are documented                            | No connector selected and no account probe exists          | `connector_evidence_incomplete`    |
-| D1 guarded create     | database owner           | Transactional `batch()` behavior is documented                     | Two-writer histories not run                               | `control_store_unverified`         |
-| Gateway reservation   | capability gateway owner | No vendor fact can prove the OpenBot protocol                      | Concurrent deployed probe not run                          | `gateway_reservation_unverified`   |
-| Metorial provisioning | vendor integration owner | Session creation is documented                                     | Ambiguous-create reconciliation not run                    | `metorial_provisioning_unverified` |
-| Metorial cleanup      | vendor integration owner | Multiple connections per session are documented                    | Second-client cleanup probe not run                        | Claim only local gateway denial    |
-| OpenRouter route      | vendor integration owner | One candidate model and provider are recorded below                | Real completion, metadata, key, and budget probes not run  | `model_route_unverified`           |
-| Sandbox execution     | runtime owner            | Isolation, lifecycle, egress, placement, and limits are documented | Candidate only; DNS and other deployed probes have not run | `code_execution_unverified`        |
-| D1 Better Auth        | identity owner           | SQLite Drizzle adapter and database rate limits are documented     | Closed-registration and session probes not run             | `identity_store_unverified`        |
-| R2 artifact workspace | artifact owner           | Not evaluated for release                                          | Deferred by decision                                       | `artifact_workspace_not_enabled`   |
-| PostgreSQL profile    | database owner           | Drizzle and Better Auth support the dialect                        | No profile package or deployed origin                      | `database_profile_unsupported`     |
-| MySQL profile         | database owner           | Drizzle and Better Auth support the dialect                        | No profile package or deployed origin                      | `database_profile_unsupported`     |
+| Gate                  | Owner                    | Documentation status                                               | Deployed status                                                                  | Deny result                        |
+| --------------------- | ------------------------ | ------------------------------------------------------------------ | -------------------------------------------------------------------------------- | ---------------------------------- |
+| First connector       | vendor integration owner | Metorial Search is a documented probe candidate                    | No pinned deployment, literal tool, or account probe exists                      | `connector_evidence_incomplete`    |
+| D1 guarded create     | database owner           | Transactional `batch()` behavior is documented                     | Two-writer histories not run                                                     | `control_store_unverified`         |
+| Gateway reservation   | capability gateway owner | No vendor fact can prove the OpenBot protocol                      | Concurrent deployed probe not run                                                | `gateway_reservation_unverified`   |
+| Metorial provisioning | vendor integration owner | Session creation is documented                                     | Ambiguous-create reconciliation not run                                          | `metorial_provisioning_unverified` |
+| Metorial cleanup      | vendor integration owner | Multiple connections per session are documented                    | Second-client cleanup probe not run                                              | Claim only local gateway denial    |
+| OpenRouter route      | vendor integration owner | One candidate model and provider are recorded below                | Real completion, metadata, key, and budget probes not run                        | `model_route_unverified`           |
+| Runtime wire protocol | runtime owner            | Local request and frame contracts exist                            | Restart, replay, import acknowledgement, and private-route preview probe not run | `runtime_protocol_unverified`      |
+| Sandbox execution     | runtime owner            | Isolation, lifecycle, egress, placement, and limits are documented | Candidate only; DNS and other deployed probes have not run                       | `code_execution_unverified`        |
+| D1 Better Auth        | identity owner           | SQLite Drizzle adapter and database rate limits are documented     | Closed-registration and session probes not run                                   | `identity_store_unverified`        |
+| R2 artifact workspace | artifact owner           | Not evaluated for release                                          | Deferred by decision                                                             | `artifact_workspace_not_enabled`   |
+| PostgreSQL profile    | database owner           | Drizzle and Better Auth support the dialect                        | No profile package or deployed origin                                            | `database_profile_unsupported`     |
+| MySQL profile         | database owner           | Drizzle and Better Auth support the dialect                        | No profile package or deployed origin                                            | `database_profile_unsupported`     |
 
 ## Metorial
 
@@ -53,7 +54,11 @@ Metorial's catalog advertises more than 1,000 integrations, but catalog breadth 
 
 ### Adoption result
 
-No connector is selected. The literal connector fixture records the missing fields. The vendor integration owner must use a dedicated test account or synthetic provider, capture provider readback with a pinned `Metorial-Version` header, classify every tool field and effect, and execute two independent MCP calls. Unsupported resource mapping denies.
+`metorial-search` is the first probe candidate because Metorial documents it as requiring no operator-supplied provider auth config. It is a public-web reader, not an organization-resource connector. The candidate therefore uses the `global_public_read_only` resource rule and admits only public or synthetic probe input. It cannot serve the normal owner-prompt path. It remains blocked until a dedicated Metorial environment supplies a pinned deployment, one literal query-only tool key, canonical input and output schema digests, read-only tag readback, bounded results, two independent MCP calls, and cleanup observations.
+
+An organization connector uses the separate `connector_specific` resource rule. Metorial resource URI filters select MCP resources; they do not prove that a tool argument is limited to one repository, mailbox, drive, channel, or account. That proof requires a reviewed argument mapper plus provider-side enforcement and a sibling-target denial. An unsupported mapping returns `resource_scope_unsupported` before session creation.
+
+The management probe sends `Metorial-Version: 2026-01-01-magnetar` and records the exact observed SDK and generated-client versions. The current official package tree declares `metorial@3.0.9`, `@metorial/sdk@3.0.9`, and `@metorial/generated@3.0.2`. These are research observations, not installed dependencies or product authority. The probe must verify the exact resolved package integrity before use.
 
 The cleanup probe must create a second client before cleanup, request cleanup, and then show what that second client can do. Until it passes, OpenBot may say that its gateway denied later calls. It may not say Metorial revoked the bearer URL.
 

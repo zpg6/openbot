@@ -28,4 +28,6 @@ This is a probe candidate, not a released route. A real request must still prove
 
 ## Connector result
 
-No first Metorial connector is selected. Public Metorial documentation proves that sessions accept per-provider tool allowlists and return an MCP connection URL. It does not publish an installation's deployment ID, pinned provider version, exact tool keys, canonical schemas, resource mapping, incidental effects, result limits, or cleanup behavior. The first-connector gate returns `connector_evidence_incomplete`.
+Metorial Search is the blocked first probe candidate because it requires no operator-supplied provider auth config and reads public web data. Public documentation proves that sessions accept per-provider tool allowlists and return an MCP connection URL. It does not publish an installation's deployment ID, pinned provider version, exact tool keys, canonical schemas, result limits, or cleanup behavior. A dedicated environment must supply those literals and two independent MCP calls before the candidate can pass. The candidate admits only public or synthetic probe input and cannot serve the normal owner-prompt path. The first-connector gate still returns `connector_evidence_incomplete`.
+
+The candidate uses the `global_public_read_only` resource rule. It cannot admit organization data or claim resource-level isolation. Other connectors require a `connector_specific` rule with a reviewed argument mapper, provider enforcement, and a sibling-target denial. Metorial resource URI filters alone do not satisfy that rule.

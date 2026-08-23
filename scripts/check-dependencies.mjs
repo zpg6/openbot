@@ -97,6 +97,9 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
         if (file.startsWith("apps/control-plane/") && specifier === "@openbot/contracts/internal") {
             errors.push(`${file}: the public control plane may import only route-safe OpenBot contracts`);
         }
+        if (specifier === "@openbot/gate-evidence/internal" && !file.startsWith("packages/gate-evidence/")) {
+            errors.push(`${file}: untrusted probe reports cannot enter application authority code`);
+        }
         if (specifier === "drizzle-orm" || specifier.startsWith("drizzle-orm/")) {
             const allowedD1Imports = new Set([
                 "drizzle-orm/d1/driver",

@@ -10,3 +10,4 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 - TypeScript repository foundation, core contracts, and public project documentation.
 - Cloudflare Workers tests use the current Vitest plugin package.
 - First-release JavaScript execution contracts for one run-owned Cloudflare Sandbox, with separate compute grants, private runner protocols, strict limits, and explicit cleanup state.
+- Strict untrusted Item 2 probe-report contracts and recorded blocker inspection, with no gate-promotion authority.

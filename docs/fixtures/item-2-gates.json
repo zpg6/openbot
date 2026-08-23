@@ -1,6 +1,6 @@
 {
     "schema_version": 1,
-    "recorded_date": "2026-08-22",
+    "recorded_date": "2026-08-23",
     "item": 2,
     "status": "blocked",
     "rules": {
@@ -15,12 +15,12 @@
             "status": "blocked",
             "deny_code": "connector_evidence_incomplete",
             "missing": [
-                "provider_deployment_id",
-                "pinned_provider_version",
-                "oauth_scope_or_synthetic_setup",
+                "provider_deployment_id_hmac",
+                "pinned_provider_version_hmac",
+                "auth_setup_or_dedicated_probe_input",
                 "literal_tool_keys",
                 "canonical_schema_digests",
-                "resource_mapping",
+                "resource_rule_evidence",
                 "incidental_effects",
                 "result_limits",
                 "two_independent_mcp_calls"
@@ -56,6 +56,12 @@
             "owner": "vendor_integration_owner",
             "status": "candidate_documented_probe_not_run",
             "deny_code": "model_route_unverified"
+        },
+        {
+            "id": "runtime_wire_protocol",
+            "owner": "runtime_owner",
+            "status": "not_run",
+            "deny_code": "runtime_protocol_unverified"
         },
         {
             "id": "sandbox_execution",
