@@ -8,8 +8,12 @@ import {
 } from "./canonical.js";
 import {
     CONNECTOR_COMMON_CHECK_IDS_V1,
+    D1_GUARDED_CREATE_CHECK_IDS_V1,
+    GATEWAY_RESERVATION_CHECK_IDS_V1,
     ITEM2_MAX_REPORT_TTL_MS_V1,
     UntrustedConnectorProbeReportV1Schema,
+    UntrustedD1GuardedCreateProbeReportV1Schema,
+    UntrustedGatewayReservationProbeReportV1Schema,
 } from "./contracts.js";
 
 const hex = (character: string): string => character.repeat(64);
@@ -34,11 +38,11 @@ const common = {
     valid_until: validUntil,
 };
 
-const transcript = (checkId: string, index: number) => ({
+const transcript = (checkId: string, index: number, gateId = "first_connector") => ({
     commitment_algorithm: "hmac-sha256-v1" as const,
     commitment_key_id_digest: common.commitment_key_id_digest,
     reference_commitment: index.toString(16).padStart(64, "0"),
-    gate_id: "first_connector" as const,
+    gate_id: gateId,
     check_id: checkId,
     configuration_digest: common.configuration_digest,
     installation_digest: common.installation_digest,
@@ -51,12 +55,22 @@ const transcript = (checkId: string, index: number) => ({
     redacted_fields: ["authorization"] as const,
 });
 
-const checks = (ids: readonly string[]) =>
+const checks = (ids: readonly string[], gateId = "first_connector") =>
     ids.map((check_id, index) => ({
         check_id,
         outcome: "passed" as const,
-        transcript_commitments: [transcript(check_id, index + 1)],
+        transcript_commitments: [transcript(check_id, index + 1, gateId)],
     }));
+
+const setCheckOutcome = (
+    report: { checks: Array<{ check_id: string }> },
+    checkId: string,
+    outcome: "failed" | "inconclusive"
+): void => {
+    const check = report.checks.find(candidate => candidate.check_id === checkId);
+    if (check === undefined) throw new Error(`Missing test check ${checkId}`);
+    Object.assign(check, { outcome });
+};
 
 const globalChecks = [
     ...CONNECTOR_COMMON_CHECK_IDS_V1,
@@ -160,6 +174,170 @@ describe("untrusted probe reports", () => {
     it("accepts both global-public and connector-specific report shapes", () => {
         expect(UntrustedConnectorProbeReportV1Schema.safeParse(connectorReport("global")).success).toBe(true);
         expect(UntrustedConnectorProbeReportV1Schema.safeParse(connectorReport("specific")).success).toBe(true);
+    });
+
+    it("requires typed deployed observations for every D1 schema-freeze check", () => {
+        const deployment = {
+            platform: "cloudflare_d1_deployed" as const,
+            database_id_commitment: hex("a"),
+            writer_a_database_id_commitment: hex("a"),
+            writer_b_database_id_commitment: hex("a"),
+            sink_database_id_commitment: hex("a"),
+            compatibility_date: "2026-08-22",
+            read_replication_enabled: true as const,
+            read_replication_setting_digest: hex("b"),
+            served_by_primary_observed: true as const,
+            writer_a_script_commitment: hex("c"),
+            writer_a_version_commitment: hex("d"),
+            writer_b_script_commitment: hex("e"),
+            writer_b_version_commitment: hex("f"),
+            sink_script_commitment: hex("8"),
+            sink_version_commitment: hex("9"),
+            first_primary_decisive_readback: true as const,
+        };
+        const guarded = {
+            ...common,
+            kind: "d1_guarded_create" as const,
+            deployment,
+            observations: {
+                histories: [
+                    "create_first",
+                    "revoke_first",
+                    "equal_release_race",
+                    "equal_release_race_roles_swapped",
+                ].map((historyCase, index) => ({
+                    case: historyCase,
+                    observed_history: index === 1 ? "revoke_before_create" : "create_before_revoke",
+                    authority_state: "revoked",
+                    confirmation_state: index === 1 ? "discarded" : "consumed",
+                    live_confirmation_slot: "clear",
+                    run_rows: index === 1 ? 0 : 1,
+                    assertion_rows: index === 1 ? 0 : 1,
+                    cancellation_requested_rows: index === 1 ? 0 : 1,
+                    cancellation_outbox_rows: index === 1 ? 0 : 1,
+                })),
+                capacity: {
+                    contenders: 5,
+                    committed_claims: 4,
+                    denied_claims: 1,
+                    releases_before_destroy_observation: 0,
+                    releases_after_exact_destroy_observation: 1,
+                    duplicate_release_state_changes: 0,
+                },
+                audit: {
+                    same_head_contenders: 2,
+                    first_phase_commits: 1,
+                    first_phase_conflicts: 1,
+                    follow_up_commits: 1,
+                    final_event_rows: 2,
+                    final_head_sequence: 2,
+                    final_chain_verified: true,
+                },
+            },
+            checks: checks(D1_GUARDED_CREATE_CHECK_IDS_V1, "d1_guarded_create"),
+        };
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(guarded).success).toBe(true);
+        const missingCapacity = structuredClone(guarded) as Record<string, unknown>;
+        delete (missingCapacity["observations"] as Record<string, unknown>)["capacity"];
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(missingCapacity).success).toBe(false);
+
+        const gateway = {
+            ...common,
+            kind: "gateway_reservation" as const,
+            deployment,
+            observations: {
+                call_kinds: ["model", "provider_tool", "code"].map(callKind => ({
+                    call_kind: callKind,
+                    normal: {
+                        spent_reservations: 1,
+                        sink_receipts: 1,
+                        winning_dispatches: 1,
+                        losing_dispatches: 0,
+                    },
+                    changed_digest: { dispatches: 0 },
+                    reserve_then_crash: {
+                        spent_reservations: 1,
+                        sink_receipts: 0,
+                        result: "outcome_unknown",
+                        retry_attempts: 0,
+                    },
+                    dispatch_response_lost: {
+                        spent_reservations: 1,
+                        sink_receipts: 1,
+                        result: "outcome_unknown",
+                        retry_attempts: 0,
+                    },
+                })),
+            },
+            checks: checks(GATEWAY_RESERVATION_CHECK_IDS_V1, "gateway_reservation"),
+        };
+        expect(UntrustedGatewayReservationProbeReportV1Schema.safeParse(gateway).success).toBe(true);
+        const missingCode = structuredClone(gateway);
+        missingCode.observations.call_kinds.pop();
+        expect(UntrustedGatewayReservationProbeReportV1Schema.safeParse(missingCode).success).toBe(false);
+
+        const duplicateDeployment = structuredClone(guarded);
+        duplicateDeployment.deployment.writer_b_script_commitment =
+            duplicateDeployment.deployment.writer_a_script_commitment;
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(duplicateDeployment).success).toBe(false);
+        const duplicateDeploymentVersion = structuredClone(guarded);
+        duplicateDeploymentVersion.deployment.sink_version_commitment =
+            duplicateDeploymentVersion.deployment.writer_a_version_commitment;
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(duplicateDeploymentVersion).success).toBe(false);
+        const mismatchedDatabase = structuredClone(guarded);
+        mismatchedDatabase.deployment.writer_b_database_id_commitment = hex("1");
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(mismatchedDatabase).success).toBe(false);
+
+        const absentPrimaryObservation = structuredClone(guarded) as Record<string, unknown>;
+        delete (absentPrimaryObservation["deployment"] as Record<string, unknown>)["served_by_primary_observed"];
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(absentPrimaryObservation).success).toBe(false);
+
+        const falsePrimaryObservation = structuredClone(guarded) as Record<string, unknown>;
+        (falsePrimaryObservation["deployment"] as Record<string, unknown>)["served_by_primary_observed"] = false;
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(falsePrimaryObservation).success).toBe(false);
+
+        const invalidForcedHistory = structuredClone(guarded);
+        invalidForcedHistory.observations.histories[0]!.observed_history = "revoke_before_create";
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(invalidForcedHistory).success).toBe(false);
+        setCheckOutcome(invalidForcedHistory, "create_linearizes_first", "failed");
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(invalidForcedHistory).success).toBe(true);
+
+        const invalidConfirmationState = structuredClone(guarded);
+        invalidConfirmationState.observations.histories[0]!.confirmation_state = "discarded";
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(invalidConfirmationState).success).toBe(false);
+        setCheckOutcome(invalidConfirmationState, "create_linearizes_first", "failed");
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(invalidConfirmationState).success).toBe(true);
+
+        const occupiedConfirmationSlot = structuredClone(guarded);
+        occupiedConfirmationSlot.observations.histories[1]!.live_confirmation_slot = "present";
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(occupiedConfirmationSlot).success).toBe(false);
+        setCheckOutcome(occupiedConfirmationSlot, "revoke_linearizes_first", "inconclusive");
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(occupiedConfirmationSlot).success).toBe(true);
+
+        const invalidCapacity = structuredClone(guarded);
+        invalidCapacity.observations.capacity.committed_claims = 3;
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(invalidCapacity).success).toBe(false);
+        setCheckOutcome(invalidCapacity, "sandbox_capacity_contention", "inconclusive");
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(invalidCapacity).success).toBe(true);
+
+        const invalidAudit = structuredClone(guarded);
+        invalidAudit.observations.audit.final_chain_verified = false;
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(invalidAudit).success).toBe(false);
+        setCheckOutcome(invalidAudit, "audit_head_contention", "failed");
+        expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(invalidAudit).success).toBe(true);
+
+        const invalidGatewayNormal = structuredClone(gateway);
+        invalidGatewayNormal.observations.call_kinds[0]!.normal.sink_receipts = 2;
+        expect(UntrustedGatewayReservationProbeReportV1Schema.safeParse(invalidGatewayNormal).success).toBe(false);
+        setCheckOutcome(invalidGatewayNormal, "model_duplicate_sequence", "failed");
+        setCheckOutcome(invalidGatewayNormal, "one_outbound_request_per_kind", "failed");
+        expect(UntrustedGatewayReservationProbeReportV1Schema.safeParse(invalidGatewayNormal).success).toBe(true);
+
+        const invalidGatewayFault = structuredClone(gateway);
+        invalidGatewayFault.observations.call_kinds[2]!.reserve_then_crash.sink_receipts = 1;
+        expect(UntrustedGatewayReservationProbeReportV1Schema.safeParse(invalidGatewayFault).success).toBe(false);
+        setCheckOutcome(invalidGatewayFault, "reserve_then_crash_not_redispatched", "inconclusive");
+        expect(UntrustedGatewayReservationProbeReportV1Schema.safeParse(invalidGatewayFault).success).toBe(true);
     });
 
     it("requires credential-free global tools, one resource-rule family, and the 128 KiB result limit", () => {

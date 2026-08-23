@@ -1,0 +1,26 @@
+{
+    "name": "@openbot/d1-probes",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "exports": {
+        "./internal": {
+            "types": "./dist/internal.d.ts",
+            "default": "./src/internal.ts"
+        }
+    },
+    "scripts": {
+        "typecheck": "tsc -b --pretty false && tsc --project tsconfig.test.json --noEmit --pretty false",
+        "test": "vitest run --root ../.. packages/d1-probes/src/scope.node.test.ts && vitest run --config vitest.config.ts"
+    },
+    "devDependencies": {
+        "@cloudflare/vitest-plugin": "catalog:",
+        "@cloudflare/workers-types": "catalog:",
+        "@types/node": "catalog:",
+        "@vitest/runner": "catalog:",
+        "@vitest/snapshot": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+        "wrangler": "catalog:"
+    }
+}

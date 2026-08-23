@@ -15,6 +15,12 @@ catalogs:
     '@types/node':
       specifier: 22.19.21
       version: 22.19.21
+    '@vitest/runner':
+      specifier: 4.1.11
+      version: 4.1.11
+    '@vitest/snapshot':
+      specifier: 4.1.11
+      version: 4.1.11
     drizzle-kit:
       specifier: 0.31.10
       version: 0.31.10
@@ -53,6 +59,9 @@ importers:
       '@cloudflare/workers-types':
         specifier: 'catalog:'
         version: 5.20260820.1
+      '@openbot/gate-attestation':
+        specifier: workspace:*
+        version: link:packages/gate-attestation
       '@types/node':
         specifier: 'catalog:'
         version: 22.19.21
@@ -108,6 +117,33 @@ importers:
       vitest:
         specifier: 'catalog:'
         version: 4.1.11(@types/node@22.19.21)
+
+  packages/d1-probes:
+    devDependencies:
+      '@cloudflare/vitest-plugin':
+        specifier: 'catalog:'
+        version: 1.0.0(@cloudflare/workers-types@5.20260820.1)(@vitest/runner@4.1.11)(@vitest/snapshot@4.1.11)(vitest@4.1.11(@types/node@22.19.21))
+      '@cloudflare/workers-types':
+        specifier: 'catalog:'
+        version: 5.20260820.1
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.21
+      '@vitest/runner':
+        specifier: 'catalog:'
+        version: 4.1.11
+      '@vitest/snapshot':
+        specifier: 'catalog:'
+        version: 4.1.11
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@22.19.21)
+      wrangler:
+        specifier: 'catalog:'
+        version: 4.125.0(@cloudflare/workers-types@5.20260820.1)
 
   packages/db-d1:
     dependencies:

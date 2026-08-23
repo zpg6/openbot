@@ -56,12 +56,29 @@ function checkManifest(file, manifest, catalog) {
             if (name === "@cloudflare/sandbox") {
                 errors.push(`${file}: @cloudflare/sandbox is deferred until its adoption gate passes`);
             }
+            if (name === "@openbot/d1-probes" && !file.startsWith("packages/d1-probes/")) {
+                errors.push(`${file}: disposable D1 probe code cannot be a product or authority dependency`);
+            }
             if (typeof value !== "string" || !isExactDependency(value)) {
                 errors.push(`${file}: ${field}.${name} must use an exact version, catalog:, or workspace:`);
             } else if (value === "catalog:" && !catalog.has(name)) {
                 errors.push(`${file}: ${field}.${name} is missing from the workspace catalog`);
             }
         }
+    }
+}
+
+function checkD1ProbeImportBoundary(file, specifier) {
+    if (file.startsWith("packages/d1-probes/")) return;
+    const packageImport = specifier === "@openbot/d1-probes" || specifier.startsWith("@openbot/d1-probes/");
+    const relativeImport = specifier.startsWith(".");
+    const resolvedImport = relativeImport ? path.resolve(path.dirname(file), specifier) : null;
+    const probeRoot = path.resolve("packages/d1-probes");
+    const resolvesIntoProbePackage =
+        resolvedImport !== null &&
+        (resolvedImport === probeRoot || resolvedImport.startsWith(`${probeRoot}${path.sep}`));
+    if (packageImport || resolvesIntoProbePackage) {
+        errors.push(`${file}: disposable D1 probe operations cannot enter product or authority code`);
     }
 }
 
@@ -86,6 +103,24 @@ if (errors.length !== beforeCatalogSelfTest + 1) {
     errors.push("catalog pinning self-test did not reject a range");
 }
 errors.splice(beforeCatalogSelfTest, 1);
+
+const beforeProbeManifestSelfTest = errors.length;
+checkManifest(
+    "apps/<self-test>/package.json",
+    { dependencies: { "@openbot/d1-probes": "workspace:*" } },
+    workspaceCatalog
+);
+if (errors.length !== beforeProbeManifestSelfTest + 1) {
+    errors.push("D1 probe manifest-boundary self-test did not reject a product dependency");
+}
+errors.splice(beforeProbeManifestSelfTest, 1);
+
+const beforeProbeImportSelfTest = errors.length;
+checkD1ProbeImportBoundary("apps/<self-test>/entry.ts", "../../packages/d1-probes/src/protocol.ts");
+if (errors.length !== beforeProbeImportSelfTest + 1) {
+    errors.push("D1 probe import-boundary self-test did not reject a relative product import");
+}
+errors.splice(beforeProbeImportSelfTest, 1);
 
 const forbiddenFiles = files.filter(file => /(?:entry\.(?:mysql|postgres)\.ts|artifact-gateway)/u.test(file));
 for (const file of forbiddenFiles) errors.push(`${file}: deferred profile or artifact entrypoint exists`);
@@ -118,6 +153,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
         ) {
             errors.push(`${file}: the operator trust registry may be loaded only at the reviewed bootstrap boundary`);
         }
+        checkD1ProbeImportBoundary(file, specifier);
         if (specifier === "drizzle-orm" || specifier.startsWith("drizzle-orm/")) {
             const allowedD1Imports = new Set([
                 "drizzle-orm/d1/driver",

@@ -30,13 +30,33 @@
             "id": "d1_guarded_create",
             "owner": "database_owner",
             "status": "not_run",
-            "deny_code": "control_store_unverified"
+            "deny_code": "control_store_unverified",
+            "required_checks": [
+                "revoke_linearizes_first",
+                "create_linearizes_first",
+                "concurrent_history_is_legal",
+                "two_independent_writers",
+                "sandbox_capacity_contention",
+                "destroy_observed_capacity_release",
+                "audit_head_contention"
+            ]
         },
         {
             "id": "gateway_reservation",
             "owner": "capability_gateway_owner",
             "status": "not_run",
-            "deny_code": "gateway_reservation_unverified"
+            "deny_code": "gateway_reservation_unverified",
+            "required_checks": [
+                "model_duplicate_sequence",
+                "provider_tool_duplicate_sequence",
+                "code_duplicate_sequence",
+                "one_outbound_request_per_kind",
+                "one_spent_reservation_per_kind",
+                "changed_digest_denied",
+                "reserve_then_crash_not_redispatched",
+                "dispatch_response_lost_not_redispatched",
+                "two_independent_writers"
+            ]
         },
         {
             "id": "metorial_provisioning",

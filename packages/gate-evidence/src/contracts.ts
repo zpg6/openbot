@@ -152,11 +152,20 @@ const refineReport = <
     }
 };
 
-const reportSchema = <T extends Item2GateIdV1, U extends readonly [string, ...string[]]>(kind: T, checkIds: U) => {
+const reportSchema = <
+    T extends Item2GateIdV1,
+    U extends readonly [string, ...string[]],
+    V extends Record<string, z.ZodType> = Record<string, never>,
+>(
+    kind: T,
+    checkIds: U,
+    extraFields: V = {} as V
+) => {
     const checkId = z.enum(checkIds);
     return z
         .object({
             ...commonFields,
+            ...extraFields,
             kind: z.literal(kind),
             checks: z
                 .array(checkResult(checkId))
@@ -167,7 +176,9 @@ const reportSchema = <T extends Item2GateIdV1, U extends readonly [string, ...st
                 ),
         })
         .strict()
-        .superRefine(refineReport);
+        .superRefine((report, context) => {
+            refineReport(report as unknown as Parameters<typeof refineReport>[0], context);
+        });
 };
 
 export const CONNECTOR_COMMON_CHECK_IDS_V1 = [
@@ -291,16 +302,368 @@ export const UntrustedConnectorProbeReportV1Schema = z
         }
     });
 
-export const UntrustedD1GuardedCreateProbeReportV1Schema = reportSchema("d1_guarded_create", [
+const D1DeploymentCommitmentV1Schema = z
+    .object({
+        platform: z.literal("cloudflare_d1_deployed"),
+        database_id_commitment: Item2DigestV1Schema,
+        writer_a_database_id_commitment: Item2DigestV1Schema,
+        writer_b_database_id_commitment: Item2DigestV1Schema,
+        sink_database_id_commitment: Item2DigestV1Schema,
+        compatibility_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+        read_replication_enabled: z.literal(true),
+        read_replication_setting_digest: Item2DigestV1Schema,
+        served_by_primary_observed: z.literal(true),
+        writer_a_script_commitment: Item2DigestV1Schema,
+        writer_a_version_commitment: Item2DigestV1Schema,
+        writer_b_script_commitment: Item2DigestV1Schema,
+        writer_b_version_commitment: Item2DigestV1Schema,
+        sink_script_commitment: Item2DigestV1Schema,
+        sink_version_commitment: Item2DigestV1Schema,
+        first_primary_decisive_readback: z.literal(true),
+    })
+    .strict()
+    .superRefine((deployment, context) => {
+        if (
+            deployment.writer_a_database_id_commitment !== deployment.database_id_commitment ||
+            deployment.writer_b_database_id_commitment !== deployment.database_id_commitment ||
+            deployment.sink_database_id_commitment !== deployment.database_id_commitment
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["database_id_commitment"],
+                message: "Every D1 probe Worker must bind the same disposable database",
+            });
+        }
+        const scriptCommitments = [
+            deployment.writer_a_script_commitment,
+            deployment.writer_b_script_commitment,
+            deployment.sink_script_commitment,
+        ];
+        if (new Set(scriptCommitments).size !== scriptCommitments.length) {
+            context.addIssue({
+                code: "custom",
+                path: ["writer_b_script_commitment"],
+                message: "D1 probe Workers must use distinct script identities",
+            });
+        }
+        const versionCommitments = [
+            deployment.writer_a_version_commitment,
+            deployment.writer_b_version_commitment,
+            deployment.sink_version_commitment,
+        ];
+        if (new Set(versionCommitments).size !== versionCommitments.length) {
+            context.addIssue({
+                code: "custom",
+                path: ["writer_b_version_commitment"],
+                message: "D1 probe Workers must use distinct deployment versions",
+            });
+        }
+    });
+
+const BoundedProbeCountV1Schema = z.number().int().nonnegative().max(64);
+const GuardedHistoryObservationV1Schema = z
+    .object({
+        case: z.enum(["create_first", "revoke_first", "equal_release_race", "equal_release_race_roles_swapped"]),
+        observed_history: z.enum(["create_before_revoke", "revoke_before_create", "inconclusive", "invalid"]),
+        authority_state: z.enum(["active", "revoked", "missing", "inconclusive"]),
+        confirmation_state: z.enum(["consumed", "discarded", "inconclusive", "invalid"]),
+        live_confirmation_slot: z.enum(["clear", "present", "inconclusive", "invalid"]),
+        run_rows: BoundedProbeCountV1Schema,
+        assertion_rows: BoundedProbeCountV1Schema,
+        cancellation_requested_rows: BoundedProbeCountV1Schema,
+        cancellation_outbox_rows: BoundedProbeCountV1Schema,
+    })
+    .strict();
+const D1GuardedCreateObservationsV1Schema = z
+    .object({
+        histories: z
+            .array(GuardedHistoryObservationV1Schema)
+            .length(4)
+            .refine(values => new Set(values.map(value => value.case)).size === 4, "History cases must be unique"),
+        capacity: z
+            .object({
+                contenders: BoundedProbeCountV1Schema,
+                committed_claims: BoundedProbeCountV1Schema,
+                denied_claims: BoundedProbeCountV1Schema,
+                releases_before_destroy_observation: BoundedProbeCountV1Schema,
+                releases_after_exact_destroy_observation: BoundedProbeCountV1Schema,
+                duplicate_release_state_changes: BoundedProbeCountV1Schema,
+            })
+            .strict(),
+        audit: z
+            .object({
+                same_head_contenders: BoundedProbeCountV1Schema,
+                first_phase_commits: BoundedProbeCountV1Schema,
+                first_phase_conflicts: BoundedProbeCountV1Schema,
+                follow_up_commits: BoundedProbeCountV1Schema,
+                final_event_rows: BoundedProbeCountV1Schema,
+                final_head_sequence: BoundedProbeCountV1Schema,
+                final_chain_verified: z.boolean(),
+            })
+            .strict(),
+    })
+    .strict();
+
+const GatewayCallKindObservationV1Schema = z
+    .object({
+        call_kind: z.enum(["model", "provider_tool", "code"]),
+        normal: z
+            .object({
+                spent_reservations: BoundedProbeCountV1Schema,
+                sink_receipts: BoundedProbeCountV1Schema,
+                winning_dispatches: BoundedProbeCountV1Schema,
+                losing_dispatches: BoundedProbeCountV1Schema,
+            })
+            .strict(),
+        changed_digest: z.object({ dispatches: BoundedProbeCountV1Schema }).strict(),
+        reserve_then_crash: z
+            .object({
+                spent_reservations: BoundedProbeCountV1Schema,
+                sink_receipts: BoundedProbeCountV1Schema,
+                result: z.enum(["outcome_unknown", "inconclusive", "invalid"]),
+                retry_attempts: BoundedProbeCountV1Schema,
+            })
+            .strict(),
+        dispatch_response_lost: z
+            .object({
+                spent_reservations: BoundedProbeCountV1Schema,
+                sink_receipts: BoundedProbeCountV1Schema,
+                result: z.enum(["outcome_unknown", "inconclusive", "invalid"]),
+                retry_attempts: BoundedProbeCountV1Schema,
+            })
+            .strict(),
+    })
+    .strict();
+const GatewayReservationObservationsV1Schema = z
+    .object({
+        call_kinds: z
+            .array(GatewayCallKindObservationV1Schema)
+            .length(3)
+            .refine(values => new Set(values.map(value => value.call_kind)).size === 3, "Call kinds must be unique"),
+    })
+    .strict();
+
+type ProbeCheckObservationV1 = {
+    check_id: string;
+    outcome: z.infer<typeof UntrustedProbeOutcomeV1Schema>;
+};
+
+function checkPassed(checks: readonly ProbeCheckObservationV1[], checkId: string): boolean {
+    return checks.find(check => check.check_id === checkId)?.outcome === "passed";
+}
+
+function guardedHistoryIs(
+    history: z.infer<typeof GuardedHistoryObservationV1Schema>,
+    expected: "create_before_revoke" | "revoke_before_create"
+): boolean {
+    if (history.observed_history !== expected || history.authority_state !== "revoked") return false;
+    const confirmationState = expected === "create_before_revoke" ? "consumed" : "discarded";
+    if (history.confirmation_state !== confirmationState || history.live_confirmation_slot !== "clear") return false;
+    const count = expected === "create_before_revoke" ? 1 : 0;
+    return (
+        history.run_rows === count &&
+        history.assertion_rows === count &&
+        history.cancellation_requested_rows === count &&
+        history.cancellation_outbox_rows === count
+    );
+}
+
+function addPassedCheckIssue(context: z.RefinementCtx, checkId: string): void {
+    context.addIssue({
+        code: "custom",
+        path: ["checks"],
+        message: `Passed check ${checkId} contradicts its deployed observation`,
+    });
+}
+
+function refineD1GuardedCreateReport(
+    report: {
+        checks: readonly ProbeCheckObservationV1[];
+        observations: z.infer<typeof D1GuardedCreateObservationsV1Schema>;
+    },
+    context: z.RefinementCtx
+): void {
+    const histories = new Map(report.observations.histories.map(history => [history.case, history]));
+    const createFirst = histories.get("create_first");
+    if (
+        checkPassed(report.checks, "create_linearizes_first") &&
+        (createFirst === undefined || !guardedHistoryIs(createFirst, "create_before_revoke"))
+    ) {
+        addPassedCheckIssue(context, "create_linearizes_first");
+    }
+    const revokeFirst = histories.get("revoke_first");
+    if (
+        checkPassed(report.checks, "revoke_linearizes_first") &&
+        (revokeFirst === undefined || !guardedHistoryIs(revokeFirst, "revoke_before_create"))
+    ) {
+        addPassedCheckIssue(context, "revoke_linearizes_first");
+    }
+    if (checkPassed(report.checks, "concurrent_history_is_legal")) {
+        for (const raceCase of ["equal_release_race", "equal_release_race_roles_swapped"] as const) {
+            const history = histories.get(raceCase);
+            if (
+                history === undefined ||
+                (history.observed_history !== "create_before_revoke" &&
+                    history.observed_history !== "revoke_before_create") ||
+                !guardedHistoryIs(history, history.observed_history)
+            ) {
+                addPassedCheckIssue(context, "concurrent_history_is_legal");
+                break;
+            }
+        }
+    }
+    const capacity = report.observations.capacity;
+    if (
+        checkPassed(report.checks, "sandbox_capacity_contention") &&
+        !(capacity.contenders === 5 && capacity.committed_claims === 4 && capacity.denied_claims === 1)
+    ) {
+        addPassedCheckIssue(context, "sandbox_capacity_contention");
+    }
+    if (
+        checkPassed(report.checks, "destroy_observed_capacity_release") &&
+        !(
+            capacity.releases_before_destroy_observation === 0 &&
+            capacity.releases_after_exact_destroy_observation === 1 &&
+            capacity.duplicate_release_state_changes === 0
+        )
+    ) {
+        addPassedCheckIssue(context, "destroy_observed_capacity_release");
+    }
+    const audit = report.observations.audit;
+    if (
+        checkPassed(report.checks, "audit_head_contention") &&
+        !(
+            audit.same_head_contenders === 2 &&
+            audit.first_phase_commits === 1 &&
+            audit.first_phase_conflicts === 1 &&
+            audit.follow_up_commits === 1 &&
+            audit.final_event_rows === 2 &&
+            audit.final_head_sequence === 2 &&
+            audit.final_chain_verified
+        )
+    ) {
+        addPassedCheckIssue(context, "audit_head_contention");
+    }
+}
+
+function gatewayNormalIsExact(observation: z.infer<typeof GatewayCallKindObservationV1Schema>): boolean {
+    return (
+        observation.normal.spent_reservations === 1 &&
+        observation.normal.sink_receipts === 1 &&
+        observation.normal.winning_dispatches === 1 &&
+        observation.normal.losing_dispatches === 0
+    );
+}
+
+function refineGatewayReservationReport(
+    report: {
+        checks: readonly ProbeCheckObservationV1[];
+        observations: z.infer<typeof GatewayReservationObservationsV1Schema>;
+    },
+    context: z.RefinementCtx
+): void {
+    const observations = new Map(
+        report.observations.call_kinds.map(observation => [observation.call_kind, observation])
+    );
+    for (const callKind of ["model", "provider_tool", "code"] as const) {
+        const observation = observations.get(callKind);
+        if (
+            checkPassed(report.checks, `${callKind}_duplicate_sequence`) &&
+            (observation === undefined || !gatewayNormalIsExact(observation))
+        ) {
+            addPassedCheckIssue(context, `${callKind}_duplicate_sequence`);
+        }
+    }
+    if (
+        checkPassed(report.checks, "one_outbound_request_per_kind") &&
+        [...observations.values()].some(
+            observation =>
+                observation.normal.sink_receipts !== 1 ||
+                observation.normal.winning_dispatches !== 1 ||
+                observation.normal.losing_dispatches !== 0
+        )
+    ) {
+        addPassedCheckIssue(context, "one_outbound_request_per_kind");
+    }
+    if (
+        checkPassed(report.checks, "one_spent_reservation_per_kind") &&
+        [...observations.values()].some(observation => observation.normal.spent_reservations !== 1)
+    ) {
+        addPassedCheckIssue(context, "one_spent_reservation_per_kind");
+    }
+    if (
+        checkPassed(report.checks, "changed_digest_denied") &&
+        [...observations.values()].some(observation => observation.changed_digest.dispatches !== 0)
+    ) {
+        addPassedCheckIssue(context, "changed_digest_denied");
+    }
+    if (
+        checkPassed(report.checks, "reserve_then_crash_not_redispatched") &&
+        [...observations.values()].some(
+            observation =>
+                observation.reserve_then_crash.spent_reservations !== 1 ||
+                observation.reserve_then_crash.sink_receipts !== 0 ||
+                observation.reserve_then_crash.result !== "outcome_unknown" ||
+                observation.reserve_then_crash.retry_attempts !== 0
+        )
+    ) {
+        addPassedCheckIssue(context, "reserve_then_crash_not_redispatched");
+    }
+    if (
+        checkPassed(report.checks, "dispatch_response_lost_not_redispatched") &&
+        [...observations.values()].some(
+            observation =>
+                observation.dispatch_response_lost.spent_reservations !== 1 ||
+                observation.dispatch_response_lost.sink_receipts !== 1 ||
+                observation.dispatch_response_lost.result !== "outcome_unknown" ||
+                observation.dispatch_response_lost.retry_attempts !== 0
+        )
+    ) {
+        addPassedCheckIssue(context, "dispatch_response_lost_not_redispatched");
+    }
+}
+
+export const D1_GUARDED_CREATE_CHECK_IDS_V1 = [
     "revoke_linearizes_first",
     "create_linearizes_first",
+    "concurrent_history_is_legal",
     "two_independent_writers",
-] as const);
-export const UntrustedGatewayReservationProbeReportV1Schema = reportSchema("gateway_reservation", [
-    "concurrent_duplicate_sequence",
-    "one_outbound_request",
-    "one_spent_reservation",
-] as const);
+    "sandbox_capacity_contention",
+    "destroy_observed_capacity_release",
+    "audit_head_contention",
+] as const;
+export const GATEWAY_RESERVATION_CHECK_IDS_V1 = [
+    "model_duplicate_sequence",
+    "provider_tool_duplicate_sequence",
+    "code_duplicate_sequence",
+    "one_outbound_request_per_kind",
+    "one_spent_reservation_per_kind",
+    "changed_digest_denied",
+    "reserve_then_crash_not_redispatched",
+    "dispatch_response_lost_not_redispatched",
+    "two_independent_writers",
+] as const;
+
+export const UntrustedD1GuardedCreateProbeReportV1Schema = reportSchema(
+    "d1_guarded_create",
+    D1_GUARDED_CREATE_CHECK_IDS_V1,
+    {
+        deployment: D1DeploymentCommitmentV1Schema,
+        observations: D1GuardedCreateObservationsV1Schema,
+    }
+).superRefine((report, context) => {
+    refineD1GuardedCreateReport(report as unknown as Parameters<typeof refineD1GuardedCreateReport>[0], context);
+});
+export const UntrustedGatewayReservationProbeReportV1Schema = reportSchema(
+    "gateway_reservation",
+    GATEWAY_RESERVATION_CHECK_IDS_V1,
+    {
+        deployment: D1DeploymentCommitmentV1Schema,
+        observations: GatewayReservationObservationsV1Schema,
+    }
+).superRefine((report, context) => {
+    refineGatewayReservationReport(report as unknown as Parameters<typeof refineGatewayReservationReport>[0], context);
+});
 export const UntrustedMetorialProvisioningProbeReportV1Schema = reportSchema("metorial_provisioning", [
     "create_success",
     "ambiguous_create_reconciled",

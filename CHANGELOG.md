@@ -12,3 +12,4 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 - First-release JavaScript execution contracts for one run-owned Cloudflare Sandbox, with separate compute grants, private runner protocols, strict limits, and explicit cleanup state.
 - Strict untrusted Item 2 probe-report contracts and recorded blocker inspection, with no gate-promotion authority.
 - P-256 gate-attestation verification, shared-generation revocation, typed connector claims, and opaque Sandbox decisions. Raw reports and copied decisions cannot authorize execution.
+- Hermetic disposable-D1 protocol tests and a blocked deployed two-writer probe contract for guarded create, gateway reservation, Sandbox capacity, and audit contention.

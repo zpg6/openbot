@@ -4,6 +4,7 @@
         { "path": "./packages/contracts" },
         { "path": "./packages/domain" },
         { "path": "./packages/db-d1" },
+        { "path": "./packages/d1-probes" },
         { "path": "./packages/gate-attestation" },
         { "path": "./packages/gate-evidence" },
         { "path": "./packages/sandbox-protocol" },

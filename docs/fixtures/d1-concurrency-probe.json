@@ -1,0 +1,291 @@
+{
+    "schema_version": 1,
+    "kind": "d1_concurrency_probe_deployment_contract",
+    "recorded_date": "2026-08-23",
+    "status": "not_run",
+    "platform": "cloudflare_d1_deployed",
+    "authority": {
+        "fixture_is_evidence": false,
+        "local_or_miniflare_eligible": false,
+        "may_promote_gate": false,
+        "operator_attestation_required": true,
+        "gate_statuses": {
+            "d1_guarded_create": {
+                "status": "not_run",
+                "deny_code": "control_store_unverified"
+            },
+            "gateway_reservation": {
+                "status": "not_run",
+                "deny_code": "gateway_reservation_unverified"
+            }
+        }
+    },
+    "mutation_state": {
+        "cloudflare_resources_created": false,
+        "cloudflare_resources_changed": false,
+        "credentials_recorded": false,
+        "product_migrations_created": false,
+        "product_schema_changed": false,
+        "observations_recorded": false
+    },
+    "resource_rules": {
+        "generated_name_prefix": "openbot-d1-probe-",
+        "generated_name_pattern": "^openbot-d1-probe-[a-z0-9]{16}$",
+        "new_disposable_database_required": true,
+        "production_database_denied": true,
+        "synthetic_ids_and_payloads_only": true,
+        "returned_resource_ids_must_match_cleanup_ids": true
+    },
+    "deployment": {
+        "database": {
+            "count": 1,
+            "lifecycle": "new_disposable_then_delete",
+            "exact_database_id_commitment_required": true,
+            "same_exact_database_id_for_all_workers": true,
+            "read_replication_setting_required": true,
+            "read_replication": "enabled",
+            "probe_sql_location": "ephemeral_non_migration_setup",
+            "product_tables_allowed": false
+        },
+        "workers": [
+            {
+                "role": "writer_a",
+                "separate_script": true,
+                "script_id_commitment_required": true,
+                "version_id_commitment_required": true,
+                "exact_database_binding_required": true,
+                "trigger": "separate_operator_process_over_access_protected_https"
+            },
+            {
+                "role": "writer_b",
+                "separate_script": true,
+                "script_id_commitment_required": true,
+                "version_id_commitment_required": true,
+                "exact_database_binding_required": true,
+                "trigger": "separate_operator_process_over_access_protected_https"
+            },
+            {
+                "role": "sink_readback",
+                "separate_script": true,
+                "script_id_commitment_required": true,
+                "version_id_commitment_required": true,
+                "exact_database_binding_required": true,
+                "trigger": "private_service_binding_sink_and_access_protected_exact_readback"
+            }
+        ],
+        "distinct_writer_script_and_version_ids_required": true,
+        "all_worker_script_and_version_ids_pairwise_distinct_required": true,
+        "sink_deployment_recorded_separately": true,
+        "compatibility_date_required": true,
+        "public_exposure": {
+            "workers_dev": false,
+            "preview_urls": false,
+            "sink_readback_routes": "one_temporary_access_protected_exact_get_only",
+            "writer_routes": "temporary_access_protected_exact_post_only",
+            "request_body_accepts_sql": false,
+            "request_body_accepts_table_names": false,
+            "one_use_run_bound_request_required": true,
+            "readback_accepts_parameters": false,
+            "readback_response": "fixed_synthetic_schema_for_generated_probe_run"
+        }
+    },
+    "execution": {
+        "writer_processes": 2,
+        "same_request_promise_all_eligible": false,
+        "cross_network_requests_required": true,
+        "automatic_application_retries": 0,
+        "ambiguous_request_retry_allowed": false,
+        "ready_barrier_required": true,
+        "barrier_timeout_result": "inconclusive",
+        "writer_session_constraint": "first-primary",
+        "decisive_readback_session_constraint": "first-primary",
+        "bookmark_readback_is_decisive": false,
+        "writer_bookmark_required": true,
+        "bookmark_causal_read_required": true,
+        "d1_result_validation": {
+            "statement_count": "exact",
+            "success": "exact",
+            "returning_identity_and_cardinality": "exact_authority_with_first_primary_readback",
+            "changes": "recorded_non_authoritative",
+            "rows_read": "required_nonnegative_integer",
+            "rows_written": "recorded_non_authoritative_nonnegative_integer",
+            "changed_db": "required_boolean",
+            "served_by_primary": "required_true",
+            "served_by_region": "required_nonempty_string",
+            "duration": "required_nonnegative_number",
+            "size_after": "required_nonnegative_integer"
+        },
+        "served_by_primary_absent_or_false": "inconclusive",
+        "batch_outcome_validation": {
+            "committed": "exact_returning_rows_result_shape_and_first_primary_readback",
+            "expected_tripwire_rollback": "recognized_d1_constraint_failure_and_first_primary_zero_row_readback",
+            "other_error": "inconclusive"
+        },
+        "unknown_malformed_contradictory_or_lost_worker_sink_or_d1_result": "inconclusive"
+    },
+    "sink": {
+        "synthetic": true,
+        "sink_ingress_private_service_binding_only": true,
+        "readback_channel": "temporary_access_protected_exact_get_route",
+        "readback_route_retained_after_writer_routes_disabled": true,
+        "readback_route_removed_before_worker_deletion": true,
+        "records_every_request_before_response": true,
+        "random_receipt_per_request": true,
+        "deduplication": "none",
+        "dedupe_keys_forbidden": ["call_kind", "logical_call_id", "attempt_id", "reservation_id", "request_digest"],
+        "decisive_readback": "fresh_first_primary_session"
+    },
+    "probe_tables": {
+        "temporary_only": true,
+        "migration_files_allowed": false,
+        "product_schema_promotion_allowed": false,
+        "foreign_key_tripwires_required": true,
+        "foreign_key_enforcement_readback_required": true,
+        "tripwire_failure_and_batch_rollback_canary_required": true
+    },
+    "trials": {
+        "guarded_create": {
+            "gate_id": "d1_guarded_create",
+            "cases": ["create_first", "revoke_first", "equal_release_race", "equal_release_race_roles_swapped"],
+            "legal_histories": [
+                {
+                    "id": "create_before_revoke",
+                    "create": "committed",
+                    "revoke": "committed",
+                    "authority": "revoked",
+                    "confirmation_state": "consumed",
+                    "live_confirmation_slot": "clear",
+                    "run_state": "cancellation_requested",
+                    "run_rows": 1,
+                    "assertion_rows": 1,
+                    "cancellation_outbox_rows": 1
+                },
+                {
+                    "id": "revoke_before_create",
+                    "create": "foreign_key_tripwire_rollback",
+                    "revoke": "committed",
+                    "authority": "revoked",
+                    "confirmation_state": "discarded",
+                    "live_confirmation_slot": "clear",
+                    "run_state": "absent",
+                    "run_rows": 0,
+                    "assertion_rows": 0,
+                    "cancellation_outbox_rows": 0
+                }
+            ],
+            "any_other_history": "failed"
+        },
+        "gateway_reservation": {
+            "gate_id": "gateway_reservation",
+            "call_kinds": ["model", "provider_tool", "code"],
+            "exact_duplicate_fields": [
+                "call_kind",
+                "logical_call_id",
+                "attempt_id",
+                "sequence",
+                "request_digest",
+                "reservation_key"
+            ],
+            "normal_case": {
+                "spent_reservations": 1,
+                "sink_receipts": 1,
+                "winner_dispatches": 1,
+                "loser_dispatches": 0,
+                "loser_result": "guarded_denial"
+            },
+            "fault_cases": [
+                {
+                    "id": "reserve_crash_before_sink",
+                    "spent_reservations": 1,
+                    "sink_receipts": 0,
+                    "result": "outcome_unknown",
+                    "retry": false
+                },
+                {
+                    "id": "sink_response_lost",
+                    "spent_reservations": 1,
+                    "sink_receipts": 1,
+                    "result": "outcome_unknown",
+                    "retry": false
+                }
+            ]
+        },
+        "sandbox_capacity": {
+            "gate_id": "d1_guarded_create",
+            "limit": 4,
+            "contenders": 5,
+            "writer_deployments_used": 2,
+            "committed_claims": 4,
+            "denied_claims": 1,
+            "denied_platform_calls": 0,
+            "release_requires": [
+                "exact_installation_id",
+                "exact_run_id",
+                "exact_run_attempt_fence",
+                "exact_claim_id",
+                "exact_sandbox_id",
+                "random_destroy_receipt",
+                "sink_recorded_observation"
+            ],
+            "release_before_observation": "no_change",
+            "release_with_mismatched_receipt": "no_change",
+            "release_replay": "no_change",
+            "matching_release_count": 1,
+            "lost_or_unknown_destroy_response": "manual_required_capacity_remains_reserved"
+        },
+        "audit_head": {
+            "gate_id": "d1_guarded_create",
+            "same_expected_sequence_and_hash": true,
+            "different_event_ids_and_hashes": true,
+            "barrier_before_append_required": true,
+            "first_phase_commits": 1,
+            "first_phase_conflicts": 1,
+            "loser_batch_result": "rolled_back",
+            "follow_up": {
+                "new_attempt_id": true,
+                "new_first_primary_head_read": true,
+                "automatic_retry": false,
+                "next_sequence_commits": 1
+            },
+            "final_chain_entries": 2,
+            "final_chain_must_verify": true
+        }
+    },
+    "report_requirements": {
+        "report_platform_literal": "cloudflare_d1_deployed",
+        "database_id_commitment": true,
+        "writer_deployment_commitments": 2,
+        "sink_deployment_commitment": true,
+        "read_replication_setting": true,
+        "served_by_primary_observed_true": true,
+        "compatibility_date": true,
+        "bookmarks_and_result_meta": true,
+        "redacted_transcript_commitments": true,
+        "all_required_trials_conclusive": true,
+        "deployment_commitments_semantically_coherent": true,
+        "worker_deployment_commitments_pairwise_distinct": true,
+        "all_worker_database_commitments_equal": true,
+        "external_operator_review_and_signature": true
+    },
+    "cleanup": {
+        "initial_status": "not_run",
+        "order": [
+            "close_stored_run_fence_and_disable_writer_routes_and_access_entry_points",
+            "settle_or_mark_unknown_in_flight_requests",
+            "capture_final_first_primary_readback_through_retained_exact_access_route",
+            "disable_and_delete_exact_readback_route_and_access_entry_point",
+            "delete_exact_writer_a_and_writer_b_deployments",
+            "delete_exact_sink_readback_deployment",
+            "delete_exact_remaining_access_service_bindings_and_driver_configuration",
+            "delete_exact_disposable_d1_database_last",
+            "confirm_recorded_resource_ids_absent"
+        ],
+        "validate_generated_prefix_before_each_delete": true,
+        "validate_returned_resource_id_before_each_delete": true,
+        "ambiguous_delete_result": "manual_required",
+        "unknown_in_flight_result": "manual_required",
+        "failed_absence_check": "manual_required",
+        "request_success_alone_proves_cleanup": false
+    },
+    "observations": []
+}

@@ -1,0 +1,12 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "composite": true,
+        "outDir": "dist",
+        "rootDir": "src",
+        "tsBuildInfoFile": "../../node_modules/.cache/d1-probes.tsbuildinfo",
+        "types": ["@cloudflare/workers-types"]
+    },
+    "include": ["src/**/*.ts"],
+    "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
+}
