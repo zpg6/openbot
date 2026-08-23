@@ -4,10 +4,12 @@ import {
     BotIdSchema,
     BotRevisionIdSchema,
     CapabilityGrantIdSchema,
+    ComputeGrantIdSchema,
     ConfigurationContentIdSchema,
     ConfirmationIdSchema,
     ConnectorReleaseIdSchema,
     OrganizationToolPolicyIdSchema,
+    OrganizationComputePolicyIdSchema,
     ProviderDeploymentIdSchema,
     RunIdSchema,
     SkillIdSchema,
@@ -15,7 +17,14 @@ import {
     UserIdSchema,
 } from "./ids.js";
 import { JsonSchemaSubsetV1Schema } from "./json-schema.js";
-import { RuntimeLimitsV1Schema } from "./limits.js";
+import {
+    CodeExecutionLimitsV1Schema,
+    NarrowedCodeExecutionLimitsV1Schema,
+    RuntimeLimitsV1Schema,
+    type CodeExecutionLimitsV1,
+    type NarrowedCodeExecutionLimitsV1,
+    type RuntimeLimitsV1,
+} from "./limits.js";
 import { UnverifiedManifestExtensionEnvelopeV1Schema } from "./manifest-extensions.js";
 import {
     DataClassV1Schema,
@@ -192,7 +201,11 @@ export const CreateOrganizationToolPolicyCommandV1Schema = z
     .object({
         schema_version: z.literal(1),
         provider_deployment_id: ProviderDeploymentIdSchema,
+        expected_provider_deployment_version: PositiveVersionSchema,
+        expected_connector_release_id: ConnectorReleaseIdSchema,
         connector_tool_key: utf8String({ minBytes: 1, maxBytes: 256 }),
+        expected_tool_schema_digest: Sha256DigestSchema,
+        expected_catalog_fence: NonnegativeFenceSchema,
     })
     .strict();
 export type CreateOrganizationToolPolicyCommandV1 = z.infer<typeof CreateOrganizationToolPolicyCommandV1Schema>;
@@ -256,10 +269,291 @@ export const ModelRouteV1Schema = z
         require_parameters: z.literal(true),
         data_collection: z.literal("deny"),
         zdr: z.literal(true),
-        parallel_tool_calls: z.literal(false),
+        parallel_tool_calls_parameter: z.literal("omitted_unsupported"),
+        max_tool_calls_per_turn: z.literal(1),
     })
     .strict();
 export type ModelRouteV1 = z.infer<typeof ModelRouteV1Schema>;
+
+export const CodeLanguageV1Schema = z.enum(["javascript"]);
+export type CodeLanguageV1 = z.infer<typeof CodeLanguageV1Schema>;
+
+const SandboxAdoptionChecksV1Schema = z
+    .object({
+        package_image_match: z.literal("passed"),
+        fixed_argv_launch: z.literal("passed"),
+        enumerated_dns_sentinel_not_observed: z.literal("passed"),
+        filesystem_limit: z.literal("passed"),
+        process_limit: z.literal("passed"),
+        startup_timeout: z.literal("passed"),
+        execution_timeout_and_kill: z.literal("passed"),
+        teardown_and_destroy: z.literal("passed"),
+        repeat_destroy_safe: z.literal("passed"),
+        sandbox_lifetime: z.literal("passed"),
+        fresh_generation: z.literal("passed"),
+        output_backpressure: z.literal("passed"),
+        replacement_uncertainty: z.literal("passed"),
+        placement: z.literal("passed"),
+        installation_capacity: z.literal("passed"),
+        private_route: z.literal("passed"),
+        secret_sentinel: z.literal("passed"),
+        mismatched_package_image_denial: z.literal("passed"),
+    })
+    .strict();
+
+export const SandboxAdoptionEvidenceV1Schema = z
+    .object({
+        schema_version: z.literal(1),
+        reviewed_configuration_digest: Sha256DigestSchema,
+        evidence_digest: Sha256DigestSchema,
+        observed_at: EpochMillisecondsSchema,
+        valid_until: EpochMillisecondsSchema,
+        cloudflare_platform_fingerprint: utf8String({ minBytes: 1, maxBytes: 512 }),
+        checks: SandboxAdoptionChecksV1Schema,
+    })
+    .strict()
+    .refine(evidence => evidence.valid_until > evidence.observed_at, {
+        message: "Sandbox adoption evidence must expire after it is observed",
+        path: ["valid_until"],
+    });
+export type SandboxAdoptionEvidenceV1 = z.infer<typeof SandboxAdoptionEvidenceV1Schema>;
+
+export const CodeExecutionProfileV1Schema = z
+    .object({
+        schema_version: z.literal(1),
+        profile_key: utf8String({ minBytes: 1, maxBytes: 128 }),
+        profile_revision: PositiveVersionSchema,
+        configuration_digest: Sha256DigestSchema,
+        profile_digest: Sha256DigestSchema,
+        display_name: AuthorityDisplayLabelV1Schema,
+        runner_protocol_version: z.literal(1),
+        runner_protocol_digest: Sha256DigestSchema,
+        runner_version: utf8String({ minBytes: 1, maxBytes: 64 }),
+        runner_digest: Sha256DigestSchema,
+        node_version: utf8String({ minBytes: 1, maxBytes: 64 }),
+        sandbox_sdk_version: utf8String({ minBytes: 1, maxBytes: 64 }),
+        sandbox_sdk_package_digest: Sha256DigestSchema,
+        image_digest: Sha256DigestSchema,
+        instance_type: z.enum(["lite", "basic"]),
+        adoption_status: z.enum(["candidate", "enabled"]),
+        lifecycle: z.enum(["active", "disabled"]),
+        languages: z
+            .array(CodeLanguageV1Schema)
+            .min(1)
+            .max(CodeLanguageV1Schema.options.length)
+            .refine(values => new Set(values).size === values.length, { message: "Code languages must be unique" }),
+        admitted_data_classes: z
+            .array(z.enum(["public", "synthetic", "organization"]))
+            .min(1)
+            .max(3)
+            .refine(values => new Set(values).size === values.length, {
+                message: "Code data classes must be unique",
+            }),
+        network_policy: z.literal("public_internet_blocked_unverified_dns"),
+        adoption_evidence: SandboxAdoptionEvidenceV1Schema.nullable(),
+        filesystem_policy: z.literal("ephemeral_per_run"),
+        package_installation: z.literal(false),
+        interactive_terminal: z.literal(false),
+        limits: CodeExecutionLimitsV1Schema,
+    })
+    .strict()
+    .superRefine((profile, context) => {
+        const classes = new Set(profile.admitted_data_classes);
+        if (profile.adoption_status === "candidate") {
+            if (profile.adoption_evidence !== null || classes.size !== 1 || !classes.has("synthetic")) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["admitted_data_classes"],
+                    message: "A candidate profile accepts only server-seeded synthetic probe data",
+                });
+            }
+        } else if (
+            profile.adoption_evidence === null ||
+            profile.adoption_evidence.reviewed_configuration_digest !== profile.configuration_digest
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["adoption_evidence"],
+                message: "An enabled profile requires complete evidence for the reviewed profile digest",
+            });
+        }
+    });
+export type CodeExecutionProfileV1 = z.infer<typeof CodeExecutionProfileV1Schema>;
+
+export const OrganizationComputePolicyV1Schema = z
+    .object({
+        schema_version: z.literal(1),
+        organization_compute_policy_id: OrganizationComputePolicyIdSchema,
+        account_id: AccountIdSchema,
+        revision_number: PositiveVersionSchema,
+        lifecycle,
+        dependency_revocation_fence: NonnegativeFenceSchema,
+        profile_key: utf8String({ minBytes: 1, maxBytes: 128 }),
+        profile_revision: PositiveVersionSchema,
+        profile_digest: Sha256DigestSchema,
+        admitted_data_classes: z
+            .array(z.enum(["public", "synthetic", "organization"]))
+            .min(1)
+            .max(3)
+            .refine(values => new Set(values).size === values.length, {
+                message: "Compute-policy data classes must be unique",
+            }),
+        limits: NarrowedCodeExecutionLimitsV1Schema,
+        created_at: EpochMillisecondsSchema,
+        policy_digest: Sha256DigestSchema,
+    })
+    .strict();
+export type OrganizationComputePolicyV1 = z.infer<typeof OrganizationComputePolicyV1Schema>;
+
+export const CreateOrganizationComputePolicyCommandV1Schema = z
+    .object({
+        schema_version: z.literal(1),
+        profile_key: utf8String({ minBytes: 1, maxBytes: 128 }),
+        expected_profile_revision: PositiveVersionSchema,
+        expected_profile_digest: Sha256DigestSchema,
+        expected_profile_dependency_fence: NonnegativeFenceSchema,
+        admitted_data_classes: z
+            .array(z.enum(["public", "synthetic", "organization"]))
+            .min(1)
+            .max(3)
+            .refine(values => new Set(values).size === values.length, {
+                message: "Compute-policy data classes must be unique",
+            }),
+        limits: NarrowedCodeExecutionLimitsV1Schema,
+    })
+    .strict();
+export type CreateOrganizationComputePolicyCommandV1 = z.infer<typeof CreateOrganizationComputePolicyCommandV1Schema>;
+
+export const ComputeGrantV1Schema = z
+    .object({
+        schema_version: z.literal(1),
+        compute_grant_id: ComputeGrantIdSchema,
+        account_id: AccountIdSchema,
+        bot_revision_id: BotRevisionIdSchema,
+        organization_compute_policy_id: OrganizationComputePolicyIdSchema,
+        compute_policy_revision: PositiveVersionSchema,
+        compute_policy_digest: Sha256DigestSchema,
+        admitted_data_classes: nonemptyUnique(z.enum(["public", "synthetic", "organization"]), 3),
+        lifecycle,
+        revocation_fence: NonnegativeFenceSchema,
+        purpose: utf8String({ minBytes: 1, maxBytes: 512 }),
+        expires_at: EpochMillisecondsSchema,
+        limits: NarrowedCodeExecutionLimitsV1Schema,
+        created_at: EpochMillisecondsSchema,
+        grant_digest: Sha256DigestSchema,
+    })
+    .strict();
+export type ComputeGrantV1 = z.infer<typeof ComputeGrantV1Schema>;
+
+export const CreateComputeGrantCommandV1Schema = z
+    .object({
+        schema_version: z.literal(1),
+        bot_revision_id: BotRevisionIdSchema,
+        organization_compute_policy_id: OrganizationComputePolicyIdSchema,
+        expected_bot_revision_digest: Sha256DigestSchema,
+        expected_compute_policy_revision: PositiveVersionSchema,
+        expected_compute_policy_digest: Sha256DigestSchema,
+        expected_compute_policy_fence: NonnegativeFenceSchema,
+        admitted_data_classes: nonemptyUnique(z.enum(["public", "synthetic", "organization"]), 3),
+        purpose: utf8String({ minBytes: 1, maxBytes: 512 }),
+        expires_at: EpochMillisecondsSchema,
+        limits: NarrowedCodeExecutionLimitsV1Schema,
+    })
+    .strict();
+export type CreateComputeGrantCommandV1 = z.infer<typeof CreateComputeGrantCommandV1Schema>;
+
+const codeLimitKeys = Object.keys(CodeExecutionLimitsV1Schema.shape) as (keyof CodeExecutionLimitsV1)[];
+
+export const computeLimitsAreNarrowerOrEqualV1 = (
+    narrower: NarrowedCodeExecutionLimitsV1,
+    broader: NarrowedCodeExecutionLimitsV1 | CodeExecutionLimitsV1
+): boolean => codeLimitKeys.every(key => narrower[key] <= broader[key]);
+
+const runtimeCodeLimitsV1 = (runtime: RuntimeLimitsV1): NarrowedCodeExecutionLimitsV1 => ({
+    max_executions: 1,
+    max_source_bytes: runtime.max_code_source_bytes_per_call,
+    max_input_bytes: runtime.max_code_input_bytes_per_call,
+    max_stdout_bytes: runtime.max_code_stdout_bytes_per_call,
+    max_stderr_bytes: runtime.max_code_stderr_bytes_per_call,
+    max_result_bytes: runtime.max_code_result_bytes_per_call,
+    max_output_bytes: runtime.max_code_output_bytes_per_run,
+    max_filesystem_bytes: runtime.max_sandbox_filesystem_bytes,
+    max_processes: runtime.max_sandbox_processes,
+    max_outbound_requests: 0,
+    max_output_frames: runtime.max_sandbox_output_frames,
+    startup_timeout_ms: runtime.max_sandbox_startup_ms,
+    execution_timeout_ms: runtime.max_code_execution_ms,
+    teardown_timeout_ms: runtime.max_sandbox_teardown_ms,
+    sandbox_lifetime_ms: runtime.max_sandbox_lifetime_ms,
+});
+
+export const deriveEffectiveCodeExecutionLimitsV1 = (
+    profile: CodeExecutionLimitsV1,
+    policy: NarrowedCodeExecutionLimitsV1,
+    grant: NarrowedCodeExecutionLimitsV1,
+    runtime: RuntimeLimitsV1
+): NarrowedCodeExecutionLimitsV1 | null => {
+    if (runtime.max_code_executions !== 1) return null;
+    const runtimeLimits = runtimeCodeLimitsV1(runtime);
+    return Object.fromEntries(
+        codeLimitKeys.map(key => [key, Math.min(profile[key], policy[key], grant[key], runtimeLimits[key])])
+    ) as NarrowedCodeExecutionLimitsV1;
+};
+
+export const computeAuthorityChainIsValidV1 = (
+    botRevision: BotRevisionV1,
+    profile: CodeExecutionProfileV1,
+    policy: OrganizationComputePolicyV1,
+    grant: ComputeGrantV1,
+    expected: {
+        account_id: string;
+        bot_revision_id: string;
+        as_of_ms: number;
+        cloudflare_platform_fingerprint: string;
+    }
+): boolean => {
+    const profileClasses = new Set(profile.admitted_data_classes);
+    const selection = botRevision.compute_selection;
+    const evidence = profile.adoption_evidence;
+    return (
+        selection !== null &&
+        botRevision.account_id === expected.account_id &&
+        botRevision.bot_revision_id === expected.bot_revision_id &&
+        profile.adoption_status === "enabled" &&
+        profile.lifecycle === "active" &&
+        evidence !== null &&
+        evidence.reviewed_configuration_digest === profile.configuration_digest &&
+        evidence.valid_until > expected.as_of_ms &&
+        evidence.cloudflare_platform_fingerprint === expected.cloudflare_platform_fingerprint &&
+        policy.lifecycle === "active" &&
+        grant.lifecycle === "active" &&
+        policy.account_id === expected.account_id &&
+        grant.account_id === expected.account_id &&
+        grant.bot_revision_id === expected.bot_revision_id &&
+        grant.expires_at > expected.as_of_ms &&
+        selection.organization_compute_policy_id === policy.organization_compute_policy_id &&
+        selection.compute_policy_revision === policy.revision_number &&
+        selection.compute_policy_digest === policy.policy_digest &&
+        selection.profile.profile_revision === profile.profile_revision &&
+        selection.profile.profile_digest === profile.profile_digest &&
+        selection.compute_policy_admitted_data_classes.length === policy.admitted_data_classes.length &&
+        selection.compute_policy_admitted_data_classes.every(dataClass =>
+            policy.admitted_data_classes.includes(dataClass)
+        ) &&
+        codeLimitKeys.every(key => selection.compute_policy_limits[key] === policy.limits[key]) &&
+        policy.profile_key === profile.profile_key &&
+        policy.profile_revision === profile.profile_revision &&
+        policy.profile_digest === profile.profile_digest &&
+        grant.organization_compute_policy_id === policy.organization_compute_policy_id &&
+        grant.compute_policy_revision === policy.revision_number &&
+        grant.compute_policy_digest === policy.policy_digest &&
+        policy.admitted_data_classes.every(dataClass => profileClasses.has(dataClass)) &&
+        grant.admitted_data_classes.every(dataClass => policy.admitted_data_classes.includes(dataClass)) &&
+        computeLimitsAreNarrowerOrEqualV1(policy.limits, profile.limits) &&
+        grant.limits.max_outbound_requests === 0 &&
+        computeLimitsAreNarrowerOrEqualV1(grant.limits, policy.limits)
+    );
+};
 
 export const BotRevisionV1Schema = z
     .object({
@@ -282,23 +576,73 @@ export const BotRevisionV1Schema = z
             .refine(values => new Set(values).size === values.length, { message: "Skill IDs must be unique" }),
         connector_release_id: ConnectorReleaseIdSchema,
         model_route: ModelRouteV1Schema,
+        compute_selection: z
+            .object({
+                organization_compute_policy_id: OrganizationComputePolicyIdSchema,
+                compute_policy_revision: PositiveVersionSchema,
+                compute_policy_digest: Sha256DigestSchema,
+                compute_policy_admitted_data_classes: nonemptyUnique(
+                    z.enum(["public", "synthetic", "organization"]),
+                    3
+                ),
+                compute_policy_limits: NarrowedCodeExecutionLimitsV1Schema,
+                profile: CodeExecutionProfileV1Schema,
+            })
+            .strict()
+            .nullable(),
         limits: RuntimeLimitsV1Schema,
         outbound_data_rule: OutboundDataRuleV1Schema,
         manifest_extensions: UnverifiedManifestExtensionEnvelopeV1Schema,
         created_at: EpochMillisecondsSchema,
         revision_digest: Sha256DigestSchema,
     })
-    .strict();
+    .strict()
+    .superRefine((revision, context) => {
+        if (revision.compute_selection !== null && revision.organization_tool_policy_ids.length > 3) {
+            context.addIssue({
+                code: "custom",
+                path: ["organization_tool_policy_ids"],
+                message: "Code execution consumes one of the four exposed tool slots",
+            });
+        }
+        if (
+            revision.compute_selection !== null &&
+            (revision.compute_selection.profile.adoption_status !== "enabled" ||
+                revision.compute_selection.profile.lifecycle !== "active" ||
+                !computeLimitsAreNarrowerOrEqualV1(
+                    revision.compute_selection.compute_policy_limits,
+                    revision.compute_selection.profile.limits
+                ) ||
+                revision.compute_selection.compute_policy_admitted_data_classes.some(
+                    dataClass => !revision.compute_selection?.profile.admitted_data_classes.includes(dataClass)
+                ))
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["compute_selection"],
+                message: "A Bot revision may select only a narrower policy on an enabled active code profile",
+            });
+        }
+        if ((revision.compute_selection === null) !== (revision.limits.max_code_executions === 0)) {
+            context.addIssue({
+                code: "custom",
+                path: ["limits", "max_code_executions"],
+                message: "Code execution count must be zero without compute selection and one with it",
+            });
+        }
+    });
 export type BotRevisionV1 = z.infer<typeof BotRevisionV1Schema>;
 export const StoredBotRevisionV1Schema = BotRevisionV1Schema;
 export type StoredBotRevisionV1 = BotRevisionV1;
 
 export const RequestedRunLimitsV1Schema = z
     .object({
-        max_model_turns: z.number().int().positive().max(3),
+        max_model_turns: z.number().int().positive().max(5),
         max_tool_calls: z.number().int().positive().max(2),
+        max_code_executions: z.number().int().nonnegative().max(1),
+        max_code_execution_ms: z.number().int().positive().max(15_000),
         max_model_output_tokens_per_request: z.number().int().positive().max(2_048),
-        max_runtime_wall_time_ms: z.number().int().positive().max(120_000),
+        max_runtime_wall_time_ms: z.number().int().positive().max(240_000),
         max_estimated_run_cost_usd_micros: z.number().int().positive().max(250_000),
     })
     .strict();
@@ -317,9 +661,31 @@ export const CreateBotRevisionCommandV1Schema = z
             .max(4)
             .refine(values => new Set(values).size === values.length, { message: "Skill IDs must be unique" }),
         model_route_key: utf8String({ minBytes: 1, maxBytes: 128 }),
+        organization_compute_policy_id: OrganizationComputePolicyIdSchema.nullable(),
+        expected_catalog_fence: NonnegativeFenceSchema,
+        expected_selection_digest: Sha256DigestSchema,
         requested_limits: RequestedRunLimitsV1Schema,
     })
-    .strict();
+    .strict()
+    .superRefine((command, context) => {
+        if (command.organization_compute_policy_id !== null && command.organization_tool_policy_ids.length > 3) {
+            context.addIssue({
+                code: "custom",
+                path: ["organization_tool_policy_ids"],
+                message: "Code execution consumes one of the four exposed tool slots",
+            });
+        }
+        if (
+            (command.organization_compute_policy_id === null) !==
+            (command.requested_limits.max_code_executions === 0)
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["requested_limits", "max_code_executions"],
+                message: "Code execution count must be zero without compute selection and one with it",
+            });
+        }
+    });
 export type CreateBotRevisionCommandV1 = z.infer<typeof CreateBotRevisionCommandV1Schema>;
 
 export const DisclosureSnapshotV1Schema = z
@@ -405,7 +771,7 @@ export const DisclosureSnapshotV1Schema = z
                 message: "Skill revisions must be unique",
             }),
         possible_data_classes: nonemptyUnique(DataClassV1Schema, DataClassV1Schema.options.length),
-        disclosure_destinations: nonemptyUnique(DisclosureDestinationV1Schema, 4),
+        disclosure_destinations: nonemptyUnique(DisclosureDestinationV1Schema, 5),
         incidental_effects: z
             .array(z.enum(["provider_access_log", "provider_access_timestamp", "provider_quota"]))
             .max(3)
@@ -413,6 +779,28 @@ export const DisclosureSnapshotV1Schema = z
                 message: "Incidental effects must be unique",
             }),
         model_route: ModelRouteV1Schema,
+        code_execution: z
+            .object({
+                profile: CodeExecutionProfileV1Schema,
+                organization_compute_policy_id: OrganizationComputePolicyIdSchema,
+                compute_policy_revision: PositiveVersionSchema,
+                compute_policy_digest: Sha256DigestSchema,
+                compute_policy_admitted_data_classes: nonemptyUnique(
+                    z.enum(["public", "synthetic", "organization"]),
+                    3
+                ),
+                compute_policy_limits: NarrowedCodeExecutionLimitsV1Schema,
+                compute_grant_id: ComputeGrantIdSchema,
+                compute_grant_digest: Sha256DigestSchema,
+                compute_grant_purpose: utf8String({ minBytes: 1, maxBytes: 512 }),
+                compute_grant_expires_at: EpochMillisecondsSchema,
+                compute_grant_admitted_data_classes: nonemptyUnique(z.enum(["public", "synthetic", "organization"]), 3),
+                compute_grant_limits: NarrowedCodeExecutionLimitsV1Schema,
+                possible_code_input_data_classes: nonemptyUnique(z.enum(["public", "synthetic", "organization"]), 3),
+                effective_limits: NarrowedCodeExecutionLimitsV1Schema,
+            })
+            .strict()
+            .nullable(),
         limits: RuntimeLimitsV1Schema,
         manifest_extensions: UnverifiedManifestExtensionEnvelopeV1Schema,
         issued_at: EpochMillisecondsSchema,
@@ -435,6 +823,50 @@ export const DisclosureSnapshotV1Schema = z
                 message: "Grant expires before the confirmation",
             });
         }
+        if (snapshot.code_execution !== null) {
+            const effectiveLimits = deriveEffectiveCodeExecutionLimitsV1(
+                snapshot.code_execution.profile.limits,
+                snapshot.code_execution.compute_policy_limits,
+                snapshot.code_execution.compute_grant_limits,
+                snapshot.limits
+            );
+            if (
+                effectiveLimits === null ||
+                snapshot.code_execution.profile.adoption_status !== "enabled" ||
+                snapshot.code_execution.profile.lifecycle !== "active" ||
+                snapshot.code_execution.profile.adoption_evidence === null ||
+                snapshot.code_execution.profile.adoption_evidence.valid_until < snapshot.expires_at ||
+                snapshot.code_execution.compute_grant_expires_at < snapshot.expires_at ||
+                !computeLimitsAreNarrowerOrEqualV1(
+                    snapshot.code_execution.compute_policy_limits,
+                    snapshot.code_execution.profile.limits
+                ) ||
+                !computeLimitsAreNarrowerOrEqualV1(
+                    snapshot.code_execution.compute_grant_limits,
+                    snapshot.code_execution.compute_policy_limits
+                ) ||
+                snapshot.code_execution.possible_code_input_data_classes.some(
+                    dataClass =>
+                        !snapshot.code_execution?.compute_policy_admitted_data_classes.includes(dataClass) ||
+                        !snapshot.code_execution.compute_grant_admitted_data_classes.includes(dataClass) ||
+                        !snapshot.code_execution.profile.admitted_data_classes.includes(dataClass)
+                ) ||
+                codeLimitKeys.some(key => snapshot.code_execution?.effective_limits[key] !== effectiveLimits?.[key])
+            ) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["code_execution"],
+                    message: "Code execution authority is inactive, expired, or broader than its parent",
+                });
+            }
+        }
+        if ((snapshot.code_execution === null) !== (snapshot.limits.max_code_executions === 0)) {
+            context.addIssue({
+                code: "custom",
+                path: ["limits", "max_code_executions"],
+                message: "Code execution count must be zero without disclosed compute authority and one with it",
+            });
+        }
         const possibleClasses = new Set(snapshot.possible_data_classes);
         const destinations = new Set(snapshot.disclosure_destinations);
         const incidentalEffects = new Set(snapshot.incidental_effects);
@@ -446,6 +878,30 @@ export const DisclosureSnapshotV1Schema = z
             ...snapshot.tools.flatMap(tool => tool.possible_data_classes),
         ]);
         const toolIncidentalEffects = new Set(snapshot.tools.flatMap(tool => tool.incidental_effects));
+        if (snapshot.code_execution !== null) {
+            if (snapshot.code_execution.compute_grant_expires_at < snapshot.expires_at) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["code_execution", "compute_grant_expires_at"],
+                    message: "Compute grant expires before the confirmation",
+                });
+            }
+            if (snapshot.code_execution.profile.adoption_status !== "enabled") {
+                context.addIssue({
+                    code: "custom",
+                    path: ["code_execution", "profile", "adoption_status"],
+                    message: "A candidate Sandbox profile cannot authorize a user run",
+                });
+            }
+            const admitted = new Set(snapshot.code_execution.profile.admitted_data_classes);
+            if ([...sourceClasses].some(value => !admitted.has(value as "public" | "synthetic" | "organization"))) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["code_execution", "profile", "admitted_data_classes"],
+                    message: "The Sandbox profile does not admit every disclosed input data class",
+                });
+            }
+        }
         if (
             possibleClasses.size !== sourceClasses.size ||
             [...possibleClasses].some(value => !sourceClasses.has(value))
@@ -473,15 +929,17 @@ export const DisclosureSnapshotV1Schema = z
                 message: "Incidental effects must equal the effects disclosed by tools",
             });
         }
-        for (const destination of DisclosureDestinationV1Schema.options) {
-            if (!destinations.has(destination)) {
-                context.addIssue({
-                    code: "custom",
-                    path: ["disclosure_destinations"],
-                    message: "Initial disclosure must name every external destination",
-                });
-                break;
-            }
+        const requiredDestinations = new Set(["metorial", "openrouter", "model_provider", "connector_provider"]);
+        if (snapshot.code_execution !== null) requiredDestinations.add("cloudflare_sandbox");
+        if (
+            destinations.size !== requiredDestinations.size ||
+            [...destinations].some(destination => !requiredDestinations.has(destination))
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["disclosure_destinations"],
+                message: "Disclosure destinations must equal the enabled execution destinations",
+            });
         }
         for (const [index, tool] of snapshot.tools.entries()) {
             if (tool.possible_data_classes.some(value => !possibleClasses.has(value))) {
@@ -517,6 +975,11 @@ export const CreateRunConfirmationCommandV1Schema = z
         bot_id: BotIdSchema,
         bot_revision_id: BotRevisionIdSchema,
         capability_grant_id: CapabilityGrantIdSchema,
+        expected_bot_revision_digest: Sha256DigestSchema,
+        expected_capability_grant_revision: PositiveVersionSchema,
+        expected_capability_grant_digest: Sha256DigestSchema,
+        expected_authority_fence: NonnegativeFenceSchema,
+        expected_compute_grant_digest: Sha256DigestSchema.nullable(),
         prompt: utf8String({ minBytes: 1, maxBytes: 16 * 1024 }),
     })
     .strict();

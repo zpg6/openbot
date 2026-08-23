@@ -16,6 +16,7 @@ const ready: PresentationStateV1 = {
     bot: "active",
     catalog: "usable",
     grant: "usable",
+    compute: "not_selected",
     confirmation: "none",
     execution: null,
     cleanup: "not_required",
@@ -31,7 +32,9 @@ describe("derivePresentationStatusV1", () => {
         [{ ...ready, execution: "running", confirmation: "live" }, "running"],
         [{ ...ready, confirmation: "live", catalog: "unusable" }, "needs_confirmation"],
         [{ ...ready, catalog: "unusable", grant: "missing" }, "needs_configuration"],
+        [{ ...ready, compute: "configuration_missing" }, "needs_configuration"],
         [{ ...ready, grant: "missing" }, "needs_access"],
+        [{ ...ready, compute: "grant_missing" }, "needs_access"],
         [{ ...ready, execution: "cancelled" }, "cancelled"],
         [{ ...ready, execution: "failed" }, "failed"],
         [{ ...ready, execution: "succeeded", evidence: "unavailable" }, "completed"],
@@ -46,6 +49,7 @@ describe("derivePresentationStatusV1", () => {
             bot: fc.constantFrom("active", "disabled"),
             catalog: fc.constantFrom("usable", "unusable"),
             grant: fc.constantFrom("usable", "missing"),
+            compute: fc.constantFrom("not_selected", "usable", "configuration_missing", "grant_missing"),
             confirmation: fc.constantFrom("none", "live"),
             execution: fc.option(
                 fc.constantFrom(

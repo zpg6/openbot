@@ -1,0 +1,44 @@
+{
+    "schema_version": 1,
+    "recorded_date": "2026-08-22",
+    "status": "blocked",
+    "decision": "no_connector_selected",
+    "deny_code": "connector_evidence_incomplete",
+    "metorial": {
+        "api_version_header": null,
+        "provider_id": null,
+        "provider_deployment_id": null,
+        "provider_version": null,
+        "provider_auth_method_id": null,
+        "oauth_scopes": [],
+        "synthetic_data_setup": null,
+        "tool_keys": [],
+        "tool_schema_digests": [],
+        "resource_mapping": null,
+        "incidental_effects": [],
+        "result_limits": null
+    },
+    "documentation_supports": {
+        "per_provider_allow_filter": true,
+        "multiple_independent_session_connections": true,
+        "oauth_setup_sessions": true
+    },
+    "documentation_does_not_supply_installation_literals": true,
+    "required_probes": [
+        "provider_version_readback",
+        "oauth_scope_or_synthetic_account_review",
+        "exact_tool_list_and_schema_capture",
+        "positive_resource_scope",
+        "sibling_resource_denial",
+        "two_sequential_calls_with_reconnect",
+        "second_client_after_cleanup",
+        "ambiguous_create_reconciliation",
+        "result_size_and_classification"
+    ],
+    "sources": [
+        "https://metorial.com/docs/concepts-sessions",
+        "https://metorial.com/docs/sdk-oauth",
+        "https://metorial.com/docs/concepts-providers",
+        "https://metorial.com/docs/glossary"
+    ]
+}

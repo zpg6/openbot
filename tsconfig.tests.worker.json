@@ -5,6 +5,10 @@
         "rootDir": ".",
         "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types", "vitest"]
     },
-    "include": ["tests/workers/**/*.ts"],
-    "references": [{ "path": "./apps/capability-gateway" }]
+    "include": ["tests/workers/**/*.ts", "tests/sandbox-workers/**/*.ts"],
+    "references": [
+        { "path": "./apps/capability-gateway" },
+        { "path": "./packages/sandbox-protocol" },
+        { "path": "./apps/sandbox-runner" }
+    ]
 }

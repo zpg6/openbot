@@ -11,6 +11,25 @@ export default defineConfig({
                 d1Databases: {
                     CONTROL_DB_FRESH: "openbot-test-control",
                 },
+                workers: [
+                    {
+                        name: "openbot-sandbox-runner-preview",
+                        compatibilityDate: "2026-08-22",
+                        modules: [
+                            {
+                                type: "ESModule",
+                                path: "sandbox-runner-test-double.mjs",
+                                contents: `
+                                    import { WorkerEntrypoint } from "cloudflare:workers";
+                                    export class SandboxExecutionService extends WorkerEntrypoint {
+                                        execute() { return "execution-only"; }
+                                    }
+                                    export default { fetch() { return new Response("Not found", { status: 404 }); } };
+                                `,
+                            },
+                        ],
+                    },
+                ],
             },
             wrangler: {
                 configPath: "./apps/capability-gateway/wrangler.d1.jsonc",

@@ -69,6 +69,16 @@
         {
             "category": "html",
             "method": "GET",
+            "path": "/catalog/compute"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/catalog/compute/:policyId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
             "path": "/catalog/skills"
         },
         {
@@ -164,6 +174,16 @@
         {
             "category": "action",
             "method": "POST",
+            "path": "/actions/organization-compute-policies"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/organization-compute-policies/:policyId/disables"
+        },
+        {
+            "category": "action",
+            "method": "POST",
             "path": "/actions/skills"
         },
         {
@@ -200,6 +220,16 @@
             "category": "action",
             "method": "POST",
             "path": "/actions/capability-grants/:grantId/revocations"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/compute-grants"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/compute-grants/:grantId/revocations"
         },
         {
             "category": "action",
@@ -289,6 +319,26 @@
         {
             "category": "api",
             "method": "GET",
+            "path": "/api/v1/organization-compute-policies"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/organization-compute-policies"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/organization-compute-policies/:policyId"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/organization-compute-policies/:policyId/disables"
+        },
+        {
+            "category": "api",
+            "method": "GET",
             "path": "/api/v1/skills"
         },
         {
@@ -365,6 +415,26 @@
             "category": "api",
             "method": "POST",
             "path": "/api/v1/capability-grants/:grantId/revocations"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/compute-grants"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/compute-grants"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/compute-grants/:grantId"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/compute-grants/:grantId/revocations"
         },
         {
             "category": "api",

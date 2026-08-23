@@ -6,6 +6,15 @@
         "rootDir": ".",
         "types": ["node", "vitest"]
     },
-    "include": ["tests/unit/**/*.ts", "vitest.config.ts", "vitest.workers.config.ts"],
-    "references": [{ "path": "./apps/control-plane" }]
+    "include": [
+        "tests/unit/**/*.ts",
+        "vitest.config.ts",
+        "vitest.workers.config.ts",
+        "vitest.sandbox.workers.config.ts"
+    ],
+    "references": [
+        { "path": "./apps/control-plane" },
+        { "path": "./packages/sandbox-protocol" },
+        { "path": "./apps/sandbox-runner" }
+    ]
 }

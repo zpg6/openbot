@@ -1,4 +1,4 @@
-import { exports } from "cloudflare:workers";
+import { env, exports } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 
 describe("capability gateway shell", () => {
@@ -12,5 +12,16 @@ describe("capability gateway shell", () => {
 
         expect(response.status).toBe(404);
         expect(response.headers.get("cache-control")).toBe("no-store");
+    });
+
+    it("binds only the Sandbox execution entrypoint", async () => {
+        const bindings = env as unknown as {
+            SANDBOX_EXECUTION: {
+                execute(): Promise<string>;
+            };
+        };
+        const execution = bindings.SANDBOX_EXECUTION;
+
+        await expect(execution.execute()).resolves.toBe("execution-only");
     });
 });

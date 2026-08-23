@@ -87,6 +87,12 @@ importers:
 
   apps/runtime: {}
 
+  apps/sandbox-runner:
+    dependencies:
+      '@openbot/sandbox-protocol':
+        specifier: workspace:*
+        version: link:../../packages/sandbox-protocol
+
   packages/contracts:
     dependencies:
       zod:
@@ -118,6 +124,19 @@ importers:
       fast-check:
         specifier: 'catalog:'
         version: 4.9.0
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@22.19.21)
+
+  packages/sandbox-protocol:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

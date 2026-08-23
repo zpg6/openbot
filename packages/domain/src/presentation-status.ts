@@ -101,7 +101,8 @@ export const derivePresentationStatusV1 = (state: PresentationStateV1): Presenta
     if (!isConfigurationUsable(state.account, state.bot) || state.catalog === "unusable") {
         return "needs_configuration";
     }
-    if (state.grant === "missing") return "needs_access";
+    if (state.compute === "configuration_missing") return "needs_configuration";
+    if (state.grant === "missing" || state.compute === "grant_missing") return "needs_access";
 
     switch (execution) {
         case "cancelled":

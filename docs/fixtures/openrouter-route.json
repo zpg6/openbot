@@ -1,0 +1,62 @@
+{
+    "schema_version": 1,
+    "observed_at": "2026-08-23T06:29:22Z",
+    "evidence_kind": "official_public_api_observation",
+    "status": "candidate_documented_probe_not_run",
+    "deny_until_probe_passes": "model_route_unverified",
+    "request_route": {
+        "model": "mistralai/mistral-small-2603",
+        "provider_slug": "mistral",
+        "provider_order": ["mistral"],
+        "allow_fallbacks": false,
+        "require_parameters": true,
+        "data_collection": "deny",
+        "zdr": true
+    },
+    "openbot_response_policy": {
+        "maximum_tool_calls_per_model_turn": 1,
+        "multiple_tool_calls_result": "model_evidence_incomplete_before_tool_execution",
+        "reason": "candidate_endpoint_metadata_does_not_list_parallel_tool_calls"
+    },
+    "observed_zdr_endpoint": {
+        "provider_name": "Mistral",
+        "tag": "mistral/zdr",
+        "status": 0,
+        "context_length_tokens": 262144,
+        "max_completion_tokens": null,
+        "prompt_usd_per_token": "0.000000165",
+        "completion_usd_per_token": "0.00000066",
+        "input_cache_read_usd_per_token": "0.0000000165",
+        "supports": ["max_tokens", "tools", "tool_choice"]
+    },
+    "required_live_observations": [
+        "resolved_model",
+        "resolved_provider",
+        "routing_strategy_direct",
+        "selected_endpoint",
+        "attempt_count_equals_one",
+        "every_sent_required_parameter_supported",
+        "multiple_tool_calls_denied_before_tool_execution",
+        "pipeline_has_no_compression_plugins_or_server_tools",
+        "cache_hit_metadata_behavior",
+        "generation_id",
+        "zdr_enforced",
+        "data_collection_denied",
+        "usage",
+        "cost",
+        "fresh_price_snapshot",
+        "run_owned_key_expiry",
+        "run_owned_key_deletion",
+        "budget_overshoot_behavior"
+    ],
+    "sources": [
+        "https://openrouter.ai/api/v1/models/mistralai/mistral-small-2603/endpoints",
+        "https://openrouter.ai/api/v1/endpoints/zdr",
+        "https://openrouter.ai/api/v1/providers",
+        "https://openrouter.ai/docs/guides/routing/provider-selection",
+        "https://openrouter.ai/docs/guides/features/zdr",
+        "https://openrouter.ai/docs/guides/features/router-metadata",
+        "https://openrouter.ai/docs/guides/privacy/data-collection",
+        "https://openrouter.ai/docs/guides/features/tool-calling"
+    ]
+}

@@ -1,0 +1,457 @@
+{
+    "schema_version": 1,
+    "recorded_date": "2026-08-22",
+    "implementation_status": "design_only",
+    "defaults": {
+        "same_key_same_digest": "return_stored_response_reference",
+        "same_key_different_digest": "409 idempotency_mismatch",
+        "cross_account_target": "404 resource_not_found",
+        "browser_success": "303 fixed_post_redirect_get",
+        "api_content_type": "application/json"
+    },
+    "commands": [
+        {
+            "id": "sign_in_email",
+            "routes": ["POST /api/auth/sign-in/email"],
+            "actor": "signed_out_browser",
+            "idempotency_scope": "better_auth_request_and_ip_bucket",
+            "expected_version": "current_credential_record",
+            "success": "session_cookie",
+            "repeat": "no_openbot_authority_created",
+            "stale": "uniform_authentication_failure",
+            "audit_event": "identity.signed_in",
+            "outbox_effects": []
+        },
+        {
+            "id": "sign_out",
+            "routes": ["POST /api/auth/sign-out"],
+            "actor": "signed_in_user",
+            "idempotency_scope": "current_session_id",
+            "expected_version": "active_session",
+            "success": "session_cookie_cleared",
+            "repeat": "signed_out_result",
+            "stale": "session_not_active",
+            "audit_event": "identity.signed_out",
+            "outbox_effects": ["update_session_revocation_projection"]
+        },
+        {
+            "id": "change_password",
+            "routes": ["POST /api/auth/change-password"],
+            "actor": "signed_in_user",
+            "idempotency_scope": "session_and_password_change_digest",
+            "expected_version": "credential_version",
+            "success": "password_changed_and_session_rotated",
+            "repeat": "stored_response_reference",
+            "stale": "credential_changed",
+            "audit_event": "identity.password_changed",
+            "outbox_effects": ["revoke_other_sessions", "cancel_work_with_removed_user_authority"]
+        },
+        {
+            "id": "issue_admin_token",
+            "routes": ["POST /operator/v1/admin-tokens"],
+            "actor": "installation_operator",
+            "idempotency_scope": "purpose_and_operator_request_digest",
+            "expected_version": "operator_verifier_and_installation_state",
+            "success": "201_raw_token_once",
+            "repeat": "metadata_without_raw_token",
+            "stale": "operator_credential_changed",
+            "audit_event": "operator.admin_token_issued",
+            "outbox_effects": []
+        },
+        {
+            "id": "bootstrap_owner",
+            "routes": ["POST /actions/bootstrap"],
+            "actor": "bootstrap_token_holder",
+            "idempotency_scope": "token_digest_and_command_kind",
+            "expected_version": "installation_version_0_and_unused_token",
+            "success": "303_/bots",
+            "repeat": "consumed_without_secret",
+            "stale": "bootstrap_closed_or_admin_token_consumed",
+            "audit_event": "account.bootstrapped",
+            "outbox_effects": []
+        },
+        {
+            "id": "reset_password",
+            "routes": ["POST /actions/password-reset"],
+            "actor": "reset_token_holder",
+            "idempotency_scope": "token_digest_and_target_user",
+            "expected_version": "active_unused_token_and_reset_fence",
+            "success": "303_/login",
+            "repeat": "consumed_state",
+            "stale": "admin_token_consumed_or_reset_stale",
+            "audit_event": "identity.password_reset",
+            "outbox_effects": ["revoke_sessions", "cancel_work_with_removed_user_authority"]
+        },
+        {
+            "id": "create_bot",
+            "routes": ["POST /actions/bots", "POST /api/v1/bots"],
+            "actor": "owner",
+            "idempotency_scope": "account_actor_command_candidate_bot_id",
+            "expected_version": "owner_membership_selected_tool_skill_compute_policy_and_enabled_profile_revisions",
+            "success": "303_bot_workspace_or_201_bot_reference",
+            "repeat": "stored_bot_reference",
+            "stale": "catalog_dependency_changed_or_compute_dependency_changed",
+            "audit_event": "bot.created",
+            "outbox_effects": []
+        },
+        {
+            "id": "update_bot_profile",
+            "routes": ["POST /actions/bots/:botId/profile", "PATCH /api/v1/bots/:botId/profile"],
+            "actor": "owner",
+            "idempotency_scope": "bot_and_profile_digest",
+            "expected_version": "bot_cosmetic_version",
+            "success": "303_bot_profile_or_200_profile_reference",
+            "repeat": "stored_profile_reference",
+            "stale": "bot_profile_changed",
+            "audit_event": "bot.profile_updated",
+            "outbox_effects": []
+        },
+        {
+            "id": "append_bot_revision",
+            "routes": ["POST /actions/bots/:botId/revisions", "POST /api/v1/bots/:botId/revisions"],
+            "actor": "owner",
+            "idempotency_scope": "bot_and_revision_digest",
+            "expected_version": "current_bot_revision_selected_tool_skill_compute_policy_and_enabled_profile_versions",
+            "success": "303_bot_profile_or_201_revision_reference",
+            "repeat": "stored_revision_reference",
+            "stale": "bot_revision_changed_or_catalog_dependency_changed_or_compute_dependency_changed",
+            "audit_event": "bot.revision_created",
+            "outbox_effects": ["invalidate_confirmation", "cancel_dependent_run"]
+        },
+        {
+            "id": "create_tool_policy",
+            "routes": ["POST /actions/organization-tool-policies", "POST /api/v1/organization-tool-policies"],
+            "actor": "owner",
+            "idempotency_scope": "deployment_tool_key_schema_digest",
+            "expected_version": "provider_deployment_version_and_connector_review_digest",
+            "success": "303_policy_detail_or_201_policy_reference",
+            "repeat": "stored_policy_reference",
+            "stale": "connector_review_changed",
+            "audit_event": "catalog.tool_policy_created",
+            "outbox_effects": []
+        },
+        {
+            "id": "disable_tool_policy",
+            "routes": [
+                "POST /actions/organization-tool-policies/:policyId/disables",
+                "POST /api/v1/organization-tool-policies/:policyId/disables"
+            ],
+            "actor": "owner",
+            "idempotency_scope": "policy_and_disable_digest",
+            "expected_version": "policy_version_revocation_fence_impact_digest",
+            "success": "303_policy_detail_or_200_disabled_reference",
+            "repeat": "stored_disabled_reference",
+            "stale": "impact_changed",
+            "audit_event": "catalog.tool_policy_disabled",
+            "outbox_effects": ["discard_confirmations", "cancel_runs", "schedule_cleanup"]
+        },
+        {
+            "id": "create_compute_policy",
+            "routes": ["POST /actions/organization-compute-policies", "POST /api/v1/organization-compute-policies"],
+            "actor": "owner",
+            "idempotency_scope": "profile_record_and_configuration_digests_narrowed_limits_admitted_classes_and_policy_digest",
+            "expected_version": "enabled_active_profile_unexpired_evidence_cloudflare_platform_fingerprint_jurisdiction_fence_and_installation_compute_ceiling",
+            "success": "303_compute_policy_detail_or_201_policy_reference",
+            "repeat": "stored_policy_reference",
+            "stale": "sandbox_profile_not_enabled_or_jurisdiction_unverified_or_compute_dependency_changed",
+            "audit_event": "compute.policy_created",
+            "outbox_effects": []
+        },
+        {
+            "id": "disable_compute_policy",
+            "routes": [
+                "POST /actions/organization-compute-policies/:policyId/disables",
+                "POST /api/v1/organization-compute-policies/:policyId/disables"
+            ],
+            "actor": "owner",
+            "idempotency_scope": "compute_policy_and_disable_digest",
+            "expected_version": "policy_version_profile_digest_revocation_fence_and_impact_digest",
+            "success": "303_compute_policy_detail_or_200_disabled_reference",
+            "repeat": "stored_disabled_reference",
+            "stale": "impact_changed_or_compute_dependency_changed",
+            "audit_event": "compute.policy_disabled",
+            "outbox_effects": ["discard_confirmations", "cancel_runs", "schedule_sandbox_cleanup"]
+        },
+        {
+            "id": "create_skill",
+            "routes": ["POST /actions/skills", "POST /api/v1/skills"],
+            "actor": "owner",
+            "idempotency_scope": "account_skill_id_content_digest",
+            "expected_version": "requested_tool_policy_versions",
+            "success": "303_skill_detail_or_201_skill_reference",
+            "repeat": "stored_skill_reference",
+            "stale": "catalog_dependency_changed",
+            "audit_event": "catalog.skill_created",
+            "outbox_effects": []
+        },
+        {
+            "id": "append_skill_revision",
+            "routes": ["POST /actions/skills/:skillId/revisions", "POST /api/v1/skills/:skillId/revisions"],
+            "actor": "owner",
+            "idempotency_scope": "skill_and_revision_digest",
+            "expected_version": "current_default_revision_and_requested_policy_versions",
+            "success": "303_skill_detail_or_201_revision_reference",
+            "repeat": "stored_revision_reference",
+            "stale": "skill_changed_or_catalog_dependency_changed",
+            "audit_event": "catalog.skill_revision_created",
+            "outbox_effects": []
+        },
+        {
+            "id": "disable_skill_revision",
+            "routes": [
+                "POST /actions/skills/:skillId/revisions/:revisionId/disables",
+                "POST /api/v1/skills/:skillId/revisions/:revisionId/disables"
+            ],
+            "actor": "owner",
+            "idempotency_scope": "skill_revision_and_disable_digest",
+            "expected_version": "revision_fence_and_impact_digest",
+            "success": "303_skill_detail_or_200_disabled_reference",
+            "repeat": "stored_disabled_reference",
+            "stale": "impact_changed",
+            "audit_event": "catalog.skill_revision_disabled",
+            "outbox_effects": ["discard_confirmations", "cancel_runs", "schedule_cleanup"]
+        },
+        {
+            "id": "create_connection_setup",
+            "routes": ["POST /actions/connection-setups", "POST /api/v1/connection-setups"],
+            "actor": "owner",
+            "idempotency_scope": "account_deployment_browser_session_callback_origin",
+            "expected_version": "reviewed_provider_deployment_version",
+            "success": "303_setup_detail_or_201_setup_reference",
+            "repeat": "stored_setup_reference",
+            "stale": "provider_deployment_changed",
+            "audit_event": "connection.setup_requested",
+            "outbox_effects": ["create_metorial_setup_from_saved_intent"]
+        },
+        {
+            "id": "reopen_connection_setup",
+            "routes": ["POST /actions/connection-setups/:setupId/reopen"],
+            "actor": "initiating_owner",
+            "idempotency_scope": "setup_id_and_browser_session",
+            "expected_version": "pending_unexpired_setup_with_stored_url",
+            "success": "303_stored_provider_url",
+            "repeat": "redirect_while_pending",
+            "stale": "connection_setup_not_pending",
+            "audit_event": "connection.setup_reopened",
+            "outbox_effects": []
+        },
+        {
+            "id": "claim_oauth_callback",
+            "routes": ["GET /oauth/metorial/callback"],
+            "actor": "initiating_owner_and_one_time_state",
+            "idempotency_scope": "state_digest_and_setup_id",
+            "expected_version": "pending_setup_same_account_user_session_origin_deployment_and_expiry",
+            "success": "303_stored_relative_route",
+            "repeat": "read_stored_terminal_status",
+            "stale": "oauth_state_consumed_or_oauth_callback_stale",
+            "audit_event": "connection.callback_claimed",
+            "outbox_effects": ["finalize_or_reconcile_metorial_setup"]
+        },
+        {
+            "id": "revoke_provider_authorization",
+            "routes": [
+                "POST /actions/provider-authorizations/:authorizationId/revocations",
+                "POST /api/v1/provider-authorizations/:authorizationId/revocations"
+            ],
+            "actor": "owner",
+            "idempotency_scope": "authorization_and_revocation_digest",
+            "expected_version": "authorization_fence_typed_provider_name_impact_digest",
+            "success": "303_connection_detail_or_200_local_revocation",
+            "repeat": "stored_local_revocation",
+            "stale": "impact_changed",
+            "audit_event": "connection.authorization_revoked_locally",
+            "outbox_effects": ["request_vendor_revocation", "discard_confirmations", "cancel_runs", "schedule_cleanup"]
+        },
+        {
+            "id": "create_capability_grant",
+            "routes": ["POST /actions/capability-grants", "POST /api/v1/capability-grants"],
+            "actor": "owner",
+            "idempotency_scope": "bot_revision_authorization_purpose_scope_limits_expiry_digest",
+            "expected_version": "bot_provider_tool_catalog_connector_authorization_and_resource_mapping_versions_without_compute_authority",
+            "success": "303_bot_access_or_201_grant_reference",
+            "repeat": "stored_grant_reference",
+            "stale": "grant_dependency_changed_or_compute_authority_wrong_grant_type",
+            "audit_event": "grant.created",
+            "outbox_effects": []
+        },
+        {
+            "id": "revoke_capability_grant",
+            "routes": [
+                "POST /actions/capability-grants/:grantId/revocations",
+                "POST /api/v1/capability-grants/:grantId/revocations"
+            ],
+            "actor": "owner",
+            "idempotency_scope": "grant_and_revocation_digest",
+            "expected_version": "grant_fence_and_impact_digest",
+            "success": "303_bot_access_or_200_revoked_reference",
+            "repeat": "stored_revoked_reference",
+            "stale": "impact_changed",
+            "audit_event": "grant.revoked",
+            "outbox_effects": [
+                "discard_confirmations",
+                "cancel_runs",
+                "schedule_vendor_cleanup",
+                "schedule_sandbox_cleanup"
+            ]
+        },
+        {
+            "id": "create_compute_grant",
+            "routes": ["POST /actions/compute-grants", "POST /api/v1/compute-grants"],
+            "actor": "owner",
+            "idempotency_scope": "bot_revision_compute_policy_revision_purpose_narrowed_classes_limits_and_expiry_digest",
+            "expected_version": "bot_revision_policy_profile_record_configuration_digests_active_lifecycle_current_evidence_jurisdiction_fence_and_capacity_ceiling",
+            "success": "303_bot_access_or_201_compute_grant_reference",
+            "repeat": "stored_compute_grant_reference",
+            "stale": "compute_grant_dependency_changed_or_sandbox_profile_not_enabled_or_jurisdiction_unverified",
+            "audit_event": "compute.grant_created",
+            "outbox_effects": []
+        },
+        {
+            "id": "revoke_compute_grant",
+            "routes": [
+                "POST /actions/compute-grants/:grantId/revocations",
+                "POST /api/v1/compute-grants/:grantId/revocations"
+            ],
+            "actor": "owner",
+            "idempotency_scope": "compute_grant_and_revocation_digest",
+            "expected_version": "compute_grant_fence_compute_policy_profile_and_impact_digests",
+            "success": "303_bot_access_or_200_revoked_reference",
+            "repeat": "stored_revoked_reference",
+            "stale": "impact_changed_or_compute_grant_dependency_changed",
+            "audit_event": "compute.grant_revoked",
+            "outbox_effects": ["discard_confirmations", "cancel_code_enabled_runs", "schedule_sandbox_cleanup"]
+        },
+        {
+            "id": "create_run_confirmation",
+            "routes": ["POST /actions/run-confirmations", "POST /api/v1/run-confirmations"],
+            "actor": "owner",
+            "idempotency_scope": "bot_actor_browser_session_prompt_digest",
+            "expected_version": "bot_provider_compute_fences_profile_record_configuration_digests_current_evidence_effective_classes_limits_jurisdiction_cleanup_and_slot_versions",
+            "success": "303_confirmation_or_201_confirmation_reference",
+            "repeat": "stored_confirmation_reference",
+            "stale": "confirmation_exists_or_bot_busy_or_cleanup_blocked_or_sandbox_profile_not_enabled_or_sandbox_data_profile_denied_or_dependency_denial",
+            "audit_event": "run.confirmation_created",
+            "outbox_effects": ["sweep_unconsumed_prompt_after_expiry"]
+        },
+        {
+            "id": "discard_run_confirmation",
+            "routes": [
+                "POST /actions/run-confirmations/:confirmationId/discards",
+                "POST /api/v1/run-confirmations/:confirmationId/discards"
+            ],
+            "actor": "initiating_owner",
+            "idempotency_scope": "confirmation_and_discard_digest",
+            "expected_version": "confirmation_version_browser_session_and_matching_slot",
+            "success": "303_bot_workspace_or_200_discarded_reference",
+            "repeat": "stored_discarded_reference",
+            "stale": "confirmation_stale_or_confirmation_consumed",
+            "audit_event": "run.confirmation_discarded",
+            "outbox_effects": ["erase_unreferenced_prompt"]
+        },
+        {
+            "id": "confirm_and_create_run",
+            "routes": ["POST /actions/runs", "POST /api/v1/runs"],
+            "actor": "initiating_owner",
+            "idempotency_scope": "confirmation_candidate_run_actor_start_digest",
+            "expected_version": "confirmation_slot_all_authority_fences_exact_manifest_and_expiry",
+            "success": "303_run_detail_or_201_run_reference",
+            "repeat": "stored_run_reference",
+            "stale": "confirmation_stale_or_confirmation_consumed_or_bot_busy",
+            "audit_event": "run.created",
+            "outbox_effects": [
+                "dispatch_run",
+                "provision_run_owned_vendor_resources",
+                "preallocate_random_sandbox_id_without_creation"
+            ]
+        },
+        {
+            "id": "dispatch_sandbox_execution",
+            "routes": ["PRIVATE RPC capability-gateway.dispatchSandboxExecution"],
+            "actor": "run_owned_durable_object_with_active_token",
+            "idempotency_scope": "run_sequence_source_input_configuration_and_canonical_field_projection_digests",
+            "expected_version": "active_token_manifest_enabled_active_profile_current_evidence_unconsumed_reservation_inherited_class_within_profile_policy_grant_and_effective_limits",
+            "success": "consume_reservation_call_exclusive_runner_once_and_return_result",
+            "repeat": "sandbox_dispatch_replayed",
+            "stale": "sandbox_dispatch_denied_or_sandbox_dispatch_replayed_or_sandbox_profile_not_enabled_or_sandbox_data_profile_denied_or_gateway_sequence_denied",
+            "audit_event": "sandbox.dispatch_consumed",
+            "outbox_effects": ["ambiguous_runner_call_marks_outcome_unknown_without_redispatch"]
+        },
+        {
+            "id": "kill_sandbox_process",
+            "routes": ["PRIVATE RPC SandboxLifecycleService.kill"],
+            "actor": "orchestrator_for_active_run_attempt",
+            "idempotency_scope": "reservation_run_sequence_sandbox_execution_digest_exact_process_handle_run_attempt_fence_and_projection_digest",
+            "expected_version": "consumed_reservation_run_owned_sandbox_call_sequence_execution_digest_exact_process_handle_run_attempt_fence_operation_and_projection_digest",
+            "success": "record_sdk_acknowledged_or_not_found_for_exact_target",
+            "repeat": "stored_lifecycle_command_result",
+            "stale": "sandbox_lifecycle_denied_or_sandbox_process_changed_or_run_attempt_stale",
+            "audit_event": "sandbox.kill_requested",
+            "outbox_effects": ["outcome_unknown_requires_destroy_and_never_proves_termination"]
+        },
+        {
+            "id": "destroy_sandbox",
+            "routes": ["PRIVATE RPC SandboxLifecycleService.destroy"],
+            "actor": "orchestrator_for_current_cleanup_target",
+            "idempotency_scope": "reservation_run_sequence_sandbox_execution_digest_authority_variant_fence_and_projection_digest",
+            "expected_version": "run_owned_sandbox_with_active_run_attempt_authority_or_exact_cleanup_obligation_id_and_fence",
+            "success": "record_sdk_acknowledged_or_not_found",
+            "repeat": "stored_cleanup_command_result_only",
+            "stale": "sandbox_lifecycle_denied_or_sandbox_cleanup_changed_or_run_attempt_stale",
+            "audit_event": "sandbox.destroy_requested",
+            "outbox_effects": ["outcome_unknown_retains_cleanup_obligation_and_blocks_bot_slot"]
+        },
+        {
+            "id": "record_sandbox_result",
+            "routes": ["PRIVATE STORE orchestrator.recordSandboxResult"],
+            "actor": "orchestrator_for_active_run_attempt",
+            "idempotency_scope": "run_sequence_reservation_request_canonical_result_and_terminal_digests",
+            "expected_version": "run_attempt_fence_consumed_reservation_one_execution_strict_canonical_json_inside_effective_limits_and_destroy_response_state",
+            "success": "stored_result_reference",
+            "repeat": "identical_repeat_returns_stored_reference",
+            "stale": "sandbox_result_changed_or_run_attempt_stale",
+            "audit_event": "sandbox.execution_recorded",
+            "outbox_effects": ["ambiguous_launch_or_destroy_creates_cleanup_and_marks_outcome_unknown"]
+        },
+        {
+            "id": "cancel_run",
+            "routes": ["POST /actions/runs/:runId/cancellations", "POST /api/v1/runs/:runId/cancellations"],
+            "actor": "owner",
+            "idempotency_scope": "run_and_cancellation_digest",
+            "expected_version": "run_version_cancellation_fence_and_can_cancel",
+            "success": "303_run_detail_or_200_cancellation_transition",
+            "repeat": "stored_cancellation_transition",
+            "stale": "run_not_cancellable_or_run_changed",
+            "audit_event": "run.cancellation_requested",
+            "outbox_effects": [
+                "abort_runtime",
+                "deny_later_reservations",
+                "request_vendor_cleanup",
+                "request_sandbox_cleanup"
+            ]
+        },
+        {
+            "id": "retry_cleanup",
+            "routes": ["POST /actions/runs/:runId/cleanup-retries", "POST /api/v1/runs/:runId/cleanup-retries"],
+            "actor": "owner",
+            "idempotency_scope": "cleanup_obligation_id_fence_exact_target_and_retry_digest",
+            "expected_version": "manual_required_obligation_retry_window_and_current_repeat_destroy_evidence_for_configuration",
+            "success": "303_run_detail_or_200_pending_obligation",
+            "repeat": "stored_pending_obligation",
+            "stale": "cleanup_changed_or_cleanup_retry_not_allowed",
+            "audit_event": "cleanup.retry_requested",
+            "outbox_effects": ["retry_exact_target_under_cleanup_obligation_authority"]
+        },
+        {
+            "id": "delete_run_content",
+            "routes": ["POST /actions/runs/:runId/content-deletions", "DELETE /api/v1/runs/:runId/content"],
+            "actor": "owner",
+            "idempotency_scope": "run_and_erasure_digest",
+            "expected_version": "content_erasure_version",
+            "success": "303_run_detail_or_204",
+            "repeat": "stored_erasure_version",
+            "stale": "content_erasure_changed",
+            "audit_event": "run.content_erasure_requested",
+            "outbox_effects": ["cancel_active_run", "erase_prompt_and_result_after_guarded_writes"]
+        }
+    ]
+}

@@ -16,6 +16,13 @@
                     "migrations_dir": "../../packages/db-d1/migrations",
                 },
             ],
+            "services": [
+                {
+                    "binding": "SANDBOX_EXECUTION",
+                    "service": "openbot-sandbox-runner-preview",
+                    "entrypoint": "SandboxExecutionService",
+                },
+            ],
         },
         "production": {
             "d1_databases": [
@@ -24,6 +31,13 @@
                     "database_name": "openbot-control-production",
                     "database_id": "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID",
                     "migrations_dir": "../../packages/db-d1/migrations",
+                },
+            ],
+            "services": [
+                {
+                    "binding": "SANDBOX_EXECUTION",
+                    "service": "openbot-sandbox-runner-production",
+                    "entrypoint": "SandboxExecutionService",
                 },
             ],
         },

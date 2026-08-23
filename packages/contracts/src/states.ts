@@ -38,6 +38,29 @@ export type CleanupStateV1 = z.infer<typeof CleanupStateV1Schema>;
 export const ProviderEvidenceStateV1Schema = z.enum(["complete", "partial", "unavailable"]);
 export type ProviderEvidenceStateV1 = z.infer<typeof ProviderEvidenceStateV1Schema>;
 
+export const SandboxExecutionStateV1Schema = z.enum([
+    "requested",
+    "provisioning",
+    "ready",
+    "executing",
+    "destroy_requested",
+    "destroyed",
+    "destroy_unverified",
+    "manual_required",
+]);
+export type SandboxExecutionStateV1 = z.infer<typeof SandboxExecutionStateV1Schema>;
+
+export const SandboxCommandStateV1Schema = z.enum([
+    "reserved",
+    "dispatched",
+    "completed",
+    "failed",
+    "timed_out",
+    "cancelled",
+    "outcome_unknown",
+]);
+export type SandboxCommandStateV1 = z.infer<typeof SandboxCommandStateV1Schema>;
+
 export const PresentationStatusV1Schema = z.enum([
     "outcome_unknown",
     "cleanup_required",
@@ -60,6 +83,7 @@ export const PresentationStateV1Schema = z
         bot: BotStateV1Schema,
         catalog: CatalogDependencyStateV1Schema,
         grant: z.enum(["usable", "missing"]),
+        compute: z.enum(["not_selected", "usable", "configuration_missing", "grant_missing"]),
         confirmation: ConfirmationStateV1Schema,
         execution: RunExecutionStateV1Schema.nullable(),
         cleanup: CleanupStateV1Schema,

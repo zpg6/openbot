@@ -63,11 +63,17 @@ describe("control-plane route inventory", () => {
 });
 
 describe("Worker exposure defaults", () => {
-    const workerNames = ["capability-gateway", "control-plane", "orchestrator", "runtime"] as const;
+    const workerConfigs = {
+        "capability-gateway": "wrangler.d1.jsonc",
+        "control-plane": "wrangler.d1.jsonc",
+        orchestrator: "wrangler.d1.jsonc",
+        runtime: "wrangler.d1.jsonc",
+        "sandbox-runner": "wrangler.jsonc",
+    } as const;
 
-    for (const worker of workerNames) {
+    for (const [worker, configFile] of Object.entries(workerConfigs)) {
         it(`${worker} disables platform URLs and logs`, async () => {
-            const config = await readFile(new URL(`../../apps/${worker}/wrangler.d1.jsonc`, import.meta.url), "utf8");
+            const config = await readFile(new URL(`../../apps/${worker}/${configFile}`, import.meta.url), "utf8");
 
             expect(config).toMatch(/"workers_dev": false/u);
             expect(config).toMatch(/"preview_urls": false/u);
@@ -83,5 +89,30 @@ describe("Worker exposure defaults", () => {
         expect(config).toContain('"binding": "CAPABILITY_GATEWAY"');
         expect(config).not.toContain("CONTROL_DB_FRESH");
         expect(config).not.toContain("d1_databases");
+    });
+
+    it("gives execute and lifecycle callers disjoint Sandbox runner entrypoints", async () => {
+        const gateway = await readFile(
+            new URL("../../apps/capability-gateway/wrangler.d1.jsonc", import.meta.url),
+            "utf8"
+        );
+        const orchestrator = await readFile(
+            new URL("../../apps/orchestrator/wrangler.d1.jsonc", import.meta.url),
+            "utf8"
+        );
+        const runtime = await readFile(new URL("../../apps/runtime/wrangler.d1.jsonc", import.meta.url), "utf8");
+
+        expect(gateway).toContain('"binding": "SANDBOX_EXECUTION"');
+        expect(gateway).toContain('"entrypoint": "SandboxExecutionService"');
+        expect(gateway).not.toContain("SandboxLifecycleService");
+        expect(gateway).not.toContain("SANDBOX_LIFECYCLE");
+
+        expect(orchestrator).toContain('"binding": "SANDBOX_LIFECYCLE"');
+        expect(orchestrator).toContain('"entrypoint": "SandboxLifecycleService"');
+        expect(orchestrator).not.toContain("SandboxExecutionService");
+        expect(orchestrator).not.toContain("SANDBOX_EXECUTION");
+
+        expect(runtime).not.toContain("SandboxExecutionService");
+        expect(runtime).not.toContain("SandboxLifecycleService");
     });
 });

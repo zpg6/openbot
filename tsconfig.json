@@ -4,10 +4,12 @@
         { "path": "./packages/contracts" },
         { "path": "./packages/domain" },
         { "path": "./packages/db-d1" },
+        { "path": "./packages/sandbox-protocol" },
         { "path": "./apps/capability-gateway" },
         { "path": "./apps/control-plane" },
         { "path": "./apps/orchestrator" },
         { "path": "./apps/runtime" },
+        { "path": "./apps/sandbox-runner" },
         { "path": "./tsconfig.tests.node.json" },
         { "path": "./tsconfig.tests.worker.json" }
     ]

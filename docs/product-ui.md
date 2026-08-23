@@ -8,21 +8,24 @@ OpenBot is unaffiliated with xAI and Grok Bot. Product research informed the hie
 
 A connection is not authority. The organization owner chooses reviewed tools and declarative skills for a Bot, then grants the Bot a narrow purpose, scope, limit, and expiry. Each task gets a fresh confirmation and an independent run.
 
-The first release does one useful job. One owner reviews and starts a short read-only task that uses one reviewed Metorial connector and one fixed OpenRouter model route. The interface must not imply that OpenBot can write provider business data, browse websites, run shell commands, share a computer, remember prior conversations, or work unattended.
+The first release does one useful job. One owner reviews and starts a short read-only task that uses one reviewed Metorial connector, one fixed OpenRouter model route, and an optional reviewed Cloudflare Sandbox profile. The interface must not imply that OpenBot can write provider business data, browse websites, expose an interactive shell, install packages, share a persistent computer, remember prior conversations, or work unattended.
 
 Use these product terms consistently:
 
-| Term                     | Meaning                                                                                                     |
-| ------------------------ | ----------------------------------------------------------------------------------------------------------- |
-| Organization             | The account boundary. The first release has one owner role.                                                 |
-| Bot                      | A named configuration with immutable behavior revisions and scoped grants.                                  |
-| Connection               | A provider authorization reference managed through Metorial. It grants nothing by itself.                   |
-| Organization tool policy | An owner-reviewed, pinned connector tool that Bots may select.                                              |
-| Declarative skill        | Versioned instruction text and bounded schemas. It cannot add authority.                                    |
-| Grant                    | The Bot-specific tool, resource, purpose, limit, and expiry authority.                                      |
-| Task confirmation        | A five-minute disclosure snapshot. It is not a run and not permission for provider writes.                  |
-| Run                      | One independent execution object with one occupied Bot run slot.                                            |
-| Cleanup                  | Revocation and deletion work for run-owned vendor resources. It can remain incomplete after execution ends. |
+| Term                     | Meaning                                                                                                                       |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| Organization             | The account boundary. The first release has one owner role.                                                                   |
+| Bot                      | A named configuration with immutable behavior revisions and scoped grants.                                                    |
+| Connection               | A provider authorization reference managed through Metorial. It grants nothing by itself.                                     |
+| Organization tool policy | An owner-reviewed, pinned connector tool that Bots may select.                                                                |
+| Declarative skill        | Versioned instruction text and bounded schemas. It cannot add authority.                                                      |
+| Code profile             | The operator-reviewed JavaScript runner, image, network, filesystem, and numeric limits.                                      |
+| Compute policy           | An organization policy that narrows an enabled code profile. A Bot revision selects it, but it grants no authority by itself. |
+| Compute grant            | Separate, expiring authority for one Bot revision to use its selected compute policy. A provider connection is unrelated.     |
+| Grant                    | The Bot-specific tool, resource, purpose, limit, and expiry authority.                                                        |
+| Task confirmation        | A five-minute disclosure snapshot. It is not a run and not permission for provider writes.                                    |
+| Run                      | One independent execution object with one occupied Bot run slot and, when enabled, one random Sandbox.                        |
+| Cleanup                  | Revocation and deletion work for run-owned vendor and Sandbox resources. It may outlive execution.                            |
 
 ## Desktop layout
 
@@ -80,15 +83,15 @@ Order Bots by presentation priority, then recent activity, then Bot ID. Presenta
 8. `Needs access`
 9. `Cancelled`, `Failed`, or `Completed`
 
-A Bot with no earlier run and usable configuration and access is `Ready`. `Needs configuration` means a selected tool policy, skill revision, connector revision, or model route cannot be used. Roster state is a navigation hint, never an authorization decision.
+A Bot with no earlier run and usable configuration and access is `Ready`. `Needs configuration` means a selected tool policy, skill revision, connector revision, model route, code profile, or compute policy cannot be used. A missing, expired, or revoked compute grant produces `Needs access`. Roster state is a navigation hint, never an authorization decision.
 
 ### Bot workspace
 
 The header shows the Bot mark, name, active revision, and an `Access` control. Under it, ordinary links switch between `Tasks`, `Access`, and `Profile`.
 
-The task feed contains independent confirmations and run summaries in OpenBot commit order. Put a user prompt on the right visually, but keep chronological DOM order. Put confirmation, activity, safe tool summaries, result, evidence, and cleanup cards on the left under a run heading.
+The task feed contains independent confirmations and run summaries in OpenBot commit order. Put a user prompt on the right visually, but keep chronological DOM order. Put confirmation, activity, safe provider-tool and code summaries, result, evidence, and cleanup cards on the left under a run heading.
 
-The composer has one multiline field and a `Review task` button. It has no attachment, microphone, mention, schedule, browser, or computer control. Disable it when the Bot lacks a currently usable grant, has a live confirmation, has a nonterminal run, or has incomplete cleanup. Explain the exact reason beside the disabled control. Do not rely on color or a disabled tooltip.
+The composer has one multiline field and a `Review task` button. It has no attachment, microphone, mention, schedule, browser, or computer control. Disable it when the Bot lacks a currently usable provider grant. A code-enabled Bot also requires an enabled active profile, active selected compute-policy revision, and unexpired active compute grant. A live confirmation, nonterminal run, or incomplete cleanup also disables the composer. Explain the exact reason beside the control. Do not rely on color or a disabled tooltip.
 
 The first release permits one live confirmation and one occupied run slot per Bot. Submitting the composer creates a five-minute confirmation. It does not create a run.
 
@@ -105,18 +108,19 @@ The first release permits one live confirmation and one occupied run slot per Bo
 | Tool       list_support_cases                                     |
 | Data       case titles, status, assigned team                     |
 | To         selected model provider and reviewed connector         |
-| Limits     2 tool calls, 120 seconds, 128 KiB per tool result      |
+| Code       JavaScript, ephemeral files, public net blocked         |
+| Limits     2 provider calls, 1 code call, 240 seconds              |
 | Skills     Triage summary, revision 3                             |
 |                                                                  |
 | [Discard]                                             [Start run] |
 +------------------------------------------------------------------+
 ```
 
-The server authors every field except the already-entered prompt. Show the exact prompt, named tool policies, selected skill revisions, possible data classes, destinations, expiry, and numeric limits. State that model-selected arguments and returned records do not exist yet and cannot be previewed.
+The server authors every field except the already-entered prompt. Show the exact prompt, named provider-tool policies, selected skill revisions, compute policy and grant, JavaScript profile, network and filesystem rules, possible data classes, destinations, expiry, and numeric limits. State that model-selected arguments, code, and returned records do not exist yet and cannot be previewed. When code is enabled, say that model-written code and selected inputs go to Cloudflare. OpenBot requests Sandbox cleanup after the run, does not reuse its files, and shows `Cleaning up` or `Cleanup required` until Cloudflare acknowledges the request.
 
 Use `Start run`, not `Approve`. The confirmation authorizes this disclosed read-only run. It does not approve a provider business-data write and never offers `Always allow`.
 
-If catalog, grant, connection, model route, cleanup, or Bot revision state changes, mark the confirmation stale. Show the reason and link back to the Bot. Never recompile and start silently.
+If catalog, provider grant, compute profile, compute policy, compute grant, connection, model route, cleanup, or Bot revision state changes, mark the confirmation stale. Show the reason and link back to the Bot. Never recompile and start silently.
 
 ### Run detail
 
@@ -128,7 +132,7 @@ Show the original prompt, a cursor-paginated timeline, the plain-text final answ
 
 A successful answer does not hide `Cleanup required`. Render `Cancel run` only when the server supplies `can_cancel`. Show a stable error code and request ID as selectable text. Browser code may add copy controls, but it must not replace the original text.
 
-Connector code may produce a safe summary that names an allowed tool and a record count. Do not render raw MCP arguments, MCP results, model reasoning, vendor bearer references, or decrypted configuration.
+Connector code may produce a safe summary that names an allowed provider tool and a record count. A code summary may show language, duration, exit state, and truncated stdout and stderr byte counts. Do not render raw MCP arguments, MCP results, model-written code, model reasoning, vendor bearer references, or decrypted configuration by default.
 
 Final answers are plain text with preserved whitespace. Do not render model Markdown or HTML. A source becomes a link only when reviewed connector code constructs a `SourceReferenceV1` from typed provider identifiers. The connector accepts one canonical HTTPS host, the default port, a defined path grammar, and an allowlist of safe query keys. It rejects unknown query keys, userinfo, fragments, IP literals, nondefault ports, and any normalization change. Model-written citations remain unlinked text.
 
@@ -190,18 +194,20 @@ Use the same routes and content on desktop and mobile. Do not build a native mob
 
 Say what OpenBot knows and what it does not know.
 
-| Situation                          | Required copy direction                                                                               |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Connection exists but no Bot grant | `Connected, but this Bot has no access.` Link to the Bot access page.                                 |
-| Resource mapping is unsupported    | `This connector cannot enforce the selected resource scope. The run was not created.`                 |
-| Bot is busy                        | Name the live confirmation, run, or cleanup obligation. Do not say only `Unavailable`.                |
-| Confirmation expired or changed    | State that no run started and ask the user to review again.                                           |
-| Cancellation requested             | Say that OpenBot denied new calls. Do not claim a vendor call already in flight was undone.           |
-| Outcome is uncertain               | Use `Outcome unknown`. Do not relabel it `Failed`.                                                    |
-| Cleanup is incomplete              | Keep the cleanup warning visible even if an answer exists.                                            |
-| Audit chain verifies               | Say the application chain verifies from its stored start. Do not call it immutable or non-repudiable. |
-| Provider write requested           | State that provider business-data writes are not supported in the read-only release.                  |
-| Artifact feature absent            | Do not render disabled upload, file, mount, or shared-workspace controls.                             |
+| Situation                          | Required copy direction                                                                                     |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Connection exists but no Bot grant | `Connected, but this Bot has no access.` Link to the Bot access page.                                       |
+| Resource mapping is unsupported    | `This connector cannot enforce the selected resource scope. The run was not created.`                       |
+| Bot is busy                        | Name the live confirmation, run, or cleanup obligation. Do not say only `Unavailable`.                      |
+| Confirmation expired or changed    | State that no run started and ask the user to review again.                                                 |
+| Cancellation requested             | Say that OpenBot denied new calls. Do not claim a vendor call already in flight was undone.                 |
+| Outcome is uncertain               | Use `Outcome unknown`. Do not relabel it `Failed`.                                                          |
+| Cleanup is incomplete              | Keep the cleanup warning visible even if an answer exists.                                                  |
+| Audit chain verifies               | Say the application chain verifies from its stored start. Do not call it immutable or non-repudiable.       |
+| Provider write requested           | State that provider business-data writes are not supported in the read-only release.                        |
+| Code execution enabled             | Name JavaScript, the Cloudflare destination, ephemeral filesystem, network and DNS limits, and compute cap. |
+| Sandbox cleanup incomplete         | State that files may still exist in an isolated container and keep the Bot slot blocked.                    |
+| Artifact feature absent            | Do not render disabled upload, file, mount, or shared-workspace controls.                                   |
 
 Do not use teammate copy that implies memory or a continuing conversation. `Start a task` is the primary verb. Each task is independent. Do not say `I'll remember`, `hand this to another Bot`, `run every week`, or `always allow`.
 
@@ -224,6 +230,8 @@ All resource IDs are account-scoped UUIDs. Raw bootstrap, reset, and confirmatio
 | `GET /run-confirmations/:confirmationId` | Session-bound five-minute task confirmation.                                                             |
 | `GET /catalog/tools`                     | Organization tool policies and dependency impact.                                                        |
 | `GET /catalog/tools/:policyId`           | Server-derived connector contract and disable impact.                                                    |
+| `GET /catalog/compute`                   | Installation profile, DNS gate state, compute policies, and dependent Bots.                              |
+| `GET /catalog/compute/:policyId`         | Profile digest, admitted data classes, grants, dependent Bots, and disable impact.                       |
 | `GET /catalog/skills`                    | Skills, current defaults, disabled revisions, and dependent Bots.                                        |
 | `GET /catalog/skills/new`                | Declarative skill form.                                                                                  |
 | `GET /catalog/skills/:skillId`           | Skill revisions, requested tools, and disable impact.                                                    |
@@ -250,6 +258,8 @@ All actions below use `POST`. Sign-in and sign-out are the documented Better Aut
 | `/actions/bots/:botId/revisions`                                | Append a behavior revision.                                                              |
 | `/actions/organization-tool-policies`                           | Approve one reviewed tool version for selection.                                         |
 | `/actions/organization-tool-policies/:policyId/disables`        | Disable after the impact digest and fence still match.                                   |
+| `/actions/organization-compute-policies`                        | Create a policy that narrows the enabled installation profile.                           |
+| `/actions/organization-compute-policies/:policyId/disables`     | Disable after the impact digest and fence still match.                                   |
 | `/actions/skills`                                               | Create a skill and first revision.                                                       |
 | `/actions/skills/:skillId/revisions`                            | Append a skill revision.                                                                 |
 | `/actions/skills/:skillId/revisions/:revisionId/disables`       | Disable one revision after impact revalidation.                                          |
@@ -258,6 +268,8 @@ All actions below use `POST`. Sign-in and sign-out are the documented Better Aut
 | `/actions/provider-authorizations/:authorizationId/revocations` | Deny local use, cancel affected runs, and request vendor revocation.                     |
 | `/actions/capability-grants`                                    | Create one Bot-scoped grant.                                                             |
 | `/actions/capability-grants/:grantId/revocations`               | Revoke, discard dependent confirmations, and cancel dependent runs.                      |
+| `/actions/compute-grants`                                       | Create separate expiring compute authority for one Bot revision.                         |
+| `/actions/compute-grants/:grantId/revocations`                  | Revoke compute authority and cancel dependent work.                                      |
 | `/actions/run-confirmations`                                    | Compile and store a disclosure snapshot.                                                 |
 | `/actions/run-confirmations/:confirmationId/discards`           | Consume without a run and schedule prompt erasure.                                       |
 | `/actions/runs`                                                 | Consume a session-bound confirmation and create a run.                                   |
@@ -269,16 +281,16 @@ All actions below use `POST`. Sign-in and sign-out are the documented Better Aut
 
 The first public API uses the browser session. Unsafe methods also require origin and synchronizer CSRF checks, accept JSON only, and expose no CORS headers. Every list returns `{ items, next_cursor }`. The generated OpenAPI document covers `/api/v1` only.
 
-| Domain               | Routes                                                                                                                                                                                                                                                                                                                                                                                       |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Account              | `GET /api/v1/account`                                                                                                                                                                                                                                                                                                                                                                        |
-| Bots                 | `GET, POST /api/v1/bots`; `GET /api/v1/bots/:botId`; `PATCH /api/v1/bots/:botId/profile`; `POST /api/v1/bots/:botId/revisions`; `GET /api/v1/bots/:botId/runs`                                                                                                                                                                                                                               |
-| Organization catalog | `GET, POST /api/v1/organization-tool-policies`; `GET /api/v1/organization-tool-policies/:policyId`; `POST /api/v1/organization-tool-policies/:policyId/disables`; `GET, POST /api/v1/skills`; `GET /api/v1/skills/:skillId`; `POST /api/v1/skills/:skillId/revisions`; `POST /api/v1/skills/:skillId/revisions/:revisionId/disables`                                                         |
-| Connector catalog    | `GET /api/v1/provider-deployments`; `GET /api/v1/provider-deployments/:deploymentId`                                                                                                                                                                                                                                                                                                         |
-| Connections          | `GET /api/v1/provider-authorizations`; `GET /api/v1/provider-authorizations/:authorizationId`; `POST /api/v1/connection-setups`; `GET /api/v1/connection-setups/:setupId`; `POST /api/v1/provider-authorizations/:authorizationId/revocations`                                                                                                                                               |
-| Grants               | `GET, POST /api/v1/capability-grants`; `GET /api/v1/capability-grants/:grantId`; `POST /api/v1/capability-grants/:grantId/revocations`                                                                                                                                                                                                                                                       |
-| Runs                 | `POST /api/v1/run-confirmations`; `GET /api/v1/run-confirmations/:confirmationId`; `POST /api/v1/run-confirmations/:confirmationId/discards`; `POST /api/v1/runs`; `GET /api/v1/runs/:runId`; `GET /api/v1/runs/:runId/events`; `GET /api/v1/runs/:runId/result`; `POST /api/v1/runs/:runId/cancellations`; `POST /api/v1/runs/:runId/cleanup-retries`; `DELETE /api/v1/runs/:runId/content` |
-| Audit                | `GET /api/v1/audit-events`; `GET /api/v1/audit-events/:eventId`                                                                                                                                                                                                                                                                                                                              |
+| Domain               | Routes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Account              | `GET /api/v1/account`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Bots                 | `GET, POST /api/v1/bots`; `GET /api/v1/bots/:botId`; `PATCH /api/v1/bots/:botId/profile`; `POST /api/v1/bots/:botId/revisions`; `GET /api/v1/bots/:botId/runs`                                                                                                                                                                                                                                                                                                                                                  |
+| Organization catalog | `GET, POST /api/v1/organization-tool-policies`; `GET /api/v1/organization-tool-policies/:policyId`; `POST /api/v1/organization-tool-policies/:policyId/disables`; `GET, POST /api/v1/organization-compute-policies`; `GET /api/v1/organization-compute-policies/:policyId`; `POST /api/v1/organization-compute-policies/:policyId/disables`; `GET, POST /api/v1/skills`; `GET /api/v1/skills/:skillId`; `POST /api/v1/skills/:skillId/revisions`; `POST /api/v1/skills/:skillId/revisions/:revisionId/disables` |
+| Connector catalog    | `GET /api/v1/provider-deployments`; `GET /api/v1/provider-deployments/:deploymentId`                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Connections          | `GET /api/v1/provider-authorizations`; `GET /api/v1/provider-authorizations/:authorizationId`; `POST /api/v1/connection-setups`; `GET /api/v1/connection-setups/:setupId`; `POST /api/v1/provider-authorizations/:authorizationId/revocations`                                                                                                                                                                                                                                                                  |
+| Grants               | `GET, POST /api/v1/capability-grants`; `GET /api/v1/capability-grants/:grantId`; `POST /api/v1/capability-grants/:grantId/revocations`; `GET, POST /api/v1/compute-grants`; `GET /api/v1/compute-grants/:grantId`; `POST /api/v1/compute-grants/:grantId/revocations`                                                                                                                                                                                                                                           |
+| Runs                 | `POST /api/v1/run-confirmations`; `GET /api/v1/run-confirmations/:confirmationId`; `POST /api/v1/run-confirmations/:confirmationId/discards`; `POST /api/v1/runs`; `GET /api/v1/runs/:runId`; `GET /api/v1/runs/:runId/events`; `GET /api/v1/runs/:runId/result`; `POST /api/v1/runs/:runId/cancellations`; `POST /api/v1/runs/:runId/cleanup-retries`; `DELETE /api/v1/runs/:runId/content`                                                                                                                    |
+| Audit                | `GET /api/v1/audit-events`; `GET /api/v1/audit-events/:eventId`                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 `GET /api/v1/runs/:runId/events` accepts `after` and a limit of at most 50. It returns `RunPollPageV1`. Cursors bind account, resource, filters, and query version. A cursor from another account, run, or filter produces a generic invalid-cursor problem.
 
@@ -290,17 +302,18 @@ Better Auth lives behind a committed allowlist under `/api/auth/*`. The initial 
 
 Page handlers serialize allowlisted view objects. They never send database rows to templates.
 
-| Contract                 | Used by                      | Required content                                                                                                         |
-| ------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `BotRosterViewV1`        | Bot list and shared sidebar  | Query state, cursor links, `BotListItemV1` rows, and allowed top-level actions.                                          |
-| `BotWorkspaceViewV1`     | Bot task page                | Bot identity, active revision, feed items, composer availability, denial reason, and navigation.                         |
-| `RunConfirmationViewV1`  | Confirmation page            | Exact disclosure snapshot, expiry, stale state, and server-derived actions.                                              |
-| `RunDetailViewV1`        | Run detail                   | Prompt, three status dimensions, timeline page, plain-text result, evidence, cleanup, `can_cancel`, and `cancel_reason`. |
-| `RunPollPageV1`          | Two-second polling           | Run version, execution, cleanup, evidence and result state, new items, and next cursor.                                  |
-| `BotAccessViewV1`        | Bot access page              | Connections, grants, resource mapping, destinations, limits, purpose, expiry, and impact-safe mutations.                 |
-| `ConnectionDetailViewV1` | Connection detail            | Provider version, safe authorization state, dependent grants, and revocation impact.                                     |
-| `CatalogViewV1`          | Tool and skill catalog pages | Immutable revision identity, lifecycle, dependency counts, and server-derived actions.                                   |
-| `AuditEventViewV1`       | Audit event page             | Redacted canonical event, stream position, stored digests, and verifier result.                                          |
+| Contract                 | Used by                      | Required content                                                                                                                          |
+| ------------------------ | ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `BotRosterViewV1`        | Bot list and shared sidebar  | Query state, cursor links, `BotListItemV1` rows, and allowed top-level actions.                                                           |
+| `BotWorkspaceViewV1`     | Bot task page                | Bot identity, active revision, feed items, composer availability, denial reason, and navigation.                                          |
+| `RunConfirmationViewV1`  | Confirmation page            | Exact disclosure snapshot, expiry, stale state, and server-derived actions.                                                               |
+| `RunDetailViewV1`        | Run detail                   | Prompt, three status dimensions, timeline page, plain-text result, evidence, cleanup, `can_cancel`, and `cancel_reason`.                  |
+| `RunPollPageV1`          | Two-second polling           | Run version, execution, cleanup, evidence and result state, new items, and next cursor.                                                   |
+| `BotAccessViewV1`        | Bot access page              | Connections, provider grants, separate compute grant, resource mapping, destinations, limits, purpose, expiry, and impact-safe mutations. |
+| `ConnectionDetailViewV1` | Connection detail            | Provider version, safe authorization state, dependent grants, and revocation impact.                                                      |
+| `CatalogViewV1`          | Tool and skill catalog pages | Immutable revision identity, lifecycle, dependency counts, and server-derived actions.                                                    |
+| `ComputeCatalogViewV1`   | Compute catalog pages        | Profile adoption evidence and expiry, profile and policy lifecycle, limits, admitted classes, dependent Bots, and server-derived actions. |
+| `AuditEventViewV1`       | Audit event page             | Redacted canonical event, stream position, stored digests, and verifier result.                                                           |
 
 Every view includes `available_actions` and stable denial reasons from the server. No view may contain an encrypted content field, credential, MCP URL, Metorial reference, bearer capability, password material, raw tool argument, or raw tool result.
 
@@ -314,7 +327,7 @@ Exact-key tests cover every registered serializer. High-entropy sentinels in sen
 
 These routes do not belong to the read-only core. Keep them unregistered and hide every artifact control until the R2 workspace gate passes.
 
-| Surface          | Routes added after the gate                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Route group      | Routes added after the gate                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | HTML             | `GET /artifact-collections`; `GET /artifact-collections/new`; `GET /artifact-collections/:collectionId`; `GET /artifact-collections/:collectionId/uploads/new`; `GET /artifact-versions/:artifactVersionId`; `GET /artifact-uploads/:uploadId`                                                                                                                                                                                                                                                                                                                             |
 | Actions          | `POST /actions/artifact-collections`; `POST /actions/artifact-uploads/small`; `POST /actions/artifact-versions/:artifactVersionId/publications`; `POST /actions/artifact-paths/:artifactPathId/moves`; `POST /actions/artifact-paths/:artifactPathId/deletions`; `POST /actions/artifact-paths/:artifactPathId/restores`; `POST /actions/bots/:botId/artifact-mounts`; `POST /actions/bots/:botId/artifact-mounts/:mountId/revocations`                                                                                                                                    |
@@ -337,7 +350,7 @@ Research snapshot: 2026-08-21. Observations describe the cited pages on that dat
 | Files and results appear in task context.                                   | [Files and results](https://docs.x.ai/grok-bot/files-and-results), results                                           | High       | Show plain-text results first. Add versioned R2 artifacts only after a separate gate.                 | No                                            |
 | Skills and routines extend Bot behavior.                                    | [Skills, routines, and automations](https://docs.x.ai/grok-bot/skills-routines-and-automations), skills and routines | High       | Support bounded declarative skill revisions. Defer executable skills, schedules, and unattended runs. | No                                            |
 | Mobile keeps access to Bot work in a narrow layout.                         | [Mobile behavior](https://docs.x.ai/grok-bot/mobile), mobile                                                         | Medium     | Use one responsive server-rendered interface and an accessible navigation drawer.                     | Yes, the exact layout is OpenBot's design.    |
-| A user's Bots share one cloud computer and can hand work across it.         | [Grok Bot FAQ](https://docs.x.ai/grok-bot/faq), computer and Bot isolation                                           | Medium     | Do not share a machine. Use independent runs and later add snapshot-bound R2 artifact collections.    | No                                            |
+| A user's Bots share one cloud computer and can hand work across it.         | [Grok Bot FAQ](https://docs.x.ai/grok-bot/faq), computer and Bot isolation                                           | Medium     | Give each code-enabled run a fresh Sandbox. Later add snapshot-bound R2 artifact collections.         | No                                            |
 | Connections are initiated from a product-level plugin flow.                 | [Plugin connection flow](https://cursor.com/help/grok-bot/connect-plugins), connecting plugins                       | Medium     | Keep connection setup separate from Bot-specific grants.                                              | Yes, the authority split is OpenBot's design. |
 
 The matrix records what inspired a design choice. It does not permit copied wording, trade dress, art, icons, layout assets, or source code.
@@ -348,7 +361,7 @@ Do not draw disabled placeholders for deferred work. Omit it until its authority
 
 - persistent conversation context, replies, reactions, group chats, and direct Bot messages
 - routines, schedules, unattended runs, desktop notifications, and native mobile applications
-- shell, browser, computer view, microphone, voice, and teach-by-demonstration
+- interactive terminal, arbitrary command endpoint, package installation, browser, computer view, microphone, voice, and teach-by-demonstration
 - provider business-data write approvals and `Always allow`
 - attachments and artifact controls before the R2 gate
 - Bot pinning, hiding, custom sidebar sections, duplication, and command palette

@@ -2,6 +2,85 @@ import { z } from "zod";
 
 const boundedInteger = (maximum: number) => z.number().int().positive().max(maximum);
 
+export const CodeExecutionLimitsV1Schema = z
+    .object({
+        max_executions: z.literal(1),
+        max_source_bytes: z.literal(32 * 1024),
+        max_input_bytes: z.literal(128 * 1024),
+        max_stdout_bytes: z.literal(48 * 1024),
+        max_stderr_bytes: z.literal(16 * 1024),
+        max_result_bytes: z.literal(64 * 1024),
+        max_output_bytes: z.literal(128 * 1024),
+        max_filesystem_bytes: z.literal(256 * 1024 * 1024),
+        max_processes: z.literal(8),
+        max_outbound_requests: z.literal(0),
+        max_output_frames: z.literal(64),
+        startup_timeout_ms: z.literal(60_000),
+        execution_timeout_ms: z.literal(15_000),
+        teardown_timeout_ms: z.literal(30_000),
+        sandbox_lifetime_ms: z.literal(120_000),
+    })
+    .strict();
+export type CodeExecutionLimitsV1 = z.infer<typeof CodeExecutionLimitsV1Schema>;
+
+export const NarrowedCodeExecutionLimitsV1Schema = z
+    .object({
+        max_executions: z.literal(1),
+        max_source_bytes: boundedInteger(32 * 1024),
+        max_input_bytes: boundedInteger(128 * 1024),
+        max_stdout_bytes: boundedInteger(48 * 1024),
+        max_stderr_bytes: boundedInteger(16 * 1024),
+        max_result_bytes: boundedInteger(64 * 1024),
+        max_output_bytes: boundedInteger(128 * 1024),
+        max_filesystem_bytes: boundedInteger(256 * 1024 * 1024),
+        max_processes: boundedInteger(8),
+        max_outbound_requests: z.literal(0),
+        max_output_frames: boundedInteger(64),
+        startup_timeout_ms: boundedInteger(60_000),
+        execution_timeout_ms: boundedInteger(15_000),
+        teardown_timeout_ms: boundedInteger(30_000),
+        sandbox_lifetime_ms: boundedInteger(120_000),
+    })
+    .strict()
+    .superRefine((limits, context) => {
+        if (limits.max_stdout_bytes + limits.max_stderr_bytes + limits.max_result_bytes > limits.max_output_bytes) {
+            context.addIssue({
+                code: "custom",
+                path: ["max_output_bytes"],
+                message: "Aggregate code output must cover stdout, stderr, and result limits",
+            });
+        }
+        if (
+            limits.startup_timeout_ms + limits.execution_timeout_ms + limits.teardown_timeout_ms >
+            limits.sandbox_lifetime_ms
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["sandbox_lifetime_ms"],
+                message: "Sandbox lifetime must cover startup, execution, and teardown limits",
+            });
+        }
+    });
+export type NarrowedCodeExecutionLimitsV1 = z.infer<typeof NarrowedCodeExecutionLimitsV1Schema>;
+
+export const DEFAULT_CODE_EXECUTION_LIMITS_V1 = Object.freeze({
+    max_executions: 1,
+    max_source_bytes: 32 * 1024,
+    max_input_bytes: 128 * 1024,
+    max_stdout_bytes: 48 * 1024,
+    max_stderr_bytes: 16 * 1024,
+    max_result_bytes: 64 * 1024,
+    max_output_bytes: 128 * 1024,
+    max_filesystem_bytes: 256 * 1024 * 1024,
+    max_processes: 8,
+    max_outbound_requests: 0,
+    max_output_frames: 64,
+    startup_timeout_ms: 60_000,
+    execution_timeout_ms: 15_000,
+    teardown_timeout_ms: 30_000,
+    sandbox_lifetime_ms: 120_000,
+} as const satisfies CodeExecutionLimitsV1);
+
 export const ArtifactRuntimeLimitsV1Schema = z
     .object({
         max_snapshot_mounts: boundedInteger(8),
@@ -29,12 +108,27 @@ export const RuntimeLimitsV1Schema = z
         max_tool_argument_bytes_per_call: boundedInteger(16 * 1024),
         max_tool_result_bytes_per_call: boundedInteger(128 * 1024),
         max_safe_summary_bytes_per_call: boundedInteger(4 * 1024),
-        max_model_turns: boundedInteger(3),
+        max_model_turns: boundedInteger(5),
         max_tool_calls: boundedInteger(2),
+        max_code_executions: z.number().int().nonnegative().max(1),
+        max_code_source_bytes_per_call: boundedInteger(32 * 1024),
+        max_code_input_bytes_per_call: boundedInteger(128 * 1024),
+        max_code_stdout_bytes_per_call: boundedInteger(48 * 1024),
+        max_code_stderr_bytes_per_call: boundedInteger(16 * 1024),
+        max_code_result_bytes_per_call: boundedInteger(64 * 1024),
+        max_code_output_bytes_per_run: boundedInteger(128 * 1024),
+        max_sandbox_filesystem_bytes: boundedInteger(256 * 1024 * 1024),
+        max_sandbox_processes: boundedInteger(8),
+        max_sandbox_outbound_requests: z.literal(0),
+        max_sandbox_output_frames: boundedInteger(64),
+        max_code_execution_ms: boundedInteger(15_000),
+        max_sandbox_startup_ms: boundedInteger(60_000),
+        max_sandbox_teardown_ms: boundedInteger(30_000),
+        max_sandbox_lifetime_ms: boundedInteger(120_000),
         max_estimated_model_input_tokens_per_request: boundedInteger(32_000),
         max_model_output_tokens_per_request: boundedInteger(2_048),
         max_model_stream_bytes_per_request: boundedInteger(128 * 1024),
-        max_runtime_wall_time_ms: boundedInteger(120_000),
+        max_runtime_wall_time_ms: boundedInteger(240_000),
         max_durable_metadata_events: boundedInteger(64),
         max_ndjson_frame_bytes: boundedInteger(16 * 1024),
         max_durable_event_bytes_per_run: boundedInteger(256 * 1024),
@@ -43,7 +137,7 @@ export const RuntimeLimitsV1Schema = z
         max_queue_delivery_attempts: boundedInteger(3),
         queue_message_retention_ms: boundedInteger(24 * 60 * 60 * 1000),
         outbox_dispatch_lease_ms: boundedInteger(30_000),
-        run_attempt_lease_ms: boundedInteger(180_000),
+        run_attempt_lease_ms: boundedInteger(300_000),
         run_attempt_heartbeat_ms: boundedInteger(30_000),
         max_automatic_cleanup_attempts: boundedInteger(10),
         automatic_cleanup_window_ms: boundedInteger(24 * 60 * 60 * 1000),
@@ -59,6 +153,28 @@ export const RuntimeLimitsV1Schema = z
                 code: "custom",
                 path: ["run_attempt_heartbeat_ms"],
                 message: "Heartbeat must be shorter than the run-attempt lease",
+            });
+        }
+        if (
+            limits.max_code_stdout_bytes_per_call +
+                limits.max_code_stderr_bytes_per_call +
+                limits.max_code_result_bytes_per_call >
+            limits.max_code_output_bytes_per_run
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["max_code_output_bytes_per_run"],
+                message: "Aggregate code output must cover stdout, stderr, and result limits",
+            });
+        }
+        if (
+            limits.max_sandbox_startup_ms + limits.max_code_execution_ms + limits.max_sandbox_teardown_ms >
+            limits.max_sandbox_lifetime_ms
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["max_sandbox_lifetime_ms"],
+                message: "Sandbox lifetime must cover startup, execution, and teardown limits",
             });
         }
         if (
@@ -125,12 +241,27 @@ export const DEFAULT_RUNTIME_LIMITS_V1 = Object.freeze({
     max_tool_argument_bytes_per_call: 16 * 1024,
     max_tool_result_bytes_per_call: 128 * 1024,
     max_safe_summary_bytes_per_call: 4 * 1024,
-    max_model_turns: 3,
+    max_model_turns: 5,
     max_tool_calls: 2,
+    max_code_executions: 0,
+    max_code_source_bytes_per_call: 32 * 1024,
+    max_code_input_bytes_per_call: 128 * 1024,
+    max_code_stdout_bytes_per_call: 48 * 1024,
+    max_code_stderr_bytes_per_call: 16 * 1024,
+    max_code_result_bytes_per_call: 64 * 1024,
+    max_code_output_bytes_per_run: 128 * 1024,
+    max_sandbox_filesystem_bytes: 256 * 1024 * 1024,
+    max_sandbox_processes: 8,
+    max_sandbox_outbound_requests: 0,
+    max_sandbox_output_frames: 64,
+    max_code_execution_ms: 15_000,
+    max_sandbox_startup_ms: 60_000,
+    max_sandbox_teardown_ms: 30_000,
+    max_sandbox_lifetime_ms: 120_000,
     max_estimated_model_input_tokens_per_request: 32_000,
     max_model_output_tokens_per_request: 2_048,
     max_model_stream_bytes_per_request: 128 * 1024,
-    max_runtime_wall_time_ms: 120_000,
+    max_runtime_wall_time_ms: 240_000,
     max_durable_metadata_events: 64,
     max_ndjson_frame_bytes: 16 * 1024,
     max_durable_event_bytes_per_run: 256 * 1024,
@@ -139,7 +270,7 @@ export const DEFAULT_RUNTIME_LIMITS_V1 = Object.freeze({
     max_queue_delivery_attempts: 3,
     queue_message_retention_ms: 24 * 60 * 60 * 1000,
     outbox_dispatch_lease_ms: 30_000,
-    run_attempt_lease_ms: 180_000,
+    run_attempt_lease_ms: 300_000,
     run_attempt_heartbeat_ms: 30_000,
     max_automatic_cleanup_attempts: 10,
     automatic_cleanup_window_ms: 24 * 60 * 60 * 1000,

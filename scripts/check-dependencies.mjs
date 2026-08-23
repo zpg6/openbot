@@ -53,6 +53,9 @@ function checkCatalog(catalog) {
 function checkManifest(file, manifest, catalog) {
     for (const field of dependencyFields) {
         for (const [name, value] of Object.entries(manifest[field] ?? {})) {
+            if (name === "@cloudflare/sandbox") {
+                errors.push(`${file}: @cloudflare/sandbox is deferred until its adoption gate passes`);
+            }
             if (typeof value !== "string" || !isExactDependency(value)) {
                 errors.push(`${file}: ${field}.${name} must use an exact version, catalog:, or workspace:`);
             } else if (value === "catalog:" && !catalog.has(name)) {
@@ -104,7 +107,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
                 errors.push(`${file}: only packages/db-d1 may import the D1 Drizzle driver and SQL builder`);
             }
         }
-        if (/^(?:mysql2|pg|postgres|@metorial\/|openai$)/u.test(specifier)) {
+        if (/^(?:mysql2|pg|postgres|@metorial\/|@cloudflare\/sandbox|openai$)/u.test(specifier)) {
             errors.push(`${file}: deferred database or vendor dependency imported: ${specifier}`);
         }
     }

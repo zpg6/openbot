@@ -25,6 +25,13 @@
                     },
                 ],
             },
+            "services": [
+                {
+                    "binding": "SANDBOX_LIFECYCLE",
+                    "service": "openbot-sandbox-runner-preview",
+                    "entrypoint": "SandboxLifecycleService",
+                },
+            ],
         },
         "production": {
             "d1_databases": [
@@ -44,6 +51,13 @@
                     },
                 ],
             },
+            "services": [
+                {
+                    "binding": "SANDBOX_LIFECYCLE",
+                    "service": "openbot-sandbox-runner-production",
+                    "entrypoint": "SandboxLifecycleService",
+                },
+            ],
         },
     },
 }

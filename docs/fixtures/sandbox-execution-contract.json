@@ -1,0 +1,342 @@
+{
+    "schema_version": 1,
+    "recorded_date": "2026-08-22",
+    "status": "design_accepted_probe_not_run",
+    "deny_code": "code_execution_unverified",
+    "capability_key": "execute_javascript_v1",
+    "authority_owner": "openbot_capability_gateway",
+    "execute_request_caller": "openbot_run_durable_object",
+    "run_lifecycle_owner": "openbot_orchestrator",
+    "runner_bindings": {
+        "SandboxExecutionService.execute": "openbot_capability_gateway",
+        "SandboxLifecycleService.kill": "openbot_orchestrator",
+        "SandboxLifecycleService.destroy": "openbot_orchestrator",
+        "generic_actor_union": false,
+        "callers_share_method_sets": false
+    },
+    "sandbox_runner_has_d1": false,
+    "sandbox_decides_authorization": false,
+    "dispatch_reservation": {
+        "authority_and_store_owner": "openbot_capability_gateway",
+        "execute_entrypoint_only_caller": "openbot_capability_gateway",
+        "consume_atomically_before_runner_call": true,
+        "runner_trust_limit": "trusts_gateway_consumed_reservation_assertion",
+        "runner_receives": ["consumed_reservation_id", "strict_request_object", "canonical_field_projection_digest"],
+        "rpc_original_wire_byte_identity_claimed": false,
+        "bound_fields": [
+            "account_id",
+            "run_id",
+            "sandbox_id",
+            "run_attempt_fence",
+            "manifest_digest",
+            "source_digest",
+            "input_digest",
+            "image_digest",
+            "runner_profile",
+            "limits",
+            "sequence",
+            "expires_at",
+            "canonical_field_projection_digest"
+        ]
+    },
+    "sandbox_id": {
+        "scope": "one_run",
+        "entropy_bits": 256,
+        "model_supplied": false,
+        "reused": false
+    },
+    "runtime": {
+        "language": "javascript",
+        "executions_per_run": 1,
+        "interpreter_extension": false,
+        "node_version": null,
+        "sdk_package": "@cloudflare/sandbox",
+        "sdk_version_candidate": "0.13.0-next.738.2",
+        "sdk_release_line": "1.0-preview",
+        "process_api": "exec_argv_process_handle",
+        "container_image_digest": null,
+        "allowed_instance_types": ["lite", "basic"],
+        "instance_type": null,
+        "probe_candidate": "lite",
+        "instance_type_probe_status": "memory_probe_not_run",
+        "vcpu": "1/16",
+        "memory_mib": 256,
+        "disk_mib": 2048
+    },
+    "unverified_limit_targets": {
+        "source_utf8_bytes": 32768,
+        "input_json_bytes": 131072,
+        "stdout_bytes": 49152,
+        "stderr_bytes": 16384,
+        "result_json_bytes": 65536,
+        "aggregate_output_bytes": 131072,
+        "filesystem_bytes_unverified_target": 268435456,
+        "processes_unverified_target": 8,
+        "outbound_requests": 0,
+        "ndjson_frames": 64,
+        "startup_ms": 60000,
+        "remote_process_lifetime_ms": 15000,
+        "teardown_ms": 30000,
+        "sandbox_age_ms": 120000,
+        "run_wall_ms": 240000,
+        "foreground_executions": 1
+    },
+    "limit_enforcement": {
+        "stdout_stderr_result_and_aggregate": "runner_importer_enforced_probe_not_run",
+        "startup_process_teardown_age_and_run_wall": "split_runner_and_orchestrator_deadlines_probe_not_run",
+        "filesystem_bytes_unverified_target": "os_or_container_mechanism_unresolved",
+        "processes_unverified_target": "os_or_container_mechanism_unresolved",
+        "cloudflare_lite_disk_boundary_mib": 2048,
+        "filesystem_and_process_targets_are_enforced_claims": false,
+        "target_numbers_may_enter_enabled_profile_before_mechanisms_pass": false
+    },
+    "profile_identity": {
+        "profile_key": null,
+        "profile_revision": null,
+        "configuration_digest": null,
+        "profile_digest": null,
+        "configuration_digest_semantics": "immutable_execution_configuration",
+        "profile_digest_semantics": "configuration_plus_adoption_status_lifecycle_evidence_and_record_metadata"
+    },
+    "adoption_status": {
+        "current": "candidate",
+        "candidate": {
+            "allowed_invocation": "server_seeded_synthetic_deployed_probe_only",
+            "user_runs": "deny",
+            "user_run_deny_code": "sandbox_profile_not_enabled",
+            "allowed_data_classes": ["synthetic"]
+        },
+        "enabled": {
+            "requires_all_release_blocking_probes": true,
+            "requires_dns_authoritative_sentinel_pass": true,
+            "allowed_data_classes": ["public", "synthetic", "organization"],
+            "denied_data_classes": ["restricted", "unknown"]
+        },
+        "dns_probe_failure_result": "block_code_enabled_release_and_select_another_executor_or_containment_design"
+    },
+    "record_lifecycle": {
+        "allowed": ["active", "disabled"],
+        "current": "active",
+        "disabled_result": "deny_probe_and_user_run_cancel_dependents_and_advance_dependency_fences"
+    },
+    "adoption_evidence": {
+        "current": null,
+        "required_for_enabled": true,
+        "required_fields": [
+            "schema_version",
+            "reviewed_configuration_digest",
+            "evidence_digest",
+            "observed_at",
+            "valid_until",
+            "cloudflare_platform_fingerprint",
+            "checks"
+        ],
+        "required_check_result": "passed",
+        "checks": [
+            "package_image_match",
+            "fixed_argv_launch",
+            "enumerated_dns_sentinel_not_observed",
+            "filesystem_limit",
+            "process_limit",
+            "startup_timeout",
+            "execution_timeout_and_kill",
+            "teardown_and_destroy",
+            "repeat_destroy_safe",
+            "sandbox_lifetime",
+            "fresh_generation",
+            "output_backpressure",
+            "replacement_uncertainty",
+            "placement",
+            "installation_capacity",
+            "private_route",
+            "secret_sentinel",
+            "mismatched_package_image_denial"
+        ],
+        "expired_or_fingerprint_mismatch_result": "sandbox_profile_not_enabled"
+    },
+    "network": {
+        "candidate_state": "public_internet_blocked_unverified_dns",
+        "enable_internet": false,
+        "allowed_hosts": [],
+        "outbound_handlers_available_to_user_code": [],
+        "ports_exposed": [],
+        "tunnels": false,
+        "dns_authoritative_sentinel_status": "not_run",
+        "passing_probe_claim_limit": "observed_coverage_for_exact_image_runtime_sdk_configuration_and_attempted_paths_not_universal_proof"
+    },
+    "data_profile": {
+        "candidate_probe_allowed": ["synthetic"],
+        "enabled_allowed": ["public", "synthetic", "organization"],
+        "always_denied": ["restricted", "unknown"],
+        "inheritance": "highest_class_of_prompt_skill_tool_result_model_result_source_and_input",
+        "user_may_lower_classification": false,
+        "candidate_user_run_deny_code": "sandbox_profile_not_enabled",
+        "compute_policy_must_narrow_profile_classes": true,
+        "compute_grant_must_narrow_policy_classes": true,
+        "effective_classes": "intersection_of_profile_policy_grant_bot_and_installation",
+        "effective_limits": "componentwise_minimum_of_profile_policy_grant_bot_and_installation"
+    },
+    "compute_authority": {
+        "provider_capability_grant_authorizes_code": false,
+        "profile": {
+            "admitted_data_classes": "ceiling",
+            "limits": "ceiling"
+        },
+        "organization_compute_policy": {
+            "admitted_data_classes": "required_narrower_or_equal_to_profile",
+            "limits": "required_componentwise_narrower_or_equal_to_profile"
+        },
+        "compute_grant": {
+            "admitted_data_classes": "required_narrower_or_equal_to_policy",
+            "limits": "required_componentwise_narrower_or_equal_to_policy",
+            "binds": ["bot_revision", "policy_digest", "purpose", "expiry"]
+        },
+        "effective_data_classes": "intersection_of_profile_policy_grant_bot_and_installation",
+        "effective_limits": "componentwise_minimum_of_profile_policy_grant_bot_and_installation"
+    },
+    "storage": {
+        "bucket_mounts": [],
+        "persistent_backups": false,
+        "cross_run_files": false,
+        "fixed_source_path": "/workspace/openbot/main.mjs",
+        "fixed_input_path": "/workspace/openbot/input.json"
+    },
+    "process": {
+        "fixed_runner_argv_candidate": ["/usr/local/bin/node", "/opt/openbot/runner.mjs"],
+        "request_bytes_enter_argv": false,
+        "executable_model_supplied": false,
+        "argv_model_supplied": false,
+        "cwd_model_supplied": false,
+        "environment_model_supplied": false,
+        "environment_policy": "reviewed_image_plus_fixed_non_secret_allowlist",
+        "openbot_background_service_api_exposed": false,
+        "openbot_package_installation_api_exposed": false,
+        "user_code_may_invoke_shipped_binaries": true,
+        "shipped_shell_or_package_manager_absence": "image_inventory_not_run"
+    },
+    "lifecycle_commands": {
+        "caller": "openbot_orchestrator",
+        "methods": ["kill", "destroy"],
+        "common_fields": [
+            "consumed_reservation_id",
+            "run_id",
+            "sandbox_reference",
+            "call_sequence",
+            "execution_request_digest",
+            "command_kind",
+            "canonical_field_projection_digest"
+        ],
+        "kill_authority": {
+            "fence_kind": "run_attempt",
+            "exact_process_handle_required": true
+        },
+        "destroy_authority_variants": {
+            "active_attempt": ["run_attempt_fence"],
+            "cleanup_obligation": ["cleanup_obligation_id", "cleanup_fence"]
+        },
+        "execute_available": false,
+        "runner_has_replay_store": false
+    },
+    "credentials": {
+        "live_credentials_in_process_environment": false,
+        "live_credentials_in_files": false,
+        "live_credentials_in_arguments": false,
+        "d1_binding": false,
+        "r2_binding": false,
+        "vendor_management_key": false,
+        "model_key": false
+    },
+    "disclosure": {
+        "destination": "cloudflare_sandbox",
+        "byte_classes": ["source", "input", "output", "execution_metadata"],
+        "data_profile_must_be_allowed": true
+    },
+    "cleanup": {
+        "destroy_call_required": true,
+        "independent_destroy_observation_claimed": false,
+        "sdk_response_states": ["sdk_acknowledged", "not_found", "outcome_unknown"],
+        "sdk_acknowledged_claim": "sdk_response_only_not_independent_destruction_observation",
+        "not_found_claim": "provider_response_only_not_independent_destruction_observation",
+        "outcome_unknown_result": "sandbox_cleanup_required",
+        "restart_result": "execution_outcome_unknown",
+        "automatic_retry_after_uncertain_dispatch": false
+    },
+    "result_contract": {
+        "success_content_type": "application/json",
+        "exactly_one_value": true,
+        "canonical_json_required": true,
+        "terminal_digest_required": true,
+        "missing_noncanonical_duplicate_trailing_or_digest_mismatch_result": "invalid_result",
+        "truncation_result": "limit_exceeded"
+    },
+    "jurisdiction_support": {
+        "automatic": "probe_required_no_residency_claim",
+        "eu": "documented_probe_required",
+        "us": "deny",
+        "fedramp": "documented_probe_required"
+    },
+    "unresolved_literals": [
+        "profile_key",
+        "configuration_digest",
+        "profile_digest",
+        "node_version",
+        "container_image_digest",
+        "instance_type",
+        "fixed_runner_digest",
+        "fixed_environment_allowlist",
+        "filesystem_limit_enforcement_mechanism",
+        "process_limit_enforcement_mechanism",
+        "dns_probe_authoritative_zone_and_observation_window",
+        "adoption_evidence_valid_until_policy",
+        "cloudflare_platform_fingerprint"
+    ],
+    "required_probes": [
+        "runner_argv_and_digest",
+        "environment_inventory",
+        "filesystem_hard_limit_enforcement",
+        "process_hard_limit_enforcement",
+        "canonical_request_field_and_digest_mutation",
+        "dispatch_reservation_replay",
+        "dispatch_reservation_concurrent_consume",
+        "sandbox_runner_no_d1_bundle",
+        "gateway_only_execute_binding",
+        "orchestrator_only_kill_destroy_binding",
+        "cross_entrypoint_call_denial",
+        "http_denial",
+        "https_denial",
+        "direct_ip_denial",
+        "redirect_denial",
+        "alternate_port_denial",
+        "authoritative_dns_sentinel",
+        "no_public_route",
+        "remote_process_lifetime",
+        "wait_timeout_does_not_imply_process_stop",
+        "worker_restart_before_launch",
+        "worker_restart_after_launch",
+        "destroy_ambiguity",
+        "replacement_container_invalidates_handle",
+        "cross_run_file_isolation",
+        "cross_run_process_isolation",
+        "stdout_backpressure",
+        "stderr_backpressure",
+        "result_json_limit",
+        "aggregate_output_limit",
+        "disk_exhaustion",
+        "memory_exhaustion",
+        "process_exhaustion",
+        "file_descriptor_exhaustion",
+        "eu_placement",
+        "fedramp_placement"
+    ],
+    "sources": [
+        "https://developers.cloudflare.com/sandbox/1-0-preview/",
+        "https://developers.cloudflare.com/sandbox/1-0-preview/processes/",
+        "https://developers.cloudflare.com/sandbox/1-0-preview/lifecycle/",
+        "https://developers.cloudflare.com/sandbox/1-0-preview/environment/",
+        "https://developers.cloudflare.com/sandbox/concepts/security/",
+        "https://developers.cloudflare.com/sandbox/guides/outbound-traffic/",
+        "https://developers.cloudflare.com/containers/platform-details/limits/",
+        "https://developers.cloudflare.com/containers/platform-details/placement/",
+        "https://registry.npmjs.org/@cloudflare%2fsandbox"
+    ]
+}

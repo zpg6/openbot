@@ -1,25 +1,35 @@
 import { describe, expect, it } from "vitest";
 import {
     AccountIdSchema,
+    BotRevisionV1Schema,
     CanonicalResourceScopeV1Schema,
     CanonicalToolSchemaV1Schema,
     CreateBotRevisionCommandV1Schema,
+    CreateComputeGrantCommandV1Schema,
+    CreateOrganizationComputePolicyCommandV1Schema,
     CreateOrganizationToolPolicyCommandV1Schema,
     CreateRunConfirmationCommandV1Schema,
     CreateSkillRevisionCommandV1Schema,
     DEFAULT_ARTIFACT_RUNTIME_LIMITS_V1,
+    DEFAULT_CODE_EXECUTION_LIMITS_V1,
     DEFAULT_RUNTIME_LIMITS_V1,
     DENY_CODES_V1,
     DisclosureSnapshotV1Schema,
     ERROR_CODES_V1,
     JsonSchemaSubsetV1Schema,
     JsonValueSchema,
+    ModelRouteV1Schema,
     UnverifiedManifestExtensionEnvelopeV1Schema,
     OrganizationToolPolicyV1Schema,
     OutboundDataRuleV1Schema,
+    CodeExecutionProfileV1Schema,
+    ComputeGrantV1Schema,
+    OrganizationComputePolicyV1Schema,
     PersistedUserContentDataClassV1Schema,
     RuntimeLimitsV1Schema,
     classifyUserAuthoredContentV1,
+    computeLimitsAreNarrowerOrEqualV1,
+    computeAuthorityChainIsValidV1,
     verifyCompilerManifestExtensionEnvelopeV1,
 } from "./internal.js";
 
@@ -32,6 +42,8 @@ const ids = {
     connector: "01890f3e-7b42-7cc1-98c3-4f760f7c9137",
     deployment: "01890f3e-7b42-7cc1-98c3-4f760f7c9138",
     grant: "01890f3e-7b42-7cc1-98c3-4f760f7c9139",
+    computePolicy: "01890f3e-7b42-7cc1-98c3-4f760f7c9142",
+    computeGrant: "01890f3e-7b42-7cc1-98c3-4f760f7c9143",
     skillRevision: "01890f3e-7b42-7cc1-98c3-4f760f7c9141",
 } as const;
 const digest = "0".repeat(64);
@@ -195,8 +207,114 @@ describe("versioned contracts", () => {
         require_parameters: true,
         data_collection: "deny",
         zdr: true,
-        parallel_tool_calls: false,
+        parallel_tool_calls_parameter: "omitted_unsupported",
+        max_tool_calls_per_turn: 1,
     } as const;
+
+    it("omits an unsupported parallel-tool parameter and denies multi-call turns", () => {
+        expect(ModelRouteV1Schema.safeParse(modelRoute).success).toBe(true);
+        expect(
+            ModelRouteV1Schema.safeParse({
+                ...modelRoute,
+                parallel_tool_calls: false,
+            }).success
+        ).toBe(false);
+        expect(
+            ModelRouteV1Schema.safeParse({
+                ...modelRoute,
+                max_tool_calls_per_turn: 2,
+            }).success
+        ).toBe(false);
+    });
+
+    it("keeps compute authority separate and blocks an unverified user profile", () => {
+        const candidate = {
+            schema_version: 1,
+            profile_key: "sandbox-javascript-v1",
+            profile_revision: 1,
+            configuration_digest: digest,
+            profile_digest: digest,
+            display_name: "Isolated code execution",
+            runner_protocol_version: 1,
+            runner_protocol_digest: digest,
+            runner_version: "1.0.0",
+            runner_digest: digest,
+            node_version: "22.19.0",
+            sandbox_sdk_version: "1.0.0-next.1",
+            sandbox_sdk_package_digest: digest,
+            image_digest: digest,
+            instance_type: "lite",
+            adoption_status: "candidate",
+            lifecycle: "active",
+            languages: ["javascript"],
+            admitted_data_classes: ["synthetic"],
+            network_policy: "public_internet_blocked_unverified_dns",
+            adoption_evidence: null,
+            filesystem_policy: "ephemeral_per_run",
+            package_installation: false,
+            interactive_terminal: false,
+            limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+        } as const;
+        expect(CodeExecutionProfileV1Schema.safeParse(candidate).success).toBe(true);
+        expect(
+            CodeExecutionProfileV1Schema.safeParse({
+                ...candidate,
+                admitted_data_classes: ["public", "synthetic"],
+            }).success
+        ).toBe(false);
+        expect(
+            CodeExecutionProfileV1Schema.safeParse({
+                ...candidate,
+                adoption_status: "enabled",
+            }).success
+        ).toBe(false);
+        expect(
+            CodeExecutionProfileV1Schema.safeParse({
+                ...candidate,
+                instance_type: "basic",
+            }).success
+        ).toBe(true);
+        expect(
+            CreateOrganizationComputePolicyCommandV1Schema.safeParse({
+                schema_version: 1,
+                profile_key: candidate.profile_key,
+                expected_profile_revision: candidate.profile_revision,
+                expected_profile_digest: candidate.profile_digest,
+                expected_profile_dependency_fence: 0,
+                admitted_data_classes: ["synthetic"],
+                limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+            }).success
+        ).toBe(true);
+        expect(
+            CreateComputeGrantCommandV1Schema.safeParse({
+                schema_version: 1,
+                bot_revision_id: ids.revision,
+                organization_compute_policy_id: ids.computePolicy,
+                expected_bot_revision_digest: digest,
+                expected_compute_policy_revision: 1,
+                expected_compute_policy_digest: digest,
+                expected_compute_policy_fence: 0,
+                admitted_data_classes: ["synthetic"],
+                purpose: "Calculate a summary",
+                expires_at: 60_000,
+                limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                provider_authorization_id: ids.grant,
+            }).success
+        ).toBe(false);
+
+        expect(
+            computeLimitsAreNarrowerOrEqualV1(
+                { ...DEFAULT_CODE_EXECUTION_LIMITS_V1, max_source_bytes: 16 * 1024 },
+                DEFAULT_CODE_EXECUTION_LIMITS_V1
+            )
+        ).toBe(true);
+        expect(
+            computeLimitsAreNarrowerOrEqualV1(
+                { ...DEFAULT_CODE_EXECUTION_LIMITS_V1, max_source_bytes: 16 * 1024 },
+                { ...DEFAULT_CODE_EXECUTION_LIMITS_V1, max_source_bytes: 8 * 1024 }
+            )
+        ).toBe(false);
+    });
 
     it("requires every tool destination and all model destinations when results reach the model", () => {
         const base = {
@@ -330,7 +448,11 @@ describe("versioned contracts", () => {
         const command = {
             schema_version: 1,
             provider_deployment_id: ids.deployment,
+            expected_provider_deployment_version: 1,
+            expected_connector_release_id: ids.connector,
             connector_tool_key: "records.search",
+            expected_tool_schema_digest: digest,
+            expected_catalog_fence: 0,
         };
         expect(CreateOrganizationToolPolicyCommandV1Schema.safeParse(command).success).toBe(true);
         expect(
@@ -376,6 +498,11 @@ describe("versioned contracts", () => {
             bot_id: ids.bot,
             bot_revision_id: ids.revision,
             capability_grant_id: ids.grant,
+            expected_bot_revision_digest: digest,
+            expected_capability_grant_revision: 1,
+            expected_capability_grant_digest: digest,
+            expected_authority_fence: 0,
+            expected_compute_grant_digest: null,
             prompt: "Read the public test records.",
         };
         expect(CreateRunConfirmationCommandV1Schema.safeParse(confirmationCommand).success).toBe(true);
@@ -397,15 +524,26 @@ describe("versioned contracts", () => {
             organization_tool_policy_ids: [ids.policy],
             skill_revision_ids: [],
             model_route_key: "reviewed-default",
+            organization_compute_policy_id: null,
+            expected_catalog_fence: 0,
+            expected_selection_digest: digest,
             requested_limits: {
-                max_model_turns: 3,
+                max_model_turns: 5,
                 max_tool_calls: 2,
+                max_code_executions: 0,
+                max_code_execution_ms: 15_000,
                 max_model_output_tokens_per_request: 2_048,
-                max_runtime_wall_time_ms: 120_000,
+                max_runtime_wall_time_ms: 240_000,
                 max_estimated_run_cost_usd_micros: 250_000,
             },
         };
         expect(CreateBotRevisionCommandV1Schema.safeParse(command).success).toBe(true);
+        expect(
+            CreateBotRevisionCommandV1Schema.safeParse({
+                ...command,
+                requested_limits: { ...command.requested_limits, max_code_executions: 1 },
+            }).success
+        ).toBe(false);
         expect(
             CreateBotRevisionCommandV1Schema.safeParse({
                 ...command,
@@ -528,6 +666,7 @@ describe("versioned contracts", () => {
             disclosure_destinations: ["metorial", "openrouter", "model_provider", "connector_provider"],
             incidental_effects: ["provider_access_log"],
             model_route: modelRoute,
+            code_execution: null,
             limits: DEFAULT_RUNTIME_LIMITS_V1,
             manifest_extensions: { schema_version: 1, extensions: [] },
             issued_at: 1,
@@ -546,6 +685,286 @@ describe("versioned contracts", () => {
             DisclosureSnapshotV1Schema.safeParse({ ...snapshot, possible_data_classes: ["synthetic"] }).success
         ).toBe(false);
         expect(DisclosureSnapshotV1Schema.safeParse({ ...snapshot, incidental_effects: [] }).success).toBe(false);
+
+        const codeExecution = {
+            schema_version: 1,
+            profile_key: "sandbox-javascript-v1",
+            profile_revision: 1,
+            configuration_digest: digest,
+            profile_digest: digest,
+            display_name: "Isolated code execution",
+            runner_protocol_version: 1,
+            runner_protocol_digest: digest,
+            runner_version: "1.0.0",
+            runner_digest: digest,
+            node_version: "22.19.0",
+            sandbox_sdk_version: "1.0.0-next.1",
+            sandbox_sdk_package_digest: digest,
+            image_digest: digest,
+            instance_type: "lite",
+            adoption_status: "enabled",
+            lifecycle: "active",
+            languages: ["javascript"],
+            admitted_data_classes: ["public", "synthetic", "organization"],
+            network_policy: "public_internet_blocked_unverified_dns",
+            adoption_evidence: {
+                schema_version: 1,
+                reviewed_configuration_digest: digest,
+                evidence_digest: digest,
+                observed_at: 1,
+                valid_until: 600_000,
+                cloudflare_platform_fingerprint: "workers-2026-08-22",
+                checks: {
+                    package_image_match: "passed",
+                    fixed_argv_launch: "passed",
+                    enumerated_dns_sentinel_not_observed: "passed",
+                    filesystem_limit: "passed",
+                    process_limit: "passed",
+                    startup_timeout: "passed",
+                    execution_timeout_and_kill: "passed",
+                    teardown_and_destroy: "passed",
+                    repeat_destroy_safe: "passed",
+                    sandbox_lifetime: "passed",
+                    fresh_generation: "passed",
+                    output_backpressure: "passed",
+                    replacement_uncertainty: "passed",
+                    placement: "passed",
+                    installation_capacity: "passed",
+                    private_route: "passed",
+                    secret_sentinel: "passed",
+                    mismatched_package_image_denial: "passed",
+                },
+            },
+            filesystem_policy: "ephemeral_per_run",
+            package_installation: false,
+            interactive_terminal: false,
+            limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+        } as const;
+        const codeEnabledSnapshot = {
+            ...snapshot,
+            limits: { ...snapshot.limits, max_code_executions: 1 },
+        } as const;
+        const parsedCodeExecution = CodeExecutionProfileV1Schema.parse(codeExecution);
+        const computePolicy = OrganizationComputePolicyV1Schema.parse({
+            schema_version: 1,
+            organization_compute_policy_id: ids.computePolicy,
+            account_id: ids.account,
+            revision_number: 1,
+            lifecycle: "active",
+            dependency_revocation_fence: 0,
+            profile_key: codeExecution.profile_key,
+            profile_revision: codeExecution.profile_revision,
+            profile_digest: codeExecution.profile_digest,
+            admitted_data_classes: ["public", "synthetic", "organization"],
+            limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+            created_at: 1,
+            policy_digest: digest,
+        });
+        const computeGrant = ComputeGrantV1Schema.parse({
+            schema_version: 1,
+            compute_grant_id: ids.computeGrant,
+            account_id: ids.account,
+            bot_revision_id: ids.revision,
+            organization_compute_policy_id: ids.computePolicy,
+            compute_policy_revision: 1,
+            compute_policy_digest: digest,
+            admitted_data_classes: ["public", "synthetic", "organization"],
+            limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+            lifecycle: "active",
+            revocation_fence: 0,
+            purpose: "Calculate the requested summary",
+            expires_at: 600_000,
+            created_at: 1,
+            grant_digest: digest,
+        });
+        const botRevision = BotRevisionV1Schema.parse({
+            schema_version: 1,
+            bot_revision_id: ids.revision,
+            bot_id: ids.bot,
+            account_id: ids.account,
+            revision_number: 1,
+            job_content_id: "01890f3e-7b42-7cc1-98c3-4f760f7c9144",
+            job_plaintext_digest: digest,
+            job_data_class: "organization",
+            standing_instructions_content_id: "01890f3e-7b42-7cc1-98c3-4f760f7c9145",
+            standing_instructions_plaintext_digest: digest,
+            standing_instructions_data_class: "organization",
+            prompt_template_version: 1,
+            organization_tool_policy_ids: [ids.policy],
+            skill_revision_ids: [],
+            connector_release_id: ids.connector,
+            model_route: modelRoute,
+            compute_selection: {
+                organization_compute_policy_id: ids.computePolicy,
+                compute_policy_revision: 1,
+                compute_policy_digest: digest,
+                compute_policy_admitted_data_classes: ["public", "synthetic", "organization"],
+                compute_policy_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                profile: codeExecution,
+            },
+            limits: codeEnabledSnapshot.limits,
+            outbound_data_rule: {
+                data_classes: ["public"],
+                destinations: ["metorial", "connector_provider"],
+                allowed_argument_fields: [],
+                tool_result_may_reach_model: false,
+            },
+            manifest_extensions: { schema_version: 1, extensions: [] },
+            created_at: 1,
+            revision_digest: digest,
+        });
+        const expectedComputeAuthority = {
+            account_id: ids.account,
+            bot_revision_id: ids.revision,
+            as_of_ms: 2,
+            cloudflare_platform_fingerprint: "workers-2026-08-22",
+        } as const;
+        expect(
+            computeAuthorityChainIsValidV1(
+                botRevision,
+                parsedCodeExecution,
+                computePolicy,
+                computeGrant,
+                expectedComputeAuthority
+            )
+        ).toBe(true);
+        expect(
+            computeAuthorityChainIsValidV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
+                ...expectedComputeAuthority,
+                account_id: "01890f3e-7b42-7cc1-98c3-4f760f7c9199",
+            })
+        ).toBe(false);
+        expect(
+            computeAuthorityChainIsValidV1(
+                botRevision,
+                parsedCodeExecution,
+                OrganizationComputePolicyV1Schema.parse({ ...computePolicy, policy_digest: "1".repeat(64) }),
+                computeGrant,
+                expectedComputeAuthority
+            )
+        ).toBe(false);
+        expect(
+            computeAuthorityChainIsValidV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
+                ...expectedComputeAuthority,
+                as_of_ms: computeGrant.expires_at,
+            })
+        ).toBe(false);
+        expect(
+            computeAuthorityChainIsValidV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
+                ...expectedComputeAuthority,
+                as_of_ms: parsedCodeExecution.adoption_evidence!.valid_until,
+            })
+        ).toBe(false);
+        expect(
+            computeAuthorityChainIsValidV1(botRevision, parsedCodeExecution, computePolicy, computeGrant, {
+                ...expectedComputeAuthority,
+                cloudflare_platform_fingerprint: "workers-changed",
+            })
+        ).toBe(false);
+        const candidateProfile = CodeExecutionProfileV1Schema.parse({
+            ...codeExecution,
+            adoption_status: "candidate",
+            admitted_data_classes: ["synthetic"],
+            adoption_evidence: null,
+        });
+        expect(
+            computeAuthorityChainIsValidV1(
+                botRevision,
+                candidateProfile,
+                computePolicy,
+                computeGrant,
+                expectedComputeAuthority
+            )
+        ).toBe(false);
+        expect(
+            DisclosureSnapshotV1Schema.safeParse({
+                ...codeEnabledSnapshot,
+                code_execution: {
+                    profile: codeExecution,
+                    organization_compute_policy_id: ids.computePolicy,
+                    compute_policy_revision: 1,
+                    compute_policy_digest: digest,
+                    compute_policy_admitted_data_classes: ["public", "synthetic", "organization"],
+                    compute_policy_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                    compute_grant_id: ids.computeGrant,
+                    compute_grant_digest: digest,
+                    compute_grant_purpose: "Summarize the reviewed public records",
+                    compute_grant_expires_at: 300_000,
+                    compute_grant_admitted_data_classes: ["public", "synthetic", "organization"],
+                    compute_grant_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                    possible_code_input_data_classes: ["organization"],
+                    effective_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                },
+                disclosure_destinations: [
+                    "metorial",
+                    "openrouter",
+                    "model_provider",
+                    "connector_provider",
+                    "cloudflare_sandbox",
+                ],
+            }).success
+        ).toBe(true);
+        expect(
+            DisclosureSnapshotV1Schema.safeParse({
+                ...codeEnabledSnapshot,
+                code_execution: {
+                    profile: codeExecution,
+                    organization_compute_policy_id: ids.computePolicy,
+                    compute_policy_revision: 1,
+                    compute_policy_digest: digest,
+                    compute_policy_admitted_data_classes: ["public"],
+                    compute_policy_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                    compute_grant_id: ids.computeGrant,
+                    compute_grant_digest: digest,
+                    compute_grant_purpose: "Summarize the reviewed public records",
+                    compute_grant_expires_at: 300_000,
+                    compute_grant_admitted_data_classes: ["public"],
+                    compute_grant_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                    possible_code_input_data_classes: ["organization"],
+                    effective_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                },
+                disclosure_destinations: [
+                    "metorial",
+                    "openrouter",
+                    "model_provider",
+                    "connector_provider",
+                    "cloudflare_sandbox",
+                ],
+            }).success
+        ).toBe(false);
+        expect(
+            DisclosureSnapshotV1Schema.safeParse({
+                ...codeEnabledSnapshot,
+                code_execution: {
+                    profile: codeExecution,
+                    organization_compute_policy_id: ids.computePolicy,
+                    compute_policy_revision: 1,
+                    compute_policy_digest: digest,
+                    compute_policy_admitted_data_classes: ["public", "synthetic", "organization"],
+                    compute_policy_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                    compute_grant_id: ids.computeGrant,
+                    compute_grant_digest: digest,
+                    compute_grant_purpose: "Summarize the reviewed public records",
+                    compute_grant_expires_at: 300_000,
+                    compute_grant_admitted_data_classes: ["public", "synthetic", "organization"],
+                    compute_grant_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                    possible_code_input_data_classes: ["organization"],
+                    effective_limits: DEFAULT_CODE_EXECUTION_LIMITS_V1,
+                },
+            }).success
+        ).toBe(false);
+        expect(
+            DisclosureSnapshotV1Schema.safeParse({
+                ...snapshot,
+                disclosure_destinations: [
+                    "metorial",
+                    "openrouter",
+                    "model_provider",
+                    "connector_provider",
+                    "cloudflare_sandbox",
+                ],
+            }).success
+        ).toBe(false);
 
         const restrictedSkill = {
             skill_revision_id: ids.skillRevision,

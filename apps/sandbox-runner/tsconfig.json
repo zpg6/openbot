@@ -1,0 +1,10 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "outDir": "../../.build/types/apps/sandbox-runner",
+        "rootDir": ".",
+        "types": ["@cloudflare/workers-types"]
+    },
+    "include": ["entry.ts", "src/**/*.ts"],
+    "references": [{ "path": "../../packages/sandbox-protocol" }]
+}

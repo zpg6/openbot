@@ -252,5 +252,11 @@ export const boundedJsonValue = (options: { maxBytes: number; maxDepth: number; 
 export const DataClassV1Schema = z.enum(["public", "synthetic", "organization", "restricted", "unknown"]);
 export type DataClassV1 = z.infer<typeof DataClassV1Schema>;
 
-export const DisclosureDestinationV1Schema = z.enum(["metorial", "openrouter", "model_provider", "connector_provider"]);
+export const DisclosureDestinationV1Schema = z.enum([
+    "metorial",
+    "openrouter",
+    "model_provider",
+    "connector_provider",
+    "cloudflare_sandbox",
+]);
 export type DisclosureDestinationV1 = z.infer<typeof DisclosureDestinationV1Schema>;

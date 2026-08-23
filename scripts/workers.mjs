@@ -2,7 +2,8 @@ import { mkdir, readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 
-const workers = ["capability-gateway", "runtime", "orchestrator", "control-plane"];
+import { workerDeploymentOrder } from "./workers-config.mjs";
+
 const [command, environment = "preview"] = process.argv.slice(2);
 const packageManagerEntrypoint = process.env.npm_execpath;
 const wranglerLogPath = process.env["WRANGLER_LOG_PATH"] ?? path.resolve(".wrangler/logs/workers.log");
@@ -24,13 +25,12 @@ if (!new Set(["preview", "production"]).has(environment)) {
     process.exit(2);
 }
 
-for (const worker of workers) {
-    const config = `apps/${worker}/wrangler.d1.jsonc`;
-    const outputDirectory = path.resolve(".build", "workers", worker);
+for (const worker of workerDeploymentOrder) {
+    const outputDirectory = path.resolve(".build", "workers", worker.name);
     if (command === "deploy") {
-        const content = await readFile(config, "utf8");
+        const content = await readFile(worker.config, "utf8");
         if (content.includes("REPLACE_WITH_")) {
-            console.error(`${config}: replace every placeholder before deployment`);
+            console.error(`${worker.config}: replace every placeholder before deployment`);
             process.exit(1);
         }
     }
@@ -39,16 +39,16 @@ for (const worker of workers) {
     if (command === "typegen") {
         args.push(
             "types",
-            `apps/${worker}/worker-configuration.d.ts`,
+            `apps/${worker.name}/worker-configuration.d.ts`,
             "--config",
-            config,
+            worker.config,
             "--env",
             environment,
             "--include-runtime",
             "false"
         );
     } else {
-        args.push("deploy", "--config", config, "--env", environment);
+        args.push("deploy", "--config", worker.config, "--env", environment);
         if (command === "dry-run") {
             args.push(
                 "--dry-run",
@@ -85,11 +85,11 @@ for (const worker of workers) {
         const drizzleInputs = inputs.filter(input => input.includes("node_modules/drizzle-orm/"));
 
         if (forbidden.length > 0) {
-            console.error(`${worker} bundle contains deferred inputs:\n${forbidden.join("\n")}`);
+            console.error(`${worker.name} bundle contains deferred inputs:\n${forbidden.join("\n")}`);
             process.exit(1);
         }
-        if (worker !== "control-plane" && drizzleInputs.length > 0) {
-            console.error(`${worker} bundle unexpectedly contains Drizzle inputs:\n${drizzleInputs.join("\n")}`);
+        if (worker.name !== "control-plane" && drizzleInputs.length > 0) {
+            console.error(`${worker.name} bundle unexpectedly contains Drizzle inputs:\n${drizzleInputs.join("\n")}`);
             process.exit(1);
         }
     }

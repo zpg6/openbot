@@ -1,0 +1,108 @@
+{
+    "schema_version": 1,
+    "recorded_date": "2026-08-22",
+    "item": 2,
+    "status": "blocked",
+    "rules": {
+        "documentation_is_probe_evidence": false,
+        "not_run_may_be_recorded_as_passed": false,
+        "unsupported_mapping_result": "deny"
+    },
+    "gates": [
+        {
+            "id": "first_connector",
+            "owner": "vendor_integration_owner",
+            "status": "blocked",
+            "deny_code": "connector_evidence_incomplete",
+            "missing": [
+                "provider_deployment_id",
+                "pinned_provider_version",
+                "oauth_scope_or_synthetic_setup",
+                "literal_tool_keys",
+                "canonical_schema_digests",
+                "resource_mapping",
+                "incidental_effects",
+                "result_limits",
+                "two_independent_mcp_calls"
+            ]
+        },
+        {
+            "id": "d1_guarded_create",
+            "owner": "database_owner",
+            "status": "not_run",
+            "deny_code": "control_store_unverified"
+        },
+        {
+            "id": "gateway_reservation",
+            "owner": "capability_gateway_owner",
+            "status": "not_run",
+            "deny_code": "gateway_reservation_unverified"
+        },
+        {
+            "id": "metorial_provisioning",
+            "owner": "vendor_integration_owner",
+            "status": "not_run",
+            "deny_code": "metorial_provisioning_unverified"
+        },
+        {
+            "id": "metorial_cleanup",
+            "owner": "vendor_integration_owner",
+            "status": "not_run",
+            "deny_code": "vendor_revocation_unverified",
+            "allowed_claim": "openbot_gateway_denied_later_calls"
+        },
+        {
+            "id": "openrouter_route",
+            "owner": "vendor_integration_owner",
+            "status": "candidate_documented_probe_not_run",
+            "deny_code": "model_route_unverified"
+        },
+        {
+            "id": "sandbox_execution",
+            "owner": "runtime_owner",
+            "status": "blocked_missing_literals_and_probes",
+            "adoption_status": "candidate",
+            "record_lifecycle": "active",
+            "candidate_invocation": "server_seeded_synthetic_deployed_probe_only",
+            "user_run_result": "sandbox_profile_not_enabled",
+            "deny_code": "code_execution_unverified",
+            "missing": [
+                "profile_key",
+                "pinned_node_and_image_digests",
+                "selected_instance_type",
+                "immutable_configuration_digest_and_profile_digest",
+                "runner_argv_environment_and_process_probes",
+                "gateway_execute_orchestrator_lifecycle_binding_isolation",
+                "filesystem_and_process_hard_limit_mechanisms",
+                "startup_process_teardown_age_run_wall_and_output_limit_probes",
+                "authoritative_dns_sentinel",
+                "enabled_active_profile_record",
+                "complete_dated_adoption_evidence_with_valid_until_and_cloudflare_platform_fingerprint"
+            ]
+        },
+        {
+            "id": "d1_better_auth",
+            "owner": "identity_owner",
+            "status": "not_run",
+            "deny_code": "identity_store_unverified"
+        },
+        {
+            "id": "r2_artifact_workspace",
+            "owner": "artifact_owner",
+            "status": "deferred",
+            "deny_code": "artifact_workspace_not_enabled"
+        },
+        {
+            "id": "postgresql_profile",
+            "owner": "database_owner",
+            "status": "deferred",
+            "deny_code": "database_profile_unsupported"
+        },
+        {
+            "id": "mysql_profile",
+            "owner": "database_owner",
+            "status": "deferred",
+            "deny_code": "database_profile_unsupported"
+        }
+    ]
+}

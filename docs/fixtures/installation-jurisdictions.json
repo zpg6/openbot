@@ -1,0 +1,45 @@
+{
+    "schema_version": 1,
+    "recorded_date": "2026-08-22",
+    "profiles": {
+        "automatic": {
+            "d1": "documented_default_no_residency_guarantee",
+            "durable_object": "documented_default_no_residency_guarantee",
+            "sandbox_container": "documented_default_no_residency_guarantee",
+            "metorial": "unverified",
+            "openrouter_route": "unverified",
+            "release_status": "blocked"
+        },
+        "eu": {
+            "d1": "documented_jurisdiction",
+            "durable_object": "documented_jurisdiction",
+            "sandbox_container": "documented_jurisdiction",
+            "metorial": "unverified",
+            "openrouter_route": "unverified",
+            "release_status": "blocked"
+        },
+        "us": {
+            "d1": "unsupported_documented_jurisdiction",
+            "durable_object": "documented_jurisdiction",
+            "sandbox_container": "unsupported_documented_jurisdiction",
+            "metorial": "unverified",
+            "openrouter_route": "unverified",
+            "release_status": "deny"
+        },
+        "fedramp": {
+            "d1": "documented_jurisdiction",
+            "durable_object": "documented_jurisdiction",
+            "sandbox_container": "documented_jurisdiction",
+            "metorial": "unverified",
+            "openrouter_route": "unverified",
+            "release_status": "blocked"
+        }
+    },
+    "deny_code": "jurisdiction_unverified",
+    "sources": [
+        "https://developers.cloudflare.com/d1/configuration/data-location/",
+        "https://developers.cloudflare.com/durable-objects/reference/data-location/",
+        "https://developers.cloudflare.com/containers/platform-details/placement/",
+        "https://openrouter.ai/docs/guides/routing/provider-selection"
+    ]
+}
