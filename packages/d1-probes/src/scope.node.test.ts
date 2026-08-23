@@ -7,6 +7,7 @@ import {
     runAuditAppendV1,
     runGatewayReservationV1,
     runGuardedCreateV1,
+    runGrantRevocationV1,
     runSandboxCapacityReleaseV1,
     runSandboxCapacityReservationV1,
     runSandboxDestroyObservationV1,
@@ -73,6 +74,7 @@ describe("D1 probe authority boundary", () => {
                 session_digest: sha("a"),
                 manifest_digest: sha("b"),
             }),
+            runGrantRevocationV1(unknownFailureDatabase, "unknown_revoke", "writer_b"),
             runGatewayReservationV1(unknownFailureDatabase, {
                 scenario: "unknown_gateway",
                 writer: "writer_a",
@@ -120,8 +122,33 @@ describe("D1 probe authority boundary", () => {
             }),
         ]);
         expect(observations.map(observation => observation.outcome)).toEqual(
-            Array.from({ length: 6 }, () => "inconclusive")
+            Array.from({ length: 7 }, () => "inconclusive")
         );
+    });
+
+    it("returns inconclusive when revocation commits but fresh first-primary reconciliation fails", async () => {
+        const statement = { bind: () => statement };
+        const database = {
+            prepare: () => statement,
+            batch: async () => [
+                { success: true, results: [{ scenario: "readback_revoke" }] },
+                { success: true, results: [{ confirmation_id: "confirmation_readback_revoke" }] },
+                { success: true, results: [{ scenario: "readback_revoke" }] },
+                { success: true, results: [] },
+                { success: true, results: [] },
+            ],
+            withSession: () => {
+                throw new Error("first-primary read failed after committed revocation");
+            },
+        } as never;
+
+        await expect(runGrantRevocationV1(database, "readback_revoke", "writer_a")).resolves.toMatchObject({
+            probe: "guarded_create",
+            scenario: "readback_revoke",
+            writer: "writer_a",
+            operation_id: "revoke_readback_revoke",
+            outcome: "inconclusive",
+        });
     });
 
     it("returns inconclusive when recognized conflicts cannot be read from first-primary", async () => {

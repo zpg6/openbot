@@ -769,100 +769,105 @@ export async function runGrantRevocationV1(
     const scenarioValue = identifier(rawScenario, "scenario");
     const writerValue = identifier(rawWriter, "writer");
     const confirmationId = `confirmation_${scenarioValue}`;
-    const results = await database.batch<Record<string, ReturningValue>>([
-        database
-            .prepare(
-                `UPDATE _openbot_probe_authority
+    const operationId = `revoke_${scenarioValue}`;
+    try {
+        const results = await database.batch<Record<string, ReturningValue>>([
+            database
+                .prepare(
+                    `UPDATE _openbot_probe_authority
              SET state = 'revoked', version = version + 1
              WHERE scenario = ? AND state = 'active'
              RETURNING scenario`
-            )
-            .bind(scenarioValue),
-        database
-            .prepare(
-                `UPDATE _openbot_probe_confirmation
+                )
+                .bind(scenarioValue),
+            database
+                .prepare(
+                    `UPDATE _openbot_probe_confirmation
              SET state = 'discarded'
              WHERE scenario = ? AND confirmation_id = ? AND state = 'live'
              RETURNING confirmation_id`
-            )
-            .bind(scenarioValue, confirmationId),
-        database
-            .prepare(
-                `UPDATE _openbot_probe_slot
+                )
+                .bind(scenarioValue, confirmationId),
+            database
+                .prepare(
+                    `UPDATE _openbot_probe_slot
              SET live_confirmation_id = NULL, version = version + 1
              WHERE scenario = ? AND live_confirmation_id = ?
              RETURNING scenario`
-            )
-            .bind(scenarioValue, confirmationId),
-        database
-            .prepare(
-                `UPDATE _openbot_probe_run
+                )
+                .bind(scenarioValue, confirmationId),
+            database
+                .prepare(
+                    `UPDATE _openbot_probe_run
              SET state = 'cancellation_requested'
              WHERE scenario = ? AND state = 'active'
              RETURNING run_id`
-            )
-            .bind(scenarioValue),
-        database
-            .prepare(
-                `INSERT OR IGNORE INTO _openbot_probe_outbox (event_id, run_id, kind)
+                )
+                .bind(scenarioValue),
+            database
+                .prepare(
+                    `INSERT OR IGNORE INTO _openbot_probe_outbox (event_id, run_id, kind)
              SELECT 'revoke_' || scenario, run_id, 'cancel_run'
              FROM _openbot_probe_run
              WHERE scenario = ? AND state = 'cancellation_requested'
              RETURNING event_id, run_id`
+                )
+                .bind(scenarioValue),
+        ]);
+        if (results.length !== 5 || results.some(result => result.success !== true)) {
+            return observe("guarded_create", scenarioValue, writerValue, operationId, "inconclusive");
+        }
+        const authorityRows = results[0]?.results ?? [];
+        const confirmationRows = results[1]?.results ?? [];
+        const slotRows = results[2]?.results ?? [];
+        const runRows = results[3]?.results ?? [];
+        const outboxRows = results[4]?.results ?? [];
+        if (
+            authorityRows.length !== 1 ||
+            authorityRows[0]?.["scenario"] !== scenarioValue ||
+            !(
+                (confirmationRows.length === 1 &&
+                    confirmationRows[0]?.["confirmation_id"] === confirmationId &&
+                    slotRows.length === 1 &&
+                    slotRows[0]?.["scenario"] === scenarioValue &&
+                    runRows.length === 0 &&
+                    outboxRows.length === 0) ||
+                (confirmationRows.length === 0 &&
+                    slotRows.length === 0 &&
+                    runRows.length === 1 &&
+                    outboxRows.length === 1 &&
+                    runRows[0]?.["run_id"] === outboxRows[0]?.["run_id"])
             )
-            .bind(scenarioValue),
-    ]);
-    if (results.length !== 5 || results.some(result => result.success !== true)) {
-        return observe("guarded_create", scenarioValue, writerValue, `revoke_${scenarioValue}`, "inconclusive");
+        ) {
+            return observe("guarded_create", scenarioValue, writerValue, operationId, "inconclusive");
+        }
+        const state = await readGuardedCreateStateV1(database, scenarioValue);
+        const revokedBefore =
+            state.authority_state === "revoked" &&
+            state.confirmation_state === "discarded" &&
+            state.live_confirmation_id === null &&
+            state.active_run_id === null &&
+            state.run_state === null &&
+            state.run_guard_count === 0 &&
+            state.outbox_count === 0;
+        const revokedAfter =
+            state.authority_state === "revoked" &&
+            state.confirmation_state === "consumed" &&
+            state.live_confirmation_id === null &&
+            state.active_run_id !== null &&
+            state.run_state === "cancellation_requested" &&
+            state.run_guard_count === 1 &&
+            state.outbox_count === 1;
+        return observe(
+            "guarded_create",
+            scenarioValue,
+            writerValue,
+            operationId,
+            revokedBefore ? "revoked_before_create" : revokedAfter ? "revoked_after_create" : "inconclusive"
+        );
+    } catch {
+        return observe("guarded_create", scenarioValue, writerValue, operationId, "inconclusive");
     }
-    const authorityRows = results[0]?.results ?? [];
-    const confirmationRows = results[1]?.results ?? [];
-    const slotRows = results[2]?.results ?? [];
-    const runRows = results[3]?.results ?? [];
-    const outboxRows = results[4]?.results ?? [];
-    if (
-        authorityRows.length !== 1 ||
-        authorityRows[0]?.["scenario"] !== scenarioValue ||
-        !(
-            (confirmationRows.length === 1 &&
-                confirmationRows[0]?.["confirmation_id"] === confirmationId &&
-                slotRows.length === 1 &&
-                slotRows[0]?.["scenario"] === scenarioValue &&
-                runRows.length === 0 &&
-                outboxRows.length === 0) ||
-            (confirmationRows.length === 0 &&
-                slotRows.length === 0 &&
-                runRows.length === 1 &&
-                outboxRows.length === 1 &&
-                runRows[0]?.["run_id"] === outboxRows[0]?.["run_id"])
-        )
-    ) {
-        return observe("guarded_create", scenarioValue, writerValue, `revoke_${scenarioValue}`, "inconclusive");
-    }
-    const state = await readGuardedCreateStateV1(database, scenarioValue);
-    const revokedBefore =
-        state.authority_state === "revoked" &&
-        state.confirmation_state === "discarded" &&
-        state.live_confirmation_id === null &&
-        state.active_run_id === null &&
-        state.run_state === null &&
-        state.run_guard_count === 0 &&
-        state.outbox_count === 0;
-    const revokedAfter =
-        state.authority_state === "revoked" &&
-        state.confirmation_state === "consumed" &&
-        state.live_confirmation_id === null &&
-        state.active_run_id !== null &&
-        state.run_state === "cancellation_requested" &&
-        state.run_guard_count === 1 &&
-        state.outbox_count === 1;
-    return observe(
-        "guarded_create",
-        scenarioValue,
-        writerValue,
-        `revoke_${scenarioValue}`,
-        revokedBefore ? "revoked_before_create" : revokedAfter ? "revoked_after_create" : "inconclusive"
-    );
 }
 
 export async function readGuardedCreateStateV1(

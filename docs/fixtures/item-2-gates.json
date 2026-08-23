@@ -31,6 +31,7 @@
             "owner": "database_owner",
             "status": "not_run",
             "deny_code": "control_store_unverified",
+            "operator_review_assessment_required": true,
             "required_checks": [
                 "revoke_linearizes_first",
                 "create_linearizes_first",
@@ -46,6 +47,7 @@
             "owner": "capability_gateway_owner",
             "status": "not_run",
             "deny_code": "gateway_reservation_unverified",
+            "operator_review_assessment_required": true,
             "required_checks": [
                 "model_duplicate_sequence",
                 "provider_tool_duplicate_sequence",

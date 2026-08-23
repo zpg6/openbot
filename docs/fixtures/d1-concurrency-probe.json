@@ -33,10 +33,19 @@
         "generated_name_pattern": "^openbot-d1-probe-[a-z0-9]{16}$",
         "new_disposable_database_required": true,
         "production_database_denied": true,
-        "synthetic_ids_and_payloads_only": true,
+        "synthetic_probe_domain_ids_and_payloads_only": true,
+        "cloudflare_account_and_zone_are_real": true,
         "returned_resource_ids_must_match_cleanup_ids": true
     },
     "deployment": {
+        "operational_identity": {
+            "account_id_hmac_commitment_required": true,
+            "zone_id_hmac_commitment_required": true,
+            "identity_commitment_algorithm": "hmac-sha256-v1",
+            "shared_preimage_domain_per_identity_type": true,
+            "role_in_identity_preimage": false,
+            "wrangler_version_required": true
+        },
         "database": {
             "count": 1,
             "lifecycle": "new_disposable_then_delete",
@@ -52,7 +61,9 @@
                 "role": "writer_a",
                 "separate_script": true,
                 "script_id_commitment_required": true,
+                "deployment_id_commitment_required": true,
                 "version_id_commitment_required": true,
+                "runtime_version_metadata_required": true,
                 "exact_database_binding_required": true,
                 "trigger": "separate_operator_process_over_access_protected_https"
             },
@@ -60,7 +71,9 @@
                 "role": "writer_b",
                 "separate_script": true,
                 "script_id_commitment_required": true,
+                "deployment_id_commitment_required": true,
                 "version_id_commitment_required": true,
+                "runtime_version_metadata_required": true,
                 "exact_database_binding_required": true,
                 "trigger": "separate_operator_process_over_access_protected_https"
             },
@@ -68,7 +81,9 @@
                 "role": "sink_readback",
                 "separate_script": true,
                 "script_id_commitment_required": true,
+                "deployment_id_commitment_required": true,
                 "version_id_commitment_required": true,
+                "runtime_version_metadata_required": true,
                 "exact_database_binding_required": true,
                 "trigger": "private_service_binding_sink_and_access_protected_exact_readback"
             }
@@ -77,6 +92,16 @@
         "all_worker_script_and_version_ids_pairwise_distinct_required": true,
         "sink_deployment_recorded_separately": true,
         "compatibility_date_required": true,
+        "service_bindings": {
+            "writer_to_sink_binding_count": 2,
+            "both_target_exact_sink_script": true,
+            "binding_configuration_digest_required": true,
+            "active_sink_deployment_single_version_100_percent": true,
+            "sink_rpc_runtime_version_response_required": true,
+            "awaited_rpc_required": true,
+            "sink_rpc_observation_required": true,
+            "access_context_expected_on_private_rpc": false
+        },
         "public_exposure": {
             "workers_dev": false,
             "preview_urls": false,
@@ -85,22 +110,38 @@
             "request_body_accepts_sql": false,
             "request_body_accepts_table_names": false,
             "one_use_run_bound_request_required": true,
+            "route_id_and_exact_pattern_commitments_required": true,
+            "access_application_policy_and_service_token_id_commitments_required": true,
+            "access_application_count": 1,
+            "reusable_access_policy_count": 1,
+            "access_service_token_count": 1,
             "readback_accepts_parameters": false,
             "readback_response": "fixed_synthetic_schema_for_generated_probe_run"
         }
     },
     "execution": {
-        "writer_processes": 2,
+        "driver_child_processes_by_trial": {
+            "guarded_create": 2,
+            "gateway_reservation": 2,
+            "audit_head": 2,
+            "sandbox_capacity": 5
+        },
+        "parent_ipc_go_release_required": true,
+        "one_go_receipt_per_child_required": true,
+        "one_network_request_per_child_required": true,
+        "readiness_identity_set_matches_child_set": true,
         "same_request_promise_all_eligible": false,
         "cross_network_requests_required": true,
         "automatic_application_retries": 0,
+        "platform_read_query_retries": "record_total_attempts_without_requiring_one",
         "ambiguous_request_retry_allowed": false,
         "ready_barrier_required": true,
         "barrier_timeout_result": "inconclusive",
         "writer_session_constraint": "first-primary",
         "decisive_readback_session_constraint": "first-primary",
         "bookmark_readback_is_decisive": false,
-        "writer_bookmark_required": true,
+        "committed_writer_bookmark_required": true,
+        "recognized_guard_denial_bookmark_required": false,
         "bookmark_causal_read_required": true,
         "d1_result_validation": {
             "statement_count": "exact",
@@ -111,8 +152,12 @@
             "rows_written": "recorded_non_authoritative_nonnegative_integer",
             "changed_db": "required_boolean",
             "served_by_primary": "required_true",
+            "served_by": "required_nonempty_string",
             "served_by_region": "required_nonempty_string",
             "duration": "required_nonnegative_number",
+            "timings_sql_duration_ms": "required_nonnegative_number",
+            "total_attempts": "required_positive_integer",
+            "last_row_id": "recorded_nullable_nonnegative_integer",
             "size_after": "required_nonnegative_integer"
         },
         "served_by_primary_absent_or_false": "inconclusive",
@@ -127,8 +172,9 @@
         "synthetic": true,
         "sink_ingress_private_service_binding_only": true,
         "readback_channel": "temporary_access_protected_exact_get_route",
-        "readback_route_retained_after_writer_routes_disabled": true,
-        "readback_route_removed_before_worker_deletion": true,
+        "writer_intake_closed_by_stored_fence_before_final_readback": true,
+        "all_access_and_routes_retained_until_final_readback": true,
+        "all_routes_removed_before_worker_deletion": true,
         "records_every_request_before_response": true,
         "random_receipt_per_request": true,
         "deduplication": "none",
@@ -147,6 +193,7 @@
         "guarded_create": {
             "gate_id": "d1_guarded_create",
             "cases": ["create_first", "revoke_first", "equal_release_race", "equal_release_race_roles_swapped"],
+            "concurrent_role_orientations": ["writer_a_create_writer_b_revoke", "writer_b_create_writer_a_revoke"],
             "legal_histories": [
                 {
                     "id": "create_before_revoke",
@@ -193,6 +240,11 @@
                 "loser_dispatches": 0,
                 "loser_result": "guarded_denial"
             },
+            "changed_digest_case": {
+                "exact_request_commits": true,
+                "changed_digest_is_guarded_denial": true,
+                "second_sink_dispatches": 0
+            },
             "fault_cases": [
                 {
                     "id": "reserve_crash_before_sink",
@@ -229,8 +281,11 @@
             ],
             "release_before_observation": "no_change",
             "release_with_mismatched_receipt": "no_change",
+            "wrong_installation_run_fence_claim_sandbox_and_receipt_each_tested": true,
             "release_replay": "no_change",
             "matching_release_count": 1,
+            "exact_target_bound_to_committed_claim_destroy_and_release": true,
+            "fifth_claim_after_release_commits": 1,
             "lost_or_unknown_destroy_response": "manual_required_capacity_remains_reserved"
         },
         "audit_head": {
@@ -243,9 +298,17 @@
             "loser_batch_result": "rolled_back",
             "follow_up": {
                 "new_attempt_id": true,
+                "first_phase_attempt_ids_bound_to_writer_requests": true,
+                "issued_by_first_phase_loser": true,
                 "new_first_primary_head_read": true,
                 "automatic_retry": false,
                 "next_sequence_commits": 1
+            },
+            "negative_cases": {
+                "stale_sequence": "guarded_denial",
+                "gap_sequence": "guarded_denial",
+                "wrong_previous_hash": "guarded_denial",
+                "head_event_split_observed": false
             },
             "final_chain_entries": 2,
             "final_chain_must_verify": true
@@ -253,30 +316,46 @@
     },
     "report_requirements": {
         "report_platform_literal": "cloudflare_d1_deployed",
+        "required_check_set_version": 1,
         "database_id_commitment": true,
+        "deployment_digest_recomputed_from_typed_projection": true,
+        "deployment_digest_contains_pre_run_configuration_only": true,
         "writer_deployment_commitments": 2,
         "sink_deployment_commitment": true,
         "read_replication_setting": true,
         "served_by_primary_observed_true": true,
         "compatibility_date": true,
+        "cloudflare_account_and_zone_commitments": true,
+        "worker_deployment_and_runtime_version_commitments": true,
+        "service_binding_and_awaited_sink_rpc_commitments": true,
+        "route_and_access_resource_commitments": true,
+        "wrangler_version": true,
         "bookmarks_and_result_meta": true,
+        "cleanup_outcome_and_absence_checks": true,
+        "canonical_final_current_state_digest_recomputed": true,
+        "cleanup_transcript_hmac_and_typed_response_projection_required": true,
+        "cleanup_transcript_response_hmac_matches_projection_commitment": true,
+        "typed_inconclusive_and_manual_required_failure_envelope": true,
         "redacted_transcript_commitments": true,
         "all_required_trials_conclusive": true,
         "deployment_commitments_semantically_coherent": true,
         "worker_deployment_commitments_pairwise_distinct": true,
         "all_worker_database_commitments_equal": true,
+        "pure_operator_review_assessment_required": true,
+        "operator_review_assessment_is_authority": false,
         "external_operator_review_and_signature": true
     },
     "cleanup": {
         "initial_status": "not_run",
         "order": [
-            "close_stored_run_fence_and_disable_writer_routes_and_access_entry_points",
+            "close_probe_run_fence_while_access_remains_active",
             "settle_or_mark_unknown_in_flight_requests",
             "capture_final_first_primary_readback_through_retained_exact_access_route",
-            "disable_and_delete_exact_readback_route_and_access_entry_point",
-            "delete_exact_writer_a_and_writer_b_deployments",
-            "delete_exact_sink_readback_deployment",
-            "delete_exact_remaining_access_service_bindings_and_driver_configuration",
+            "revoke_exact_access_service_token",
+            "delete_and_confirm_absent_all_three_exact_routes",
+            "delete_exact_access_application_and_reusable_policy",
+            "delete_exact_writer_a_and_writer_b_scripts_without_force",
+            "delete_exact_sink_readback_script_without_force",
             "delete_exact_disposable_d1_database_last",
             "confirm_recorded_resource_ids_absent"
         ],

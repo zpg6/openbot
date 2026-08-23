@@ -110,6 +110,9 @@ Use a run-owned key and send one bounded tool-capable request with router metada
 ### Verified documentation
 
 - D1 `batch()` executes statements sequentially and rolls back the batch on failure.
+- `first-primary` applies to the first query in a D1 session. Each decisive probe snapshot therefore uses one aggregate query in a fresh session, or one fresh session per `SELECT`.
+- D1 may retry read-only queries. Probe reports record `total_attempts`; OpenBot still performs no application retry after an ambiguous operation.
+- Current D1 result metadata includes `served_by`, `served_by_primary`, `served_by_region`, `timings.sql_duration_ms`, and `total_attempts`. Missing primary metadata makes a decisive read inconclusive.
 - One D1 database is single-threaded. Paid-plan databases are limited to 10 GB. A row or value is limited to 2 MB, and a query accepts at most 100 bound parameters.
 - D1 supports `eu` and `fedramp` jurisdictions. Its location hints are not placement guarantees.
 - Durable Objects support `eu`, `us`, and `fedramp` jurisdiction subnamespaces. Cloudflare recommends a jurisdiction subnamespace before `newUniqueId()`.
@@ -123,9 +126,13 @@ Use a run-owned key and send one bounded tool-capable request with router metada
 - The Agents SDK uses Durable Objects and persistent SQL state. Its MCP client persists connection state in Agent SQL and makes connected server tools available through that client.
 - Code Mode is experimental. It lets model-written code compose configured tools across a sandbox boundary and leaves authorization in the upstream tool handler or host callback.
 
+The deployed D1 report must commit the real Cloudflare account and zone IDs through domain-separated HMACs. It also commits the database, Worker scripts, deployments, runtime version metadata, exact routes, Access resources, Wrangler version, bookmarks, statement metadata, primary readbacks, and cleanup absence checks. A pure assessment checks those fields and every legal history before operator review. `eligible_for_operator_review` is not a gate decision or runtime authority.
+
 Sources:
 
 - [D1 database API](https://developers.cloudflare.com/d1/worker-api/d1-database/)
+- [D1 return objects](https://developers.cloudflare.com/d1/worker-api/return-object/)
+- [D1 retry behavior](https://developers.cloudflare.com/d1/best-practices/retry-queries/)
 - [D1 limits](https://developers.cloudflare.com/d1/platform/limits/)
 - [D1 data location](https://developers.cloudflare.com/d1/configuration/data-location/)
 - [Durable Object data location](https://developers.cloudflare.com/durable-objects/reference/data-location/)

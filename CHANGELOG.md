@@ -13,3 +13,4 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 - Strict untrusted Item 2 probe-report contracts and recorded blocker inspection, with no gate-promotion authority.
 - P-256 gate-attestation verification, shared-generation revocation, typed connector claims, and opaque Sandbox decisions. Raw reports and copied decisions cannot authorize execution.
 - Hermetic disposable-D1 protocol tests and a blocked deployed two-writer probe contract for guarded create, gateway reservation, Sandbox capacity, and audit contention.
+- Fail-closed adjudication contracts for deployed D1 evidence, including exact worker participation, primary readbacks, ambiguity cases, and cleanup commitments. Adjudication remains non-authoritative and does not promote a gate.

@@ -35,6 +35,14 @@ check(
 
 const item2Gates = new Map((item2Fixture.gates ?? []).map(gate => [gate.id, gate]));
 check(
+    item2Gates.get("d1_guarded_create")?.operator_review_assessment_required === true,
+    "D1 guarded-create evidence needs a pure operator-review assessment before signing"
+);
+check(
+    item2Gates.get("gateway_reservation")?.operator_review_assessment_required === true,
+    "gateway evidence needs a pure operator-review assessment before signing"
+);
+check(
     same(item2Gates.get("d1_guarded_create")?.required_checks, [
         "revoke_linearizes_first",
         "create_linearizes_first",
@@ -66,10 +74,32 @@ check(rules.generated_name_prefix === "openbot-d1-probe-", "generated resource p
 check(rules.generated_name_pattern === "^openbot-d1-probe-[a-z0-9]{16}$", "safe-name pattern changed");
 check(rules.new_disposable_database_required === true, "a new disposable database is required");
 check(rules.production_database_denied === true, "production databases must be denied");
-check(rules.synthetic_ids_and_payloads_only === true, "only synthetic IDs and payloads are allowed");
+check(
+    rules.synthetic_probe_domain_ids_and_payloads_only === true,
+    "only probe-domain IDs and payloads may be synthetic"
+);
+check(rules.cloudflare_account_and_zone_are_real === true, "Cloudflare account and zone IDs are operational IDs");
 check(rules.returned_resource_ids_must_match_cleanup_ids === true, "cleanup must bind returned resource IDs");
 
 const deployment = fixture.deployment ?? {};
+check(
+    deployment.operational_identity?.account_id_hmac_commitment_required === true,
+    "account ID needs an HMAC commitment"
+);
+check(deployment.operational_identity?.zone_id_hmac_commitment_required === true, "zone ID needs an HMAC commitment");
+check(
+    deployment.operational_identity?.identity_commitment_algorithm === "hmac-sha256-v1",
+    "identity commitment algorithm changed"
+);
+check(
+    deployment.operational_identity?.shared_preimage_domain_per_identity_type === true,
+    "roles must share one identity preimage domain"
+);
+check(
+    deployment.operational_identity?.role_in_identity_preimage === false,
+    "roles cannot alter identity equality commitments"
+);
+check(deployment.operational_identity?.wrangler_version_required === true, "the Wrangler version must be recorded");
 check(deployment.database?.count === 1, "the probe requires exactly one D1 database");
 check(deployment.database?.same_exact_database_id_for_all_workers === true, "all Workers must bind one exact D1 ID");
 check(deployment.database?.exact_database_id_commitment_required === true, "the database ID needs a commitment");
@@ -91,7 +121,9 @@ check(
 for (const worker of deployment.workers ?? []) {
     check(worker.separate_script === true, `${worker.role} must be a separate script`);
     check(worker.script_id_commitment_required === true, `${worker.role} must commit its script ID`);
+    check(worker.deployment_id_commitment_required === true, `${worker.role} must commit its deployment ID`);
     check(worker.version_id_commitment_required === true, `${worker.role} must commit its version ID`);
+    check(worker.runtime_version_metadata_required === true, `${worker.role} must return runtime version metadata`);
     check(worker.exact_database_binding_required === true, `${worker.role} must bind the exact disposable D1 ID`);
 }
 check(deployment.distinct_writer_script_and_version_ids_required === true, "writers need distinct deployments");
@@ -101,6 +133,26 @@ check(
 );
 check(deployment.sink_deployment_recorded_separately === true, "sink deployment must be recorded separately");
 check(deployment.compatibility_date_required === true, "compatibility date is required");
+check(deployment.service_bindings?.writer_to_sink_binding_count === 2, "both writers need sink bindings");
+check(
+    deployment.service_bindings?.both_target_exact_sink_script === true,
+    "both service bindings must target the exact sink script"
+);
+check(deployment.service_bindings?.binding_configuration_digest_required === true, "binding configs need digests");
+check(
+    deployment.service_bindings?.active_sink_deployment_single_version_100_percent === true,
+    "sink deployment must route all traffic to one version"
+);
+check(
+    deployment.service_bindings?.sink_rpc_runtime_version_response_required === true,
+    "sink RPC must report its runtime version"
+);
+check(deployment.service_bindings?.awaited_rpc_required === true, "sink delivery must use awaited RPC");
+check(deployment.service_bindings?.sink_rpc_observation_required === true, "sink RPC must be observed");
+check(
+    deployment.service_bindings?.access_context_expected_on_private_rpc === false,
+    "Access context does not propagate over service bindings"
+);
 check(deployment.public_exposure?.workers_dev === false, "workers.dev must stay disabled");
 check(deployment.public_exposure?.preview_urls === false, "preview URLs must stay disabled");
 check(
@@ -120,6 +172,17 @@ check(
     deployment.public_exposure?.one_use_run_bound_request_required === true,
     "writer requests must be one-use and bound to the generated probe run"
 );
+check(
+    deployment.public_exposure?.route_id_and_exact_pattern_commitments_required === true,
+    "every route needs an ID and exact-pattern commitment"
+);
+check(
+    deployment.public_exposure?.access_application_policy_and_service_token_id_commitments_required === true,
+    "Access application, policy, and service-token IDs need commitments"
+);
+check(deployment.public_exposure?.access_application_count === 1, "the probe uses one Access application");
+check(deployment.public_exposure?.reusable_access_policy_count === 1, "the probe uses one reusable Access policy");
+check(deployment.public_exposure?.access_service_token_count === 1, "the probe uses one Access service token");
 check(deployment.public_exposure?.readback_accepts_parameters === false, "readback must accept no query parameters");
 check(
     deployment.public_exposure?.readback_response === "fixed_synthetic_schema_for_generated_probe_run",
@@ -132,17 +195,34 @@ check(
 );
 
 const execution = fixture.execution ?? {};
-check(execution.writer_processes === 2, "the operator driver needs two processes");
+check(
+    same(execution.driver_child_processes_by_trial, {
+        guarded_create: 2,
+        gateway_reservation: 2,
+        audit_head: 2,
+        sandbox_capacity: 5,
+    }),
+    "the driver needs one child process per contender"
+);
+check(execution.parent_ipc_go_release_required === true, "the parent must release ready children over IPC");
+check(execution.one_go_receipt_per_child_required === true, "every child needs one GO receipt");
+check(execution.one_network_request_per_child_required === true, "every child sends one network request");
+check(execution.readiness_identity_set_matches_child_set === true, "readiness rows must bind every child");
 check(execution.same_request_promise_all_eligible === false, "same-request Promise.all is not two-writer evidence");
 check(execution.cross_network_requests_required === true, "writer requests must cross the network");
 check(execution.automatic_application_retries === 0, "automatic retries are forbidden");
+check(
+    execution.platform_read_query_retries === "record_total_attempts_without_requiring_one",
+    "D1 read retries must be observed without being mistaken for application retries"
+);
 check(execution.ambiguous_request_retry_allowed === false, "ambiguous requests must not be retried");
 check(execution.ready_barrier_required === true, "a two-writer barrier is required");
 check(execution.barrier_timeout_result === "inconclusive", "barrier timeout must be inconclusive");
 check(execution.writer_session_constraint === "first-primary", "writer sessions must start first-primary");
 check(execution.decisive_readback_session_constraint === "first-primary", "decisive reads must start first-primary");
 check(execution.bookmark_readback_is_decisive === false, "bookmark reads cannot replace first-primary readback");
-check(execution.writer_bookmark_required === true, "writer bookmarks are required");
+check(execution.committed_writer_bookmark_required === true, "committed writer bookmarks are required");
+check(execution.recognized_guard_denial_bookmark_required === false, "recognized denials cannot invent bookmarks");
 check(execution.bookmark_causal_read_required === true, "bookmark causal reads are required");
 check(
     execution.served_by_primary_absent_or_false === "inconclusive",
@@ -153,14 +233,18 @@ check(
         "changed_db",
         "changes",
         "duration",
+        "last_row_id",
         "returning_identity_and_cardinality",
         "rows_read",
         "rows_written",
+        "served_by",
         "served_by_primary",
         "served_by_region",
         "size_after",
         "statement_count",
         "success",
+        "timings_sql_duration_ms",
+        "total_attempts",
     ]),
     "exact D1Result validation fields changed"
 );
@@ -197,13 +281,14 @@ check(
     "final readback needs an implementable narrow channel"
 );
 check(
-    sink.readback_route_retained_after_writer_routes_disabled === true,
-    "cleanup must retain readback after intake closes"
+    sink.writer_intake_closed_by_stored_fence_before_final_readback === true,
+    "the stored fence must close writer intake before final readback"
 );
 check(
-    sink.readback_route_removed_before_worker_deletion === true,
-    "cleanup must remove readback before Worker deletion"
+    sink.all_access_and_routes_retained_until_final_readback === true,
+    "Access and exact routes must remain active through final readback"
 );
+check(sink.all_routes_removed_before_worker_deletion === true, "routes must close before Worker deletion");
 check(sink.records_every_request_before_response === true, "the sink must record before response");
 check(sink.random_receipt_per_request === true, "the sink must issue a new random receipt for every request");
 check(sink.deduplication === "none", "the sink must not deduplicate");
@@ -233,6 +318,10 @@ check(
 );
 
 const guarded = fixture.trials?.guarded_create ?? {};
+check(
+    same(guarded.concurrent_role_orientations, ["writer_a_create_writer_b_revoke", "writer_b_create_writer_a_revoke"]),
+    "concurrent guarded histories must swap writer roles"
+);
 check(
     same(guarded.cases, ["create_first", "revoke_first", "equal_release_race", "equal_release_race_roles_swapped"]),
     "guarded-create cases changed"
@@ -292,6 +381,14 @@ check(
     "gateway normal-case result changed"
 );
 check(
+    same(gateway.changed_digest_case, {
+        exact_request_commits: true,
+        changed_digest_is_guarded_denial: true,
+        second_sink_dispatches: 0,
+    }),
+    "gateway changed-digest result changed"
+);
+check(
     same(gateway.fault_cases, [
         {
             id: "reserve_crash_before_sink",
@@ -334,8 +431,17 @@ check(
 check(capacity.release_before_observation === "no_change", "capacity cannot release before destroy observation");
 check(capacity.release_with_mismatched_receipt === "no_change", "a mismatched receipt cannot release capacity");
 check(
+    capacity.wrong_installation_run_fence_claim_sandbox_and_receipt_each_tested === true,
+    "every capacity release binding needs a negative test"
+);
+check(
     capacity.release_replay === "no_change" && capacity.matching_release_count === 1,
     "capacity release must be one-time"
+);
+check(capacity.fifth_claim_after_release_commits === 1, "one new claim must commit after exact release");
+check(
+    capacity.exact_target_bound_to_committed_claim_destroy_and_release === true,
+    "capacity target must bind the claim, destroy, and release"
 );
 check(
     capacity.lost_or_unknown_destroy_response === "manual_required_capacity_remains_reserved",
@@ -352,9 +458,23 @@ check(
 );
 check(audit.loser_batch_result === "rolled_back", "the losing audit batch must roll back");
 check(audit.follow_up?.new_attempt_id === true, "audit follow-up needs a new attempt ID");
+check(
+    audit.follow_up?.first_phase_attempt_ids_bound_to_writer_requests === true,
+    "audit contender attempt IDs must bind their writer requests"
+);
+check(audit.follow_up?.issued_by_first_phase_loser === true, "audit loser must issue the follow-up");
 check(audit.follow_up?.new_first_primary_head_read === true, "audit follow-up must reread first-primary");
 check(audit.follow_up?.automatic_retry === false, "audit follow-up is not an automatic retry");
 check(audit.follow_up?.next_sequence_commits === 1, "audit follow-up must commit the next sequence");
+check(
+    same(audit.negative_cases, {
+        stale_sequence: "guarded_denial",
+        gap_sequence: "guarded_denial",
+        wrong_previous_hash: "guarded_denial",
+        head_event_split_observed: false,
+    }),
+    "audit negative cases changed"
+);
 check(
     audit.final_chain_entries === 2 && audit.final_chain_must_verify === true,
     "the final two-entry chain must verify"
@@ -362,13 +482,47 @@ check(
 
 const report = fixture.report_requirements ?? {};
 check(report.report_platform_literal === "cloudflare_d1_deployed", "deployed reports need the exact platform literal");
+check(report.required_check_set_version === 1, "D1 adjudication check-set version changed");
 check(report.database_id_commitment === true, "deployed reports need a database-ID commitment");
+check(
+    report.deployment_digest_recomputed_from_typed_projection === true,
+    "the deployment digest must be recomputed from the typed deployment projection"
+);
+check(
+    report.deployment_digest_contains_pre_run_configuration_only === true,
+    "deployment expectations must be fixed before the probe runs"
+);
 check(report.writer_deployment_commitments === 2, "deployed reports need two writer commitments");
 check(report.sink_deployment_commitment === true, "deployed reports need the sink deployment commitment");
 check(report.read_replication_setting === true, "deployed reports need the read-replication setting");
 check(report.served_by_primary_observed_true === true, "deployed reports must record true served_by_primary metadata");
 check(report.compatibility_date === true, "deployed reports need the compatibility date");
+check(report.cloudflare_account_and_zone_commitments === true, "deployed reports need account and zone commitments");
+check(
+    report.worker_deployment_and_runtime_version_commitments === true,
+    "deployed reports need deployment and runtime-version commitments"
+);
+check(
+    report.service_binding_and_awaited_sink_rpc_commitments === true,
+    "deployed reports need service-binding and awaited sink RPC commitments"
+);
+check(report.route_and_access_resource_commitments === true, "deployed reports need route and Access commitments");
+check(report.wrangler_version === true, "deployed reports need the Wrangler version");
 check(report.bookmarks_and_result_meta === true, "deployed reports need bookmarks and D1Result metadata");
+check(report.cleanup_outcome_and_absence_checks === true, "deployed reports need cleanup and absence observations");
+check(report.canonical_final_current_state_digest_recomputed === true, "final current-state digest must be recomputed");
+check(
+    report.cleanup_transcript_hmac_and_typed_response_projection_required === true,
+    "cleanup transcript must bind the typed final-state projection"
+);
+check(
+    report.cleanup_transcript_response_hmac_matches_projection_commitment === true,
+    "cleanup transcript HMAC must match its projection commitment"
+);
+check(
+    report.typed_inconclusive_and_manual_required_failure_envelope === true,
+    "collector failures need a typed fail-closed envelope"
+);
 check(report.redacted_transcript_commitments === true, "deployed reports need redacted transcript commitments");
 check(report.all_required_trials_conclusive === true, "all required trials must be conclusive");
 check(
@@ -377,19 +531,22 @@ check(
 );
 check(report.worker_deployment_commitments_pairwise_distinct === true, "all Worker commitments must be distinct");
 check(report.all_worker_database_commitments_equal === true, "all Worker commitments must bind one database");
+check(report.pure_operator_review_assessment_required === true, "reports need a pure review assessment");
+check(report.operator_review_assessment_is_authority === false, "the review assessment cannot grant authority");
 check(report.external_operator_review_and_signature === true, "deployed reports require external review and signature");
 
 const cleanup = fixture.cleanup ?? {};
 check(cleanup.initial_status === "not_run", "checked-in cleanup status must remain not_run");
 check(
     same(cleanup.order, [
-        "close_stored_run_fence_and_disable_writer_routes_and_access_entry_points",
+        "close_probe_run_fence_while_access_remains_active",
         "settle_or_mark_unknown_in_flight_requests",
         "capture_final_first_primary_readback_through_retained_exact_access_route",
-        "disable_and_delete_exact_readback_route_and_access_entry_point",
-        "delete_exact_writer_a_and_writer_b_deployments",
-        "delete_exact_sink_readback_deployment",
-        "delete_exact_remaining_access_service_bindings_and_driver_configuration",
+        "revoke_exact_access_service_token",
+        "delete_and_confirm_absent_all_three_exact_routes",
+        "delete_exact_access_application_and_reusable_policy",
+        "delete_exact_writer_a_and_writer_b_scripts_without_force",
+        "delete_exact_sink_readback_script_without_force",
         "delete_exact_disposable_d1_database_last",
         "confirm_recorded_resource_ids_absent",
     ]),
