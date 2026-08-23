@@ -1,0 +1,14 @@
+{
+    "files": [],
+    "references": [
+        { "path": "./packages/contracts" },
+        { "path": "./packages/domain" },
+        { "path": "./packages/db-d1" },
+        { "path": "./apps/capability-gateway" },
+        { "path": "./apps/control-plane" },
+        { "path": "./apps/orchestrator" },
+        { "path": "./apps/runtime" },
+        { "path": "./tsconfig.tests.node.json" },
+        { "path": "./tsconfig.tests.worker.json" }
+    ]
+}

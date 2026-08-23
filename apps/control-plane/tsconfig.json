@@ -1,0 +1,10 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "outDir": "../../.build/types/apps/control-plane",
+        "rootDir": ".",
+        "types": ["@cloudflare/workers-types"]
+    },
+    "include": ["entry.d1.ts", "src/**/*.ts"],
+    "references": [{ "path": "../../packages/db-d1" }]
+}

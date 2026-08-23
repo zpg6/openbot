@@ -1,0 +1,10 @@
+{
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "outDir": "./.build/types/tests/worker",
+        "rootDir": ".",
+        "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types", "vitest"]
+    },
+    "include": ["tests/workers/**/*.ts"],
+    "references": [{ "path": "./apps/capability-gateway" }]
+}

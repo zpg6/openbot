@@ -1,0 +1,11 @@
+{
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "lib": ["ES2024", "DOM", "DOM.Iterable"],
+        "outDir": "./.build/types/tests/node",
+        "rootDir": ".",
+        "types": ["node", "vitest"]
+    },
+    "include": ["tests/unit/**/*.ts", "vitest.config.ts", "vitest.workers.config.ts"],
+    "references": [{ "path": "./apps/control-plane" }]
+}

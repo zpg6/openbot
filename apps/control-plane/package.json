@@ -1,0 +1,14 @@
+{
+    "name": "@openbot/control-plane",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "wrangler dev --config wrangler.d1.jsonc --env preview",
+        "build": "wrangler deploy --dry-run --outdir ../../.build/workers/control-plane --config wrangler.d1.jsonc --env preview"
+    },
+    "dependencies": {
+        "@openbot/db-d1": "workspace:*",
+        "hono": "catalog:"
+    }
+}

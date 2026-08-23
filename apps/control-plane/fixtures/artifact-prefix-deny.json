@@ -1,0 +1,11 @@
+{
+    "schema_version": 1,
+    "denied_prefixes": [
+        "/artifact-collections",
+        "/artifact-uploads",
+        "/artifact-versions",
+        "/actions/artifact-",
+        "/api/v1/artifact-"
+    ],
+    "denied_fragments": ["/artifact-mounts"]
+}

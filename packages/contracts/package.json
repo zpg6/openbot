@@ -1,0 +1,32 @@
+{
+    "name": "@openbot/contracts",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./src/index.ts"
+        },
+        "./public": {
+            "types": "./dist/public.d.ts",
+            "default": "./src/public.ts"
+        },
+        "./internal": {
+            "types": "./dist/internal.d.ts",
+            "default": "./src/internal.ts"
+        }
+    },
+    "scripts": {
+        "typecheck": "tsc -b --pretty false",
+        "test": "vitest run"
+    },
+    "dependencies": {
+        "zod": "catalog:"
+    },
+    "devDependencies": {
+        "fast-check": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:"
+    }
+}

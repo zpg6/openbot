@@ -1,0 +1,455 @@
+{
+    "schema_version": 1,
+    "routes": [
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/login"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/bootstrap"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/reset"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/bots"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/bots/new"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/bots/:botId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/bots/:botId/profile"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/bots/:botId/access"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/bots/:botId/runs/:runId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/run-confirmations/:confirmationId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/catalog/tools"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/catalog/tools/:policyId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/catalog/skills"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/catalog/skills/new"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/catalog/skills/:skillId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/connections"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/connections/new"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/connection-setups/:setupId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/connections/:authorizationId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/oauth/metorial/callback"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/audit"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/audit/events/:eventId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/cleanup-obligations/:obligationId"
+        },
+        {
+            "category": "html",
+            "method": "GET",
+            "path": "/settings"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/bootstrap"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/password-reset"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/bots"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/bots/:botId/profile"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/bots/:botId/revisions"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/organization-tool-policies"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/organization-tool-policies/:policyId/disables"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/skills"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/skills/:skillId/revisions"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/skills/:skillId/revisions/:revisionId/disables"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/connection-setups"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/connection-setups/:setupId/reopen"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/provider-authorizations/:authorizationId/revocations"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/capability-grants"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/capability-grants/:grantId/revocations"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/run-confirmations"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/run-confirmations/:confirmationId/discards"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/runs"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/runs/:runId/cancellations"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/runs/:runId/cleanup-retries"
+        },
+        {
+            "category": "action",
+            "method": "POST",
+            "path": "/actions/runs/:runId/content-deletions"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/account"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/bots"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/bots"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/bots/:botId"
+        },
+        {
+            "category": "api",
+            "method": "PATCH",
+            "path": "/api/v1/bots/:botId/profile"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/bots/:botId/revisions"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/bots/:botId/runs"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/organization-tool-policies"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/organization-tool-policies"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/organization-tool-policies/:policyId"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/organization-tool-policies/:policyId/disables"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/skills"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/skills"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/skills/:skillId"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/skills/:skillId/revisions"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/skills/:skillId/revisions/:revisionId/disables"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/provider-deployments"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/provider-deployments/:deploymentId"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/provider-authorizations"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/provider-authorizations/:authorizationId"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/connection-setups"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/connection-setups/:setupId"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/provider-authorizations/:authorizationId/revocations"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/capability-grants"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/capability-grants"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/capability-grants/:grantId"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/capability-grants/:grantId/revocations"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/run-confirmations"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/run-confirmations/:confirmationId"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/run-confirmations/:confirmationId/discards"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/runs"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/runs/:runId"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/runs/:runId/events"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/runs/:runId/result"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/runs/:runId/cancellations"
+        },
+        {
+            "category": "api",
+            "method": "POST",
+            "path": "/api/v1/runs/:runId/cleanup-retries"
+        },
+        {
+            "category": "api",
+            "method": "DELETE",
+            "path": "/api/v1/runs/:runId/content"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/audit-events"
+        },
+        {
+            "category": "api",
+            "method": "GET",
+            "path": "/api/v1/audit-events/:eventId"
+        },
+        {
+            "category": "auth",
+            "method": "POST",
+            "path": "/api/auth/sign-in/email"
+        },
+        {
+            "category": "auth",
+            "method": "GET",
+            "path": "/api/auth/get-session"
+        },
+        {
+            "category": "auth",
+            "method": "POST",
+            "path": "/api/auth/change-password"
+        },
+        {
+            "category": "auth",
+            "method": "POST",
+            "path": "/api/auth/sign-out"
+        },
+        {
+            "category": "operator",
+            "method": "POST",
+            "path": "/operator/v1/admin-tokens"
+        }
+    ]
+}

@@ -1,0 +1,44 @@
+{
+    "name": "openbot",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "packageManager": "pnpm@11.22.0",
+    "engines": {
+        "node": ">=22.19.0 <23",
+        "pnpm": "11.22.0"
+    },
+    "scripts": {
+        "dev": "corepack pnpm --filter @openbot/control-plane dev",
+        "build": "tsc -b --pretty false && node scripts/workers.mjs dry-run",
+        "typecheck": "tsc -b --pretty false",
+        "test": "vitest run --config vitest.config.ts",
+        "test:integration": "vitest run --config vitest.workers.config.ts",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "cf-typegen": "node scripts/workers.mjs typegen",
+        "check:dependencies": "node scripts/check-dependencies.mjs",
+        "check:secrets": "node scripts/check-secrets.mjs",
+        "check:fixtures": "node scripts/check-fixtures.mjs",
+        "db:generate:d1": "drizzle-kit generate --config packages/db-d1/drizzle.config.ts",
+        "db:migrate:d1:local": "wrangler d1 migrations apply CONTROL_DB_FRESH --local --config apps/control-plane/wrangler.d1.jsonc --env preview",
+        "db:migrate:d1:remote": "wrangler d1 migrations apply CONTROL_DB_FRESH --remote --config apps/control-plane/wrangler.d1.jsonc --env production",
+        "deploy:d1:preview": "node scripts/workers.mjs deploy preview",
+        "deploy:d1:production": "node scripts/workers.mjs deploy production",
+        "tail:preview": "wrangler tail --config apps/control-plane/wrangler.d1.jsonc --env preview",
+        "tail:production": "wrangler tail --config apps/control-plane/wrangler.d1.jsonc --env production",
+        "verify": "corepack pnpm format:check && corepack pnpm check:dependencies && corepack pnpm check:secrets && corepack pnpm check:fixtures && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build",
+        "verify:integration": "corepack pnpm verify && corepack pnpm test:integration",
+        "verify:preview": "node scripts/verify-preview.mjs"
+    },
+    "devDependencies": {
+        "@cloudflare/vitest-plugin": "catalog:",
+        "@cloudflare/workers-types": "catalog:",
+        "@types/node": "catalog:",
+        "drizzle-kit": "catalog:",
+        "prettier": "catalog:",
+        "typescript": "catalog:",
+        "vitest": "catalog:",
+        "wrangler": "catalog:"
+    }
+}

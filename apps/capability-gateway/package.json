@@ -1,0 +1,9 @@
+{
+    "name": "@openbot/capability-gateway",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "build": "wrangler deploy --dry-run --outdir ../../.build/workers/capability-gateway --config wrangler.d1.jsonc --env preview"
+    }
+}

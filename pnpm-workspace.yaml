@@ -1,0 +1,50 @@
+packages:
+    - "apps/*"
+    - "packages/*"
+    - "connectors/*"
+
+allowBuilds:
+    esbuild: true
+    workerd: true
+
+autoInstallPeers: false
+
+catalog:
+    "@cloudflare/vitest-plugin": 1.0.0
+    "@cloudflare/workers-types": 5.20260820.1
+    "@hono/zod-openapi": 1.6.1
+    "@playwright/test": 1.62.1
+    "@types/node": 22.19.21
+    drizzle-kit: 0.31.10
+    drizzle-orm: 0.45.2
+    fast-check: 4.9.0
+    hono: 4.13.3
+    prettier: 3.9.6
+    testcontainers: 12.1.0
+    typescript: 7.0.2
+    vitest: 4.1.11
+    wrangler: 4.125.0
+    zod: 4.4.3
+
+confirmModulesPurge: false
+
+engineStrict: true
+
+dedupePeerDependents: false
+
+linkWorkspacePackages: false
+
+minimumReleaseAge: 1440
+
+minimumReleaseAgeExclude:
+    - "@cloudflare/vitest-plugin"
+    - "@cloudflare/workers-types"
+    - pnpm
+    - typescript
+    - wrangler
+
+preferWorkspacePackages: false
+
+saveExact: true
+
+strictPeerDependencies: true

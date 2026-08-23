@@ -1,0 +1,31 @@
+{
+    "$schema": "../../node_modules/wrangler/config-schema.json",
+    "name": "openbot-capability-gateway",
+    "main": "entry.d1.ts",
+    "compatibility_date": "2026-08-22",
+    "preview_urls": false,
+    "workers_dev": false,
+    "observability": { "enabled": false },
+    "env": {
+        "preview": {
+            "d1_databases": [
+                {
+                    "binding": "CONTROL_DB_FRESH",
+                    "database_name": "openbot-control-preview",
+                    "database_id": "REPLACE_WITH_PREVIEW_D1_DATABASE_ID",
+                    "migrations_dir": "../../packages/db-d1/migrations",
+                },
+            ],
+        },
+        "production": {
+            "d1_databases": [
+                {
+                    "binding": "CONTROL_DB_FRESH",
+                    "database_name": "openbot-control-production",
+                    "database_id": "REPLACE_WITH_PRODUCTION_D1_DATABASE_ID",
+                    "migrations_dir": "../../packages/db-d1/migrations",
+                },
+            ],
+        },
+    },
+}
