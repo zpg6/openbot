@@ -48,7 +48,7 @@ export const D1ProbeGatewayReservationRequestV1Schema = UnsignedD1ProbeGatewayRe
 }).strict();
 export type D1ProbeGatewayReservationRequestV1 = z.infer<typeof D1ProbeGatewayReservationRequestV1Schema>;
 
-const D1MetadataV1Schema = z
+export const D1ProbeD1MetadataV1Schema = z
     .object({
         changes: CountSchema,
         rows_read: CountSchema,
@@ -64,7 +64,7 @@ const D1MetadataV1Schema = z
         size_after: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     })
     .strict();
-export type D1ProbeD1MetadataV1 = z.infer<typeof D1MetadataV1Schema>;
+export type D1ProbeD1MetadataV1 = z.infer<typeof D1ProbeD1MetadataV1Schema>;
 
 export const D1ProbeGatewayCommittedBatchV1Schema = z
     .object({
@@ -79,11 +79,11 @@ export const D1ProbeGatewayCommittedBatchV1Schema = z
                         reservation_id: OpaqueIdSchema,
                     })
                     .strict(),
-                metadata: D1MetadataV1Schema,
+                metadata: D1ProbeD1MetadataV1Schema,
             })
             .strict(),
         insert_guard: z
-            .object({ row: z.object({ reservation_id: OpaqueIdSchema }).strict(), metadata: D1MetadataV1Schema })
+            .object({ row: z.object({ reservation_id: OpaqueIdSchema }).strict(), metadata: D1ProbeD1MetadataV1Schema })
             .strict(),
         decrement_budget: z
             .object({
@@ -95,7 +95,7 @@ export const D1ProbeGatewayCommittedBatchV1Schema = z
                         remaining: z.literal(0),
                     })
                     .strict(),
-                metadata: D1MetadataV1Schema,
+                metadata: D1ProbeD1MetadataV1Schema,
             })
             .strict(),
         bookmark: z.string().min(1).max(512),
@@ -117,7 +117,7 @@ export const D1ProbeGatewayReadbackV1Schema = z
         stored_reservation_id: OpaqueIdSchema,
         stored_dispatch_request_digest: DigestSchema,
         stored_request_digest: DigestSchema,
-        metadata: D1MetadataV1Schema,
+        metadata: D1ProbeD1MetadataV1Schema,
     })
     .strict();
 export type D1ProbeGatewayReadbackV1 = z.infer<typeof D1ProbeGatewayReadbackV1Schema>;

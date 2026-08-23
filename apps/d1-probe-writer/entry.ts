@@ -1,5 +1,6 @@
 import type {
     D1ProbeGatewayReservationResponseV1,
+    D1ProbeGatewayTrialResponseV1,
     D1ProbeReceiptResponseV1,
     D1ProbeSinkServiceV1,
     D1ProbeWriterRoleV1,
@@ -8,6 +9,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 
 import { forwardProbeReceiptV1 } from "./src/forward.js";
 import { reserveAndDispatchGatewayProbeV1 } from "./src/gateway.js";
+import { runGatewayTrialV1 } from "./src/trigger.js";
 
 interface Env {
     readonly PROBE_DB: D1Database;
@@ -24,6 +26,10 @@ abstract class D1ProbeWriterService extends WorkerEntrypoint<Env> {
 
     reserveGateway(input: unknown): Promise<D1ProbeGatewayReservationResponseV1> {
         return reserveAndDispatchGatewayProbeV1(this.env.PROBE_DB, this.env.PROBE_SINK, this.role, input);
+    }
+
+    runGatewayTrial(input: unknown): Promise<D1ProbeGatewayTrialResponseV1> {
+        return runGatewayTrialV1(this.env.PROBE_DB, this.env.PROBE_SINK, this.role, input);
     }
 }
 

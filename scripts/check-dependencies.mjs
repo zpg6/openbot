@@ -145,6 +145,7 @@ function checkD1ProbeRpcImportBoundary(file, specifier) {
         file.startsWith("packages/d1-probe-rpc/") ||
         file.startsWith("apps/d1-probe-sink/") ||
         file.startsWith("apps/d1-probe-writer/") ||
+        file.startsWith("tests/d1-probe-writer-workers/") ||
         file === "tests/unit/d1-probe-rpc-boundary.test.ts"
     ) {
         return;
@@ -163,6 +164,7 @@ function checkD1ProbeWorkerImportBoundary(file, specifier) {
     if (
         file.startsWith("apps/d1-probe-sink/") ||
         file.startsWith("apps/d1-probe-writer/") ||
+        file.startsWith("tests/d1-probe-writer-workers/") ||
         file === "tests/unit/d1-probe-rpc-boundary.test.ts"
     ) {
         return;

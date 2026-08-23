@@ -14,7 +14,7 @@
         "typecheck": "tsc -b --pretty false",
         "test": "vitest run --config vitest.config.ts",
         "test:d1-probes": "corepack pnpm --dir packages/d1-probes test",
-        "test:integration": "vitest run --config vitest.workers.config.ts && vitest run --config vitest.sandbox.workers.config.ts && corepack pnpm test:d1-probes",
+        "test:integration": "vitest run --config vitest.workers.config.ts && vitest run --config vitest.sandbox.workers.config.ts && vitest run --config vitest.d1-probe-writer.config.ts && corepack pnpm test:d1-probes",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
         "cf-typegen": "node scripts/workers.mjs typegen",

@@ -227,6 +227,67 @@ CREATE TABLE IF NOT EXISTS _openbot_probe_external_sink_receipt (
     receipt_request_digest TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS _openbot_probe_external_trial (
+    probe_run_id TEXT NOT NULL,
+    trial_id TEXT NOT NULL,
+    trial_kind TEXT NOT NULL CHECK (trial_kind = 'gateway_reservation'),
+    state TEXT NOT NULL CHECK (state IN ('open', 'closed')),
+    expected_contender_count INTEGER NOT NULL CHECK (expected_contender_count = 2),
+    PRIMARY KEY (probe_run_id, trial_id)
+);
+
+CREATE TABLE IF NOT EXISTS _openbot_probe_external_trial_assignment (
+    probe_run_id TEXT NOT NULL,
+    trial_id TEXT NOT NULL,
+    child_process_id TEXT NOT NULL,
+    writer_role TEXT NOT NULL CHECK (writer_role IN ('writer_a', 'writer_b')),
+    go_receipt_digest TEXT NOT NULL,
+    operation_request_digest TEXT NOT NULL,
+    PRIMARY KEY (probe_run_id, trial_id, child_process_id),
+    UNIQUE (
+        probe_run_id,
+        trial_id,
+        child_process_id,
+        writer_role,
+        go_receipt_digest,
+        operation_request_digest
+    ),
+    UNIQUE (probe_run_id, trial_id, go_receipt_digest),
+    UNIQUE (probe_run_id, trial_id, operation_request_digest),
+    FOREIGN KEY (probe_run_id, trial_id) REFERENCES _openbot_probe_external_trial(probe_run_id, trial_id)
+);
+
+CREATE TABLE IF NOT EXISTS _openbot_probe_external_trial_readiness (
+    probe_run_id TEXT NOT NULL,
+    trial_id TEXT NOT NULL,
+    child_process_id TEXT NOT NULL,
+    writer_role TEXT NOT NULL CHECK (writer_role IN ('writer_a', 'writer_b')),
+    go_receipt_digest TEXT NOT NULL,
+    operation_request_digest TEXT NOT NULL,
+    request_id TEXT NOT NULL UNIQUE,
+    request_digest TEXT NOT NULL,
+    PRIMARY KEY (probe_run_id, trial_id, child_process_id),
+    FOREIGN KEY (
+        probe_run_id,
+        trial_id,
+        child_process_id,
+        writer_role,
+        go_receipt_digest,
+        operation_request_digest
+    ) REFERENCES _openbot_probe_external_trial_assignment(
+        probe_run_id,
+        trial_id,
+        child_process_id,
+        writer_role,
+        go_receipt_digest,
+        operation_request_digest
+    )
+);
+
+CREATE TABLE IF NOT EXISTS _openbot_probe_external_trial_readiness_guard (
+    request_id TEXT PRIMARY KEY REFERENCES _openbot_probe_external_trial_readiness(request_id)
+);
+
 CREATE TABLE IF NOT EXISTS _openbot_probe_external_gateway_budget (
     probe_run_id TEXT NOT NULL,
     scenario TEXT NOT NULL,
@@ -347,6 +408,10 @@ END;
 
 const resetSql = `
 DELETE FROM _openbot_probe_external_sink_receipt;
+DELETE FROM _openbot_probe_external_trial_readiness_guard;
+DELETE FROM _openbot_probe_external_trial_readiness;
+DELETE FROM _openbot_probe_external_trial_assignment;
+DELETE FROM _openbot_probe_external_trial;
 DELETE FROM _openbot_probe_external_gateway_guard;
 DELETE FROM _openbot_probe_external_gateway_reservation;
 DELETE FROM _openbot_probe_external_gateway_budget;

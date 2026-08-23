@@ -10,7 +10,8 @@
         "tests/unit/**/*.ts",
         "vitest.config.ts",
         "vitest.workers.config.ts",
-        "vitest.sandbox.workers.config.ts"
+        "vitest.sandbox.workers.config.ts",
+        "vitest.d1-probe-writer.config.ts"
     ],
     "references": [
         { "path": "./apps/control-plane" },

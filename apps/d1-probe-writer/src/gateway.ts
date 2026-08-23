@@ -95,6 +95,8 @@ const metadataFrom = (value: unknown, expectWrite: boolean): D1ProbeD1MetadataV1
     return metadataFromSchema(metadata);
 };
 
+export { metadataFrom as d1ProbeMetadataFromV1 };
+
 const metadataFromSchema = (value: unknown): D1ProbeD1MetadataV1 => {
     const result = D1ProbeGatewayReadbackV1Schema.shape.metadata.safeParse(value);
     if (!result.success) throw new TypeError("D1 metadata is invalid");
