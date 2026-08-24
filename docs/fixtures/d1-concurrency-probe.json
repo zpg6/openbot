@@ -115,6 +115,13 @@
             "access_application_count": 1,
             "reusable_access_policy_count": 1,
             "access_service_token_count": 1,
+            "worker_access_context_required": true,
+            "access_audience_exact_match_required": true,
+            "access_service_token_identity_exact_match_required": true,
+            "manual_access_jwt_parsing": false,
+            "canonical_request_body_required": true,
+            "request_body_limit_bytes": 16384,
+            "content_length_exact_required": true,
             "readback_accepts_parameters": false,
             "readback_response": "fixed_synthetic_schema_for_generated_probe_run"
         }

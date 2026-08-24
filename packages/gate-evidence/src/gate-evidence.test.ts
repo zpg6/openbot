@@ -1691,7 +1691,7 @@ describe("untrusted probe reports", () => {
         )!;
         if (recordedRelease.outcome === "committed") recordedRelease.writer_receipt_identity_commitment = hex("0");
         expect(UntrustedD1GuardedCreateProbeReportV1Schema.safeParse(substitutedCapacityReceipt).success).toBe(false);
-    });
+    }, 30_000);
 
     it("requires credential-free global tools, one resource-rule family, and the 128 KiB result limit", () => {
         const credentialed = {

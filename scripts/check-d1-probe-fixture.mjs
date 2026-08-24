@@ -183,6 +183,22 @@ check(
 check(deployment.public_exposure?.access_application_count === 1, "the probe uses one Access application");
 check(deployment.public_exposure?.reusable_access_policy_count === 1, "the probe uses one reusable Access policy");
 check(deployment.public_exposure?.access_service_token_count === 1, "the probe uses one Access service token");
+check(
+    deployment.public_exposure?.worker_access_context_required === true,
+    "Writer routes require Worker Access context"
+);
+check(
+    deployment.public_exposure?.access_audience_exact_match_required === true,
+    "Writer routes require the exact Access audience"
+);
+check(
+    deployment.public_exposure?.access_service_token_identity_exact_match_required === true,
+    "Writer routes require the exact Access service-token identity"
+);
+check(deployment.public_exposure?.manual_access_jwt_parsing === false, "Writer routes use verified Access context");
+check(deployment.public_exposure?.canonical_request_body_required === true, "Writer requests must be canonical JSON");
+check(deployment.public_exposure?.request_body_limit_bytes === 16384, "Writer request body limit changed");
+check(deployment.public_exposure?.content_length_exact_required === true, "Writer requests require exact length");
 check(deployment.public_exposure?.readback_accepts_parameters === false, "readback must accept no query parameters");
 check(
     deployment.public_exposure?.readback_response === "fixed_synthetic_schema_for_generated_probe_run",

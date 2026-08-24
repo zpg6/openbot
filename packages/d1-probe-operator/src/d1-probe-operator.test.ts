@@ -180,7 +180,7 @@ describe("D1 probe operator preflight", () => {
         });
     });
 
-    it("accepts only canonical stdin and a separate file-descriptor key", async () => {
+    it("accepts canonical stdin with a separate file-descriptor key", async () => {
         const canonicalRequest = canonicalizeJsonV1(request() as CanonicalJsonValueV1);
         const success = await runCli(canonicalRequest, key);
         expect(success).toMatchObject({ code: 0, stderr: "" });
@@ -189,9 +189,15 @@ describe("D1 probe operator preflight", () => {
             kind: "d1_probe_preflight_plan",
             deploy_performed: false,
         });
+    }, 15_000);
 
+    it("rejects noncanonical stdin", async () => {
         const noncanonical = await runCli(`${JSON.stringify(request(), null, 2)}\n`, key);
         expect(noncanonical).toEqual({ code: 1, stdout: "", stderr: "invalid_canonical_json\n" });
+    }, 15_000);
+
+    it("rejects a missing file-descriptor key", async () => {
+        const canonicalRequest = canonicalizeJsonV1(request() as CanonicalJsonValueV1);
         const missingKey = await runCli(canonicalRequest);
         expect(missingKey).toEqual({ code: 1, stdout: "", stderr: "commitment_key_unavailable\n" });
     }, 15_000);

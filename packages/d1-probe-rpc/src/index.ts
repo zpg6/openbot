@@ -64,3 +64,23 @@ export type {
     D1ProbeGatewayTrialServiceV1,
     UnsignedD1ProbeGatewayTrialRequestV1,
 } from "./trigger.js";
+
+export {
+    D1_PROBE_GATEWAY_TRIAL_HTTP_BODY_LIMIT_BYTES_V1,
+    D1ProbeGatewayTrialHttpResponseV1Schema,
+    D1ProbeHttpErrorCodeV1Schema,
+    D1ProbeHttpErrorV1Schema,
+    D1ProbeWriterHttpConfigV1Schema,
+    canonicalD1ProbeGatewayTrialHttpBodyV1,
+    canonicalD1ProbeGatewayTrialHttpResponseV1,
+    d1ProbeGatewayTrialHttpStatusV1,
+    d1ProbeHttpErrorV1,
+    parseD1ProbeGatewayTrialHttpResponseV1,
+} from "./http.js";
+
+export type {
+    D1ProbeGatewayTrialHttpResponseV1,
+    D1ProbeHttpErrorCodeV1,
+    D1ProbeHttpErrorV1,
+    D1ProbeWriterHttpConfigV1,
+} from "./http.js";
