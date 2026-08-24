@@ -31,6 +31,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.root_plan_command_registered === true &&
             fixture.implementation?.durable_operation_state_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_durable_operation_state === false &&
+            fixture.implementation?.checkout_local_driver_lease_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_driver_lease === false &&
+            fixture.implementation?.untrusted_effect_claim_journal_implemented === true &&
+            fixture.implementation?.credentialed_runner_writes_effect_claim_journal === false &&
             fixture.implementation?.automatic_cleanup_core_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_automatic_cleanup_core === false &&
             fixture.implementation?.cleanup_cli_registered === false &&
@@ -87,6 +91,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.ambiguous_mutation_result === "manual_cleanup_required_no_retry" &&
             workflow.checkout_local_plan_reservation === true &&
             workflow.distributed_plan_reservation === false &&
+            workflow.driver_lease_scope === "cooperative_single_checkout_only" &&
+            workflow.effect_claim_journal_scope === "caller_constructible_redacted_hash_chain_only" &&
             workflow.fresh_execution_ownership_tag_required === true &&
             workflow.durable_private_attempt_record_implemented === true &&
             workflow.credentialed_runner_records_raw_execution_ownership_tag === false &&

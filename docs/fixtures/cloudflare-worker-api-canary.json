@@ -14,6 +14,10 @@
         "root_plan_command_registered": true,
         "durable_operation_state_implemented": true,
         "credentialed_runner_uses_durable_operation_state": false,
+        "checkout_local_driver_lease_implemented": true,
+        "credentialed_runner_uses_driver_lease": false,
+        "untrusted_effect_claim_journal_implemented": true,
+        "credentialed_runner_writes_effect_claim_journal": false,
         "automatic_cleanup_core_implemented": true,
         "credentialed_runner_uses_automatic_cleanup_core": false,
         "cleanup_cli_registered": false,
@@ -35,7 +39,9 @@
         "lifecycle_advance_allowed": false,
         "gate_promotion_allowed": false,
         "production_artifact_eligible_for_upload": false,
-        "production_deployment_ready": false
+        "production_deployment_ready": false,
+        "driver_lease_is_security_or_distributed_lock": false,
+        "effect_claim_journal_authenticates_remote_effects": false
     },
     "isolation": {
         "one_new_disposable_worker_required": true,
@@ -73,6 +79,8 @@
         "ambiguous_mutation_result": "manual_cleanup_required_no_retry",
         "checkout_local_plan_reservation": true,
         "distributed_plan_reservation": false,
+        "driver_lease_scope": "cooperative_single_checkout_only",
+        "effect_claim_journal_scope": "caller_constructible_redacted_hash_chain_only",
         "fresh_execution_ownership_tag_required": true,
         "durable_private_attempt_record_implemented": true,
         "credentialed_runner_records_raw_execution_ownership_tag": false,
