@@ -499,14 +499,25 @@ check(
     "Worker mutation lifecycle must remain local, blocked, and non-authoritative"
 );
 check(
-    workerMutationLifecycle.upload_safety_blocker === "script_shell_and_subdomain_settings_protocol_missing" &&
+    workerMutationLifecycle.upload_safety_blocker === "beta_worker_api_interoperability_canary_missing" &&
+        workerMutationLifecycle.private_shell_protocol_contract_implemented === true &&
+        workerMutationLifecycle.beta_worker_api_interoperability_canary_passed === false &&
         workerMutationLifecycle.first_version_preview_safety_resolved === false &&
-        workerMutationLifecycle.upload_state === "blocked_pending_script_shell_settings_protocol" &&
+        workerMutationLifecycle.private_shell_state ===
+            "blocked_pending_beta_interoperability_canary_and_opaque_evidence" &&
+        workerMutationLifecycle.private_shell_adapter_implemented === false &&
+        workerMutationLifecycle.upload_state === "blocked_pending_opaque_private_shell_evidence" &&
         workerMutationLifecycle.deployment_state === "blocked_pending_opaque_version_evidence",
-    "first-Version preview safety remains blocked pending a script-shell and settings protocol"
+    "first-Version preview safety remains blocked pending the beta interoperability canary and opaque evidence"
 );
 check(
     JSON.stringify(workerMutationLifecycle.roles_in_order) === JSON.stringify(["sink", "writer_a", "writer_b"]) &&
+        JSON.stringify(workerMutationLifecycle.private_shell_steps_in_order) ===
+            JSON.stringify([
+                "sink_private_shell_created",
+                "writer_a_private_shell_created",
+                "writer_b_private_shell_created",
+            ]) &&
         workerMutationLifecycle.each_version_upload_precedes_its_deployment === true &&
         workerMutationLifecycle.deployment_version_count === 1 &&
         workerMutationLifecycle.deployment_traffic_percentage === 100 &&
@@ -517,8 +528,10 @@ check(
     "each Worker must upload one exact Version before a one-Version 100 percent Deployment"
 );
 check(
-    workerMutationLifecycle.lost_upload_response === "manual_cleanup_required_no_retry" &&
+    workerMutationLifecycle.lost_private_shell_response === "manual_cleanup_required_no_retry" &&
+        workerMutationLifecycle.lost_upload_response === "manual_cleanup_required_no_retry" &&
         workerMutationLifecycle.lost_deployment_response === "manual_cleanup_required_no_retry" &&
+        workerMutationLifecycle.ambiguous_private_shell_reason === "ambiguous_create" &&
         workerMutationLifecycle.ambiguous_upload_and_deployment_reasons_distinct === true &&
         workerMutationLifecycle.bootstrap_failure_worker_dispatch_phase === "pre_dispatch" &&
         workerMutationLifecycle.worker_mutation_failure_dispatch_phase === "post_dispatch" &&
@@ -527,6 +540,18 @@ check(
         workerMutationLifecycle.upload_adapter_implemented === false &&
         workerMutationLifecycle.deployment_adapter_implemented === false,
     "lost upload and deployment results need separate terminal evidence and manual cleanup"
+);
+check(
+    JSON.stringify(deployment.access_provisioning_order) ===
+        JSON.stringify([
+            "access_application_created",
+            "access_service_token_created",
+            "access_policy_created",
+            "writer_a_route_created",
+            "writer_b_route_created",
+            "readback_route_created",
+        ]),
+    "Access provisioning must create the service token before its exact policy and all routes"
 );
 check(deployment.public_exposure?.workers_dev === false, "workers.dev must stay disabled");
 check(deployment.public_exposure?.preview_urls === false, "preview URLs must stay disabled");

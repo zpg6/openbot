@@ -4,8 +4,11 @@ import { canonicalizeJsonV1, type CanonicalJsonValueV1 } from "@openbot/gate-att
 import { describe, expect, it, vi } from "vitest";
 
 import {
+    D1_PROBE_CREATE_STEPS_V1,
     D1_PROBE_RESOURCE_KINDS_V1,
     D1_PROBE_WORKER_MUTATION_CONTRACT_V1,
+    D1_PROBE_WORKER_MUTATION_STEPS_V1,
+    D1_PROBE_WORKER_PRIVATE_SHELL_STEPS_V1,
     D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1,
     D1ProbeLifecycleJournalV1Schema,
     D1ProbeLifecycleManualRequiredV1Schema,
@@ -369,12 +372,51 @@ describe("D1 probe operator preflight", () => {
                 exact_url: `https://probe.example.test/_openbot-d1-probe/${suffixes.readback_route}`,
             }),
         ]);
+        expect(first.create_steps).toEqual([
+            "database_created",
+            "sink_private_shell_created",
+            "sink_version_uploaded",
+            "sink_deployed",
+            "writer_a_private_shell_created",
+            "writer_a_version_uploaded",
+            "writer_a_deployed",
+            "writer_b_private_shell_created",
+            "writer_b_version_uploaded",
+            "writer_b_deployed",
+            "access_application_created",
+            "access_service_token_created",
+            "access_policy_created",
+            "writer_a_route_created",
+            "writer_b_route_created",
+            "readback_route_created",
+            "probe_ready",
+        ]);
+        expect(first.create_steps).toEqual(D1_PROBE_CREATE_STEPS_V1);
+        const policyBeforeToken = [...first.create_steps];
+        [policyBeforeToken[11], policyBeforeToken[12]] = [policyBeforeToken[12]!, policyBeforeToken[11]!];
+        expect(D1ProbePreflightPlanV1Schema.safeParse({ ...first, create_steps: policyBeforeToken }).success).toBe(
+            false
+        );
+        expect(
+            D1ProbePreflightPlanV1Schema.safeParse({
+                ...first,
+                create_steps: first.create_steps.filter(step => step !== "writer_a_private_shell_created"),
+            }).success
+        ).toBe(false);
+        const writerShellAfterUpload = [...first.create_steps];
+        [writerShellAfterUpload[4], writerShellAfterUpload[5]] = [
+            writerShellAfterUpload[5]!,
+            writerShellAfterUpload[4]!,
+        ];
+        expect(D1ProbePreflightPlanV1Schema.safeParse({ ...first, create_steps: writerShellAfterUpload }).success).toBe(
+            false
+        );
         const output = JSON.stringify(first);
         expect(output).not.toContain(request().account_id);
         expect(output).not.toContain(request().zone_id);
         expect(output).not.toContain(request().operator_database_deny_list[0]);
         expect(output).not.toContain(key);
-        expect(first.plan_digest).toBe("54e027909071cf0129dfa88e3f4c2890068950c8505e9282e2522d3912694b35");
+        expect(first.plan_digest).toBe("637d801ebf013665237926189e9fd4976b1df40e8d5d3985364a990590cf407a");
     });
 
     it("rejects duplicate names, unsafe identifiers, noncanonical keys, and hostile input", async () => {
@@ -462,7 +504,7 @@ describe("D1 probe resource lifecycle", () => {
             advanceD1ProbeLifecycleJournalV1(
                 compiledPlan,
                 databaseAdvanced.journal,
-                eventForStep(compiledPlan, "sink_version_uploaded", 1)
+                eventForStep(compiledPlan, "sink_private_shell_created", 1)
             )
         ).toEqual({ success: false, code: "opaque_evidence_required" });
     });
@@ -502,16 +544,24 @@ describe("D1 probe resource lifecycle", () => {
             mutation_allowed: false,
             lifecycle_advance_allowed: false,
             database_precondition: "opaque_initialized_database_required_after_database_created",
-            upload_safety_blocker: "script_shell_and_subdomain_settings_protocol_missing",
+            upload_safety_blocker: "beta_worker_api_interoperability_canary_missing",
+            private_shell_protocol_contract_implemented: true,
+            beta_worker_api_interoperability_canary_passed: false,
             first_version_preview_safety_resolved: false,
             gate_promotion_allowed: false,
         });
         expect(D1_PROBE_WORKER_MUTATION_CONTRACT_V1.roles).toEqual([
             {
                 role: "sink",
+                private_shell: {
+                    step: "sink_private_shell_created",
+                    state: "blocked_pending_beta_interoperability_canary_and_opaque_evidence",
+                    adapter_implemented: false,
+                    lost_response: "manual_cleanup_required_no_retry",
+                },
                 upload: {
                     step: "sink_version_uploaded",
-                    state: "blocked_pending_script_shell_settings_protocol",
+                    state: "blocked_pending_opaque_private_shell_evidence",
                     adapter_implemented: false,
                     lost_response: "manual_cleanup_required_no_retry",
                 },
@@ -527,9 +577,15 @@ describe("D1 probe resource lifecycle", () => {
             },
             {
                 role: "writer_a",
+                private_shell: {
+                    step: "writer_a_private_shell_created",
+                    state: "blocked_pending_beta_interoperability_canary_and_opaque_evidence",
+                    adapter_implemented: false,
+                    lost_response: "manual_cleanup_required_no_retry",
+                },
                 upload: {
                     step: "writer_a_version_uploaded",
-                    state: "blocked_pending_script_shell_settings_protocol",
+                    state: "blocked_pending_opaque_private_shell_evidence",
                     adapter_implemented: false,
                     lost_response: "manual_cleanup_required_no_retry",
                 },
@@ -545,9 +601,15 @@ describe("D1 probe resource lifecycle", () => {
             },
             {
                 role: "writer_b",
+                private_shell: {
+                    step: "writer_b_private_shell_created",
+                    state: "blocked_pending_beta_interoperability_canary_and_opaque_evidence",
+                    adapter_implemented: false,
+                    lost_response: "manual_cleanup_required_no_retry",
+                },
                 upload: {
                     step: "writer_b_version_uploaded",
-                    state: "blocked_pending_script_shell_settings_protocol",
+                    state: "blocked_pending_opaque_private_shell_evidence",
                     adapter_implemented: false,
                     lost_response: "manual_cleanup_required_no_retry",
                 },
@@ -563,6 +625,7 @@ describe("D1 probe resource lifecycle", () => {
             },
         ]);
         expect(Object.isFrozen(D1_PROBE_WORKER_MUTATION_CONTRACT_V1.roles)).toBe(true);
+        expect(Object.isFrozen(D1_PROBE_WORKER_MUTATION_CONTRACT_V1.roles[0]?.private_shell)).toBe(true);
         expect(Object.isFrozen(D1_PROBE_WORKER_MUTATION_CONTRACT_V1.roles[0]?.upload)).toBe(true);
     });
 
@@ -578,6 +641,13 @@ describe("D1 probe resource lifecycle", () => {
         if (!databaseAdvanced.success) throw new Error(databaseAdvanced.code);
         const scriptResource = compiledPlan.resources.find(resource => resource.resource_kind === "sink_script");
         if (scriptResource === undefined) throw new Error("missing sink resource");
+        const privateShell = {
+            step: "sink_private_shell_created",
+            observation_digest: hex("0"),
+            resource_kind: "sink_script",
+            resource_name_commitment: scriptResource.generated_name_commitment,
+            resource_id_commitment: hex("2"),
+        } as const;
         const upload = {
             step: "sink_version_uploaded",
             observation_digest: hex("1"),
@@ -623,11 +693,18 @@ describe("D1 probe resource lifecycle", () => {
                 D1ProbeWorkerUploadDeploymentEvidenceV1Schema.safeParse({ upload, deployment: mutation }).success
             ).toBe(false);
         }
-        const forgedUploadPrefix = {
+        expect(D1ProbeLifecycleObservationV1Schema.safeParse(privateShell).success).toBe(true);
+        const forgedPrivateShellPrefix = {
             ...databaseAdvanced.journal,
             state: "provisioning",
-            completed_steps: [...databaseAdvanced.journal.completed_steps, "sink_version_uploaded"],
-            observations: [...databaseAdvanced.journal.observations, upload],
+            completed_steps: [...databaseAdvanced.journal.completed_steps, "sink_private_shell_created"],
+            observations: [...databaseAdvanced.journal.observations, privateShell],
+        };
+        expect(D1ProbeLifecycleJournalV1Schema.safeParse(forgedPrivateShellPrefix).success).toBe(false);
+        const forgedUploadPrefix = {
+            ...forgedPrivateShellPrefix,
+            completed_steps: [...forgedPrivateShellPrefix.completed_steps, "sink_version_uploaded"],
+            observations: [...forgedPrivateShellPrefix.observations, upload],
         };
         expect(D1ProbeLifecycleJournalV1Schema.safeParse(forgedUploadPrefix).success).toBe(false);
         expect(
@@ -637,12 +714,91 @@ describe("D1 probe resource lifecycle", () => {
                 observations: [...forgedUploadPrefix.observations, deployment],
             }).success
         ).toBe(false);
+        const workerObservation = (role: "writer_a" | "writer_b", character: string) => {
+            const resourceKind = `${role}_script` as const;
+            const resource = compiledPlan.resources.find(candidate => candidate.resource_kind === resourceKind);
+            if (resource === undefined) throw new Error(`missing ${resourceKind}`);
+            const resourceId = hex(character);
+            const versionId = hex(role === "writer_a" ? "8" : "9");
+            const artifactDigest = hex(role === "writer_a" ? "a" : "b");
+            const bindingDigest = hex(role === "writer_a" ? "c" : "d");
+            return [
+                {
+                    step: `${role}_private_shell_created`,
+                    observation_digest: hex(role === "writer_a" ? "2" : "3"),
+                    resource_kind: resourceKind,
+                    resource_name_commitment: resource.generated_name_commitment,
+                    resource_id_commitment: resourceId,
+                },
+                {
+                    step: `${role}_version_uploaded`,
+                    observation_digest: hex(role === "writer_a" ? "4" : "5"),
+                    resource_kind: resourceKind,
+                    resource_name_commitment: resource.generated_name_commitment,
+                    resource_id_commitment: resourceId,
+                    worker_version_id_commitment: versionId,
+                    worker_artifact_digest: artifactDigest,
+                    worker_binding_configuration_digest: bindingDigest,
+                },
+                {
+                    step: `${role}_deployed`,
+                    observation_digest: hex(role === "writer_a" ? "6" : "7"),
+                    resource_kind: resourceKind,
+                    resource_name_commitment: resource.generated_name_commitment,
+                    resource_id_commitment: resourceId,
+                    worker_version_id_commitment: versionId,
+                    worker_artifact_digest: artifactDigest,
+                    worker_binding_configuration_digest: bindingDigest,
+                    worker_deployment_id_commitment: hex(role === "writer_a" ? "e" : "f"),
+                    worker_deployment_percentage: 100,
+                    worker_deployment_force: false,
+                },
+            ] as const;
+        };
+        const everyWorkerObservation = [
+            privateShell,
+            upload,
+            deployment,
+            ...workerObservation("writer_a", "4"),
+            ...workerObservation("writer_b", "5"),
+        ];
+        expect(everyWorkerObservation.map(observation => observation.step)).toEqual(D1_PROBE_WORKER_MUTATION_STEPS_V1);
+        for (
+            let completedWorkerSteps = 1;
+            completedWorkerSteps <= everyWorkerObservation.length;
+            completedWorkerSteps += 1
+        ) {
+            const observations = everyWorkerObservation.slice(0, completedWorkerSteps);
+            expect(
+                observations.every(observation => D1ProbeLifecycleObservationV1Schema.safeParse(observation).success)
+            ).toBe(true);
+            expect(
+                D1ProbeLifecycleJournalV1Schema.safeParse({
+                    ...databaseAdvanced.journal,
+                    state: "provisioning",
+                    completed_steps: [
+                        ...databaseAdvanced.journal.completed_steps,
+                        ...observations.map(observation => observation.step),
+                    ],
+                    observations: [...databaseAdvanced.journal.observations, ...observations],
+                }).success
+            ).toBe(false);
+        }
         for (const valid of [
             {
-                failed_step: "sink_version_uploaded",
+                failed_step: "sink_private_shell_created",
                 reason: "unexpected_platform_result",
                 observation_digest: hex("a"),
                 worker_dispatch_phase: "pre_dispatch",
+                retry_allowed: false,
+                manual_cleanup_required: true,
+            },
+            {
+                failed_step: "sink_private_shell_created",
+                reason: "ambiguous_create",
+                observation_digest: hex("a"),
+                worker_dispatch_phase: "post_dispatch",
+                mutation_outcome: "unknown",
                 retry_allowed: false,
                 manual_cleanup_required: true,
             },
@@ -669,9 +825,18 @@ describe("D1 probe resource lifecycle", () => {
         }
         for (const invalid of [
             {
-                failed_step: "sink_version_uploaded",
+                failed_step: "sink_private_shell_created",
                 reason: "ambiguous_create",
                 observation_digest: hex("a"),
+            },
+            {
+                failed_step: "writer_a_private_shell_created",
+                reason: "ambiguous_version_upload",
+                observation_digest: hex("a"),
+                worker_dispatch_phase: "post_dispatch",
+                mutation_outcome: "unknown",
+                retry_allowed: false,
+                manual_cleanup_required: true,
             },
             {
                 failed_step: "sink_deployed",
@@ -691,7 +856,19 @@ describe("D1 probe resource lifecycle", () => {
         ]) {
             expect(D1ProbeLifecycleManualRequiredV1Schema.safeParse(invalid).success).toBe(false);
         }
+        expect(D1_PROBE_WORKER_PRIVATE_SHELL_STEPS_V1).toHaveLength(3);
         expect(D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1).toHaveLength(3);
+        expect(D1_PROBE_WORKER_MUTATION_STEPS_V1).toEqual([
+            "sink_private_shell_created",
+            "sink_version_uploaded",
+            "sink_deployed",
+            "writer_a_private_shell_created",
+            "writer_a_version_uploaded",
+            "writer_a_deployed",
+            "writer_b_private_shell_created",
+            "writer_b_version_uploaded",
+            "writer_b_deployed",
+        ]);
     });
 
     it("makes ambiguity terminal and binds it to the exact next step", async () => {

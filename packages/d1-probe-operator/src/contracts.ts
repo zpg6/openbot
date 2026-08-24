@@ -105,19 +105,28 @@ export const D1ProbeCommitmentKeyV1Schema = z
 
 export const D1_PROBE_CREATE_STEPS_V1 = Object.freeze([
     "database_created",
+    "sink_private_shell_created",
     "sink_version_uploaded",
     "sink_deployed",
+    "writer_a_private_shell_created",
     "writer_a_version_uploaded",
     "writer_a_deployed",
+    "writer_b_private_shell_created",
     "writer_b_version_uploaded",
     "writer_b_deployed",
     "access_application_created",
-    "access_policy_created",
     "access_service_token_created",
+    "access_policy_created",
     "writer_a_route_created",
     "writer_b_route_created",
     "readback_route_created",
     "probe_ready",
+] as const);
+
+export const D1_PROBE_WORKER_PRIVATE_SHELL_STEPS_V1 = Object.freeze([
+    "sink_private_shell_created",
+    "writer_a_private_shell_created",
+    "writer_b_private_shell_created",
 ] as const);
 
 export const D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1 = Object.freeze([
@@ -133,10 +142,13 @@ export const D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1 = Object.freeze([
 ] as const);
 
 export const D1_PROBE_WORKER_MUTATION_STEPS_V1 = Object.freeze([
+    "sink_private_shell_created",
     "sink_version_uploaded",
     "sink_deployed",
+    "writer_a_private_shell_created",
     "writer_a_version_uploaded",
     "writer_a_deployed",
+    "writer_b_private_shell_created",
     "writer_b_version_uploaded",
     "writer_b_deployed",
 ] as const);
@@ -149,19 +161,27 @@ export const D1_PROBE_WORKER_MUTATION_CONTRACT_V1 = Object.freeze({
     lifecycle_advance_allowed: false as const,
     gate_promotion_allowed: false as const,
     database_precondition: "opaque_initialized_database_required_after_database_created" as const,
-    upload_safety_blocker: "script_shell_and_subdomain_settings_protocol_missing" as const,
+    upload_safety_blocker: "beta_worker_api_interoperability_canary_missing" as const,
+    private_shell_protocol_contract_implemented: true as const,
+    beta_worker_api_interoperability_canary_passed: false as const,
     first_version_preview_safety_resolved: false as const,
     roles: Object.freeze(
         [
-            ["sink", "sink_version_uploaded", "sink_deployed"],
-            ["writer_a", "writer_a_version_uploaded", "writer_a_deployed"],
-            ["writer_b", "writer_b_version_uploaded", "writer_b_deployed"],
-        ].map(([role, uploadStep, deploymentStep]) =>
+            ["sink", "sink_private_shell_created", "sink_version_uploaded", "sink_deployed"],
+            ["writer_a", "writer_a_private_shell_created", "writer_a_version_uploaded", "writer_a_deployed"],
+            ["writer_b", "writer_b_private_shell_created", "writer_b_version_uploaded", "writer_b_deployed"],
+        ].map(([role, shellStep, uploadStep, deploymentStep]) =>
             Object.freeze({
                 role,
+                private_shell: Object.freeze({
+                    step: shellStep,
+                    state: "blocked_pending_beta_interoperability_canary_and_opaque_evidence" as const,
+                    adapter_implemented: false as const,
+                    lost_response: "manual_cleanup_required_no_retry" as const,
+                }),
                 upload: Object.freeze({
                     step: uploadStep,
-                    state: "blocked_pending_script_shell_settings_protocol" as const,
+                    state: "blocked_pending_opaque_private_shell_evidence" as const,
                     adapter_implemented: false as const,
                     lost_response: "manual_cleanup_required_no_retry" as const,
                 }),
@@ -444,14 +464,22 @@ export const D1ProbeLifecycleManualRequiredV1Schema = z
     })
     .strict()
     .superRefine((failure, context) => {
+        const failedPrivateShell = D1_PROBE_WORKER_PRIVATE_SHELL_STEPS_V1.includes(failure.failed_step as never);
         const failedUpload = D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1.includes(failure.failed_step as never);
         const failedDeployment = D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1.includes(failure.failed_step as never);
-        const isWorkerStep = failedUpload || failedDeployment;
+        const isWorkerStep = failedPrivateShell || failedUpload || failedDeployment;
         const isBootstrapPreDispatchFailure =
-            failure.failed_step === "sink_version_uploaded" &&
+            failure.failed_step === "sink_private_shell_created" &&
             failure.reason === "unexpected_platform_result" &&
             failure.worker_dispatch_phase === "pre_dispatch" &&
             failure.mutation_outcome === undefined &&
+            failure.retry_allowed === false &&
+            failure.manual_cleanup_required === true;
+        const isPostDispatchPrivateShellFailure =
+            failedPrivateShell &&
+            failure.reason === "ambiguous_create" &&
+            failure.worker_dispatch_phase === "post_dispatch" &&
+            failure.mutation_outcome === "unknown" &&
             failure.retry_allowed === false &&
             failure.manual_cleanup_required === true;
         const isPostDispatchUploadFailure =
@@ -476,6 +504,7 @@ export const D1ProbeLifecycleManualRequiredV1Schema = z
         if (
             (isWorkerStep &&
                 !isBootstrapPreDispatchFailure &&
+                !isPostDispatchPrivateShellFailure &&
                 !isPostDispatchUploadFailure &&
                 !isPostDispatchDeploymentFailure) ||
             (!isWorkerStep && hasWorkerFailureFields)

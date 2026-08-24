@@ -6,6 +6,7 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 
 ### Added
 
+- A pure Cloudflare Worker provisioning protocol for private beta shells, non-deploying Versions, classic readback, 100 percent Deployment, runtime identity, and no-force cleanup. It exposes no Cloudflare-assigned ID, API token, HMAC key, or module bytes, performs no network call, and remains blocked on a disposable-account interoperability canary.
 - Role-specific D1 probe Worker HTTP entrypoints with direct Access checks, strict runtime-version observations, first-primary sink readback, and a lifecycle contract that separates Version upload from 100% Deployment. Remote upload remains blocked until preview-safety and opaque evidence consumers exist.
 - A private pure compiler for upload-ineligible D1 probe Worker artifact candidates. It binds exact module and canonical direct-API multipart metadata digests for the sink and both writers, while granting no upload, deployment, lifecycle, or gate authority.
 - Initial implementation plan for the self-hosted read-only Bot runtime.

@@ -3,6 +3,7 @@ import {
     D1_PROBE_LIFECYCLE_STEPS_V1,
     D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1,
     D1_PROBE_WORKER_MUTATION_STEPS_V1,
+    D1_PROBE_WORKER_PRIVATE_SHELL_STEPS_V1,
     D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1,
     D1ProbeLifecycleJournalV1Schema,
     D1ProbeLifecycleStepV1Schema,
@@ -18,15 +19,18 @@ const DigestPattern = /^[0-9a-f]{64}$/u;
 
 const resourceByStep = Object.freeze({
     database_created: "database",
+    sink_private_shell_created: "sink_script",
     sink_version_uploaded: "sink_script",
     sink_deployed: "sink_script",
+    writer_a_private_shell_created: "writer_a_script",
     writer_a_version_uploaded: "writer_a_script",
     writer_a_deployed: "writer_a_script",
+    writer_b_private_shell_created: "writer_b_script",
     writer_b_version_uploaded: "writer_b_script",
     writer_b_deployed: "writer_b_script",
     access_application_created: "access_application",
-    access_policy_created: "access_policy",
     access_service_token_created: "access_service_token",
+    access_policy_created: "access_policy",
     writer_a_route_created: "writer_a_route",
     writer_b_route_created: "writer_b_route",
     readback_route_created: "readback_route",
@@ -273,14 +277,22 @@ export const markD1ProbeLifecycleAmbiguousV1 = (
         return { success: false, code: "invalid_lifecycle_failure" };
     }
     if (!failure.success) return { success: false, code: "invalid_lifecycle_failure" };
+    const failedPrivateShell = D1_PROBE_WORKER_PRIVATE_SHELL_STEPS_V1.includes(failure.data.failed_step as never);
     const failedUpload = D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1.includes(failure.data.failed_step as never);
     const failedDeployment = D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1.includes(failure.data.failed_step as never);
-    const isWorkerStep = failedUpload || failedDeployment;
+    const isWorkerStep = failedPrivateShell || failedUpload || failedDeployment;
     const isBootstrapPreDispatchFailure =
-        failure.data.failed_step === "sink_version_uploaded" &&
+        failure.data.failed_step === "sink_private_shell_created" &&
         failure.data.reason === "unexpected_platform_result" &&
         failure.data.worker_dispatch_phase === "pre_dispatch" &&
         failure.data.mutation_outcome === undefined &&
+        failure.data.retry_allowed === false &&
+        failure.data.manual_cleanup_required === true;
+    const isPostDispatchPrivateShellFailure =
+        failedPrivateShell &&
+        failure.data.reason === "ambiguous_create" &&
+        failure.data.worker_dispatch_phase === "post_dispatch" &&
+        failure.data.mutation_outcome === "unknown" &&
         failure.data.retry_allowed === false &&
         failure.data.manual_cleanup_required === true;
     const isPostDispatchUploadFailure =
@@ -305,6 +317,7 @@ export const markD1ProbeLifecycleAmbiguousV1 = (
     if (
         (isWorkerStep &&
             !isBootstrapPreDispatchFailure &&
+            !isPostDispatchPrivateShellFailure &&
             !isPostDispatchUploadFailure &&
             !isPostDispatchDeploymentFailure) ||
         (!isWorkerStep && hasWorkerFields)

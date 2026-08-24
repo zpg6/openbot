@@ -377,7 +377,7 @@ describe("Cloudflare D1 database bootstrap", () => {
     it("turns an ambiguous first dispatch into exact target-bound manual cleanup without retry", async () => {
         const provisioned = await prepareCreatedDatabase();
         const forgedManual = markD1ProbeLifecycleAmbiguousV1(provisioned.plan, provisioned.journal, {
-            failed_step: "sink_version_uploaded",
+            failed_step: "sink_private_shell_created",
             reason: "unexpected_platform_result",
             observation_digest: "f".repeat(64),
             worker_dispatch_phase: "pre_dispatch",
@@ -413,7 +413,7 @@ describe("Cloudflare D1 database bootstrap", () => {
         expect(result.journal).toMatchObject({
             completed_steps: ["database_created"],
             manual_required: {
-                failed_step: "sink_version_uploaded",
+                failed_step: "sink_private_shell_created",
                 reason: "unexpected_platform_result",
                 worker_dispatch_phase: "pre_dispatch",
                 retry_allowed: false,
