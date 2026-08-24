@@ -30,6 +30,8 @@ const CLOUDFLARE_API_ORIGIN_V1 = "https://api.cloudflare.com";
 const CLOUDFLARE_API_PREFIX_V1 = "/client/v4";
 const CLOUDFLARE_RESPONSE_LIMIT_BYTES_V1 = 262_144;
 const CLOUDFLARE_TOTAL_TIMEOUT_MS_V1 = 20_000;
+const CLOUDFLARE_DATABASE_LIST_PER_PAGE_V1 = 100;
+const CLOUDFLARE_DATABASE_LIST_MAX_PAGES_V1 = 4;
 
 const DatabaseIdV1Schema = z
     .string()
@@ -56,6 +58,28 @@ const CloudflareDatabaseDeleteResponseV1Schema = z
         result: z.unknown(),
     })
     .passthrough();
+const CloudflareDatabaseListResponseV1Schema = z
+    .object({
+        success: z.literal(true),
+        errors: z.array(z.unknown()).length(0),
+        result: z.array(
+            z
+                .object({
+                    uuid: DatabaseIdV1Schema,
+                    name: z.string().min(1).max(64),
+                })
+                .passthrough()
+        ),
+        result_info: z
+            .object({
+                count: z.number().int().min(0).max(CLOUDFLARE_DATABASE_LIST_PER_PAGE_V1),
+                page: z.number().int().min(1).max(CLOUDFLARE_DATABASE_LIST_MAX_PAGES_V1),
+                per_page: z.literal(CLOUDFLARE_DATABASE_LIST_PER_PAGE_V1),
+                total_count: z.number().int().min(0),
+            })
+            .strict(),
+    })
+    .passthrough();
 
 export interface D1ProbeCloudflareDatabaseDependenciesV1 {
     readonly fetch: typeof globalThis.fetch;
@@ -76,6 +100,7 @@ export interface CreatedDatabaseContextV1 {
 const createdDatabases = new WeakMap<CreatedD1ProbeDatabaseV1, CreatedDatabaseContextV1>();
 const deleteRequestedDatabases = new WeakSet<CreatedD1ProbeDatabaseV1>();
 const emergencyCleanupBindings = new WeakMap<CreatedD1ProbeDatabaseV1, string>();
+const databaseDeleteOutcomes = new WeakMap<CreatedD1ProbeDatabaseV1, "sdk_acknowledged" | "outcome_unknown">();
 
 export const resolveCreatedD1ProbeDatabaseV1 = (created: CreatedD1ProbeDatabaseV1): CreatedDatabaseContextV1 | null =>
     createdDatabases.get(created) ?? null;
@@ -109,6 +134,25 @@ export interface UntrustedD1ProbeDatabaseDeleteObservationV1 {
     readonly observation_digest: string;
 }
 
+export interface UntrustedD1ProbeDatabaseAbsenceObservationV1 {
+    readonly schema_version: 1;
+    readonly kind: "untrusted_d1_probe_database_absence_observation";
+    readonly status: "control_plane_absence_observed";
+    readonly deletion_outcome: "sdk_acknowledged" | "outcome_unknown";
+    readonly authoritative: false;
+    readonly absence_observed: true;
+    readonly independent_proof: false;
+    readonly cleanup_confirmed: false;
+    readonly eligible_for_attestation: false;
+    readonly gate_promotion_allowed: false;
+    readonly plan_digest: string;
+    readonly database_id_commitment: string;
+    readonly database_name_commitment: string;
+    readonly page_count: number;
+    readonly candidate_count: number;
+    readonly observation_digest: string;
+}
+
 export type CreateD1ProbeDatabaseDenialV1 =
     | "invalid_observed_route"
     | "stale_observed_route"
@@ -134,6 +178,23 @@ export type DeleteD1ProbeDatabaseDenialV1 =
     | "observation_digest_unavailable"
     | "database_delete_already_requested"
     | "database_delete_outcome_unknown";
+
+export type ObserveD1ProbeDatabaseAbsenceDenialV1 =
+    | "invalid_created_database"
+    | "invalid_lifecycle_journal"
+    | "invalid_commitment_key"
+    | "invalid_api_token"
+    | "preflight_reverification_failed"
+    | "resource_binding_mismatch"
+    | "commitment_unavailable"
+    | "database_delete_not_requested"
+    | "database_list_request_failed"
+    | "database_list_response_invalid"
+    | "database_list_pagination_inconsistent"
+    | "database_list_duplicate_id"
+    | "database_list_too_many_pages"
+    | "database_still_present"
+    | "observation_digest_unavailable";
 
 type PostDispatchFailureV1 = Readonly<{
     success: false;
@@ -204,17 +265,17 @@ const hmacValue = async (key: CryptoKey, domain: string, value: CanonicalJsonVal
 
 const readBoundedJson = async (response: Response): Promise<unknown | null> => {
     if (response.status !== 200 || response.redirected || response.body === null) {
-        await response.body?.cancel("Cloudflare D1 create response was invalid").catch(() => undefined);
+        await response.body?.cancel("Cloudflare API response was invalid").catch(() => undefined);
         return null;
     }
     const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
     if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/u.test(contentType)) {
-        await response.body.cancel("Cloudflare D1 create content type was invalid").catch(() => undefined);
+        await response.body.cancel("Cloudflare API content type was invalid").catch(() => undefined);
         return null;
     }
     const contentEncoding = response.headers.get("content-encoding")?.toLowerCase();
     if (contentEncoding !== undefined && contentEncoding !== "identity") {
-        await response.body.cancel("Cloudflare D1 create encoding was invalid").catch(() => undefined);
+        await response.body.cancel("Cloudflare API encoding was invalid").catch(() => undefined);
         return null;
     }
     const declared = response.headers.get("content-length");
@@ -222,7 +283,7 @@ const readBoundedJson = async (response: Response): Promise<unknown | null> => {
         declared !== null &&
         (!/^(?:0|[1-9][0-9]{0,6})$/u.test(declared) || Number(declared) > CLOUDFLARE_RESPONSE_LIMIT_BYTES_V1)
     ) {
-        await response.body.cancel("Cloudflare D1 create response was too large").catch(() => undefined);
+        await response.body.cancel("Cloudflare API response was too large").catch(() => undefined);
         return null;
     }
 
@@ -235,7 +296,7 @@ const readBoundedJson = async (response: Response): Promise<unknown | null> => {
             if (part.done) break;
             size += part.value.byteLength;
             if (size > CLOUDFLARE_RESPONSE_LIMIT_BYTES_V1) {
-                await reader.cancel("Cloudflare D1 create response was too large");
+                await reader.cancel("Cloudflare API response was too large");
                 return null;
             }
             chunks.push(part.value);
@@ -688,6 +749,7 @@ export const deleteD1ProbeDatabaseV1 = async (
     }
 
     const response = CloudflareDatabaseDeleteResponseV1Schema.safeParse(responseValue);
+    databaseDeleteOutcomes.set(createdDatabase, response.success ? "sdk_acknowledged" : "outcome_unknown");
     const observationDigest = await digestCanonicalJsonV1("openbot.d1-probe.database-delete-response.v1", {
         plan_digest: preflightContext.plan.plan_digest,
         database_id_commitment: databaseIdCommitment,
@@ -751,6 +813,213 @@ export const deleteD1ProbeDatabaseV1 = async (
             plan_digest: preflightContext.plan.plan_digest,
             database_id_commitment: databaseIdCommitment,
             database_name_commitment: databaseNameCommitment,
+            observation_digest: observationDigest,
+        }),
+    };
+};
+
+export const observeD1ProbeDatabaseAbsenceV1 = async (
+    createdDatabase: CreatedD1ProbeDatabaseV1,
+    journalInput: unknown,
+    commitmentKeyInput: unknown,
+    apiTokenInput: unknown,
+    dependencies: D1ProbeCloudflareDatabaseDependenciesV1 = { fetch: globalThis.fetch }
+): Promise<
+    | Readonly<{
+          success: true;
+          journal: D1ProbeLifecycleJournalV1;
+          observation: UntrustedD1ProbeDatabaseAbsenceObservationV1;
+      }>
+    | Readonly<{ success: false; code: ObserveD1ProbeDatabaseAbsenceDenialV1 }>
+> => {
+    const createdContext = resolveCreatedD1ProbeDatabaseV1(createdDatabase);
+    if (createdContext === null) return { success: false, code: "invalid_created_database" };
+    const preflightContext = resolveVerifiedD1ProbePreflightV1(createdContext.verified_preflight);
+    if (preflightContext === null || preflightContext.plan.plan_digest !== createdContext.plan_digest) {
+        return { success: false, code: "invalid_created_database" };
+    }
+    let journal: D1ProbeLifecycleJournalV1 | null = null;
+    try {
+        const parsed = D1ProbeLifecycleJournalV1Schema.safeParse(journalInput);
+        journal = parsed.success ? parsed.data : null;
+    } catch {
+        journal = null;
+    }
+    if (
+        journal === null ||
+        journal.plan_digest !== preflightContext.plan.plan_digest ||
+        !isD1ProbeLifecycleJournalBoundV1(preflightContext.plan, journal)
+    ) {
+        return { success: false, code: "invalid_lifecycle_journal" };
+    }
+    const readyForFinalAbsence = isD1ProbeLifecycleJournalReadyForStepV1(
+        preflightContext.plan,
+        journal,
+        "all_resource_absence_confirmed"
+    );
+    const reconcilingDelete =
+        journal.state === "manual_required" && journal.manual_required?.failed_step === "database_deleted";
+    const reconcilingCreate = isEmergencyCreateCleanup(journal);
+    if (!readyForFinalAbsence && !reconcilingDelete && !reconcilingCreate) {
+        return { success: false, code: "invalid_lifecycle_journal" };
+    }
+    if (
+        reconcilingCreate &&
+        emergencyCleanupBindings.get(createdDatabase) !== journal.manual_required?.observation_digest
+    ) {
+        return { success: false, code: "resource_binding_mismatch" };
+    }
+    const deletionOutcome = databaseDeleteOutcomes.get(createdDatabase);
+    if (deletionOutcome === undefined) return { success: false, code: "database_delete_not_requested" };
+
+    const reverified = await verifyD1ProbePreflightV1(
+        preflightContext.request,
+        preflightContext.plan,
+        commitmentKeyInput
+    );
+    if (!reverified.success) {
+        return {
+            success: false,
+            code:
+                reverified.code === "invalid_commitment_key"
+                    ? "invalid_commitment_key"
+                    : "preflight_reverification_failed",
+        };
+    }
+    const key = await importCommitmentKey(commitmentKeyInput);
+    if (key === null) return { success: false, code: "invalid_commitment_key" };
+    const databaseIdCommitment = await hmacValue(
+        key,
+        "openbot.identity.cloudflare_d1_database_id.v1",
+        createdContext.database_id
+    );
+    const databaseNameCommitment = await hmacValue(
+        key,
+        "openbot.d1-probe.generated-resource-name.database.v1",
+        createdContext.database_name
+    );
+    if (databaseIdCommitment === null || databaseNameCommitment === null) {
+        return { success: false, code: "commitment_unavailable" };
+    }
+    const plannedDatabase = preflightContext.plan.resources.find(resource => resource.resource_kind === "database");
+    const createdObservation = journal.observations.find(observation => observation.step === "database_created");
+    if (
+        plannedDatabase === undefined ||
+        (!reconcilingCreate &&
+            (createdContext.database_name !== plannedDatabase.generated_name ||
+                databaseNameCommitment !== plannedDatabase.generated_name_commitment ||
+                createdObservation?.resource_id_commitment !== databaseIdCommitment ||
+                createdObservation.resource_name_commitment !== databaseNameCommitment))
+    ) {
+        return { success: false, code: "resource_binding_mismatch" };
+    }
+    let token: ReturnType<typeof CloudflareApiTokenV1Schema.safeParse>;
+    try {
+        token = CloudflareApiTokenV1Schema.safeParse(apiTokenInput);
+    } catch {
+        return { success: false, code: "invalid_api_token" };
+    }
+    if (!token.success) return { success: false, code: "invalid_api_token" };
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLOUDFLARE_TOTAL_TIMEOUT_MS_V1);
+    const observedDatabaseIds = new Set<string>();
+    let pageCount = 0;
+    let candidateCount = 0;
+    let expectedTotalCount: number | null = null;
+    try {
+        for (let page = 1; page <= CLOUDFLARE_DATABASE_LIST_MAX_PAGES_V1; page += 1) {
+            const query = new URLSearchParams({
+                name: createdContext.database_name,
+                page: String(page),
+                per_page: String(CLOUDFLARE_DATABASE_LIST_PER_PAGE_V1),
+            });
+            let responseValue: unknown | null = null;
+            try {
+                const response = await dependencies.fetch(
+                    `${CLOUDFLARE_API_ORIGIN_V1}${CLOUDFLARE_API_PREFIX_V1}/accounts/${preflightContext.request.account_id}/d1/database?${query.toString()}`,
+                    {
+                        method: "GET",
+                        headers: {
+                            accept: "application/json",
+                            "accept-encoding": "identity",
+                            authorization: `Bearer ${token.data}`,
+                        },
+                        cache: "no-store",
+                        credentials: "omit",
+                        redirect: "manual",
+                        signal: controller.signal,
+                    }
+                );
+                responseValue = await readBoundedJson(response);
+            } catch {
+                return { success: false, code: "database_list_request_failed" };
+            }
+            if (responseValue === null) return { success: false, code: "database_list_response_invalid" };
+            let parsed: ReturnType<typeof CloudflareDatabaseListResponseV1Schema.safeParse>;
+            try {
+                parsed = CloudflareDatabaseListResponseV1Schema.safeParse(responseValue);
+            } catch {
+                return { success: false, code: "database_list_response_invalid" };
+            }
+            if (!parsed.success) return { success: false, code: "database_list_response_invalid" };
+            const result = parsed.data.result;
+            const resultInfo = parsed.data.result_info;
+            if (
+                resultInfo.page !== page ||
+                resultInfo.count !== result.length ||
+                (expectedTotalCount !== null && resultInfo.total_count !== expectedTotalCount)
+            ) {
+                return { success: false, code: "database_list_pagination_inconsistent" };
+            }
+            expectedTotalCount ??= resultInfo.total_count;
+            pageCount += 1;
+            candidateCount += result.length;
+            for (const candidate of result) {
+                if (observedDatabaseIds.has(candidate.uuid)) {
+                    return { success: false, code: "database_list_duplicate_id" };
+                }
+                observedDatabaseIds.add(candidate.uuid);
+                if (candidate.uuid === createdContext.database_id || candidate.name === createdContext.database_name) {
+                    return { success: false, code: "database_still_present" };
+                }
+            }
+            if (result.length < CLOUDFLARE_DATABASE_LIST_PER_PAGE_V1) break;
+            if (page === CLOUDFLARE_DATABASE_LIST_MAX_PAGES_V1) {
+                return { success: false, code: "database_list_too_many_pages" };
+            }
+        }
+    } finally {
+        clearTimeout(timer);
+    }
+    const observationDigest = await digestCanonicalJsonV1("openbot.d1-probe.database-absence-observation.v1", {
+        plan_digest: preflightContext.plan.plan_digest,
+        database_id_commitment: databaseIdCommitment,
+        database_name_commitment: databaseNameCommitment,
+        deletion_outcome: deletionOutcome,
+        page_count: pageCount,
+        candidate_count: candidateCount,
+    });
+    if (observationDigest === null) return { success: false, code: "observation_digest_unavailable" };
+    return {
+        success: true,
+        journal,
+        observation: Object.freeze({
+            schema_version: 1,
+            kind: "untrusted_d1_probe_database_absence_observation",
+            status: "control_plane_absence_observed",
+            deletion_outcome: deletionOutcome,
+            authoritative: false,
+            absence_observed: true,
+            independent_proof: false,
+            cleanup_confirmed: false,
+            eligible_for_attestation: false,
+            gate_promotion_allowed: false,
+            plan_digest: preflightContext.plan.plan_digest,
+            database_id_commitment: databaseIdCommitment,
+            database_name_commitment: databaseNameCommitment,
+            page_count: pageCount,
+            candidate_count: candidateCount,
             observation_digest: observationDigest,
         }),
     };

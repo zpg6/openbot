@@ -276,6 +276,43 @@ check(
         deployment.database?.delete_authoritative === false,
     "a D1 delete acknowledgement cannot claim absence or gate authority"
 );
+check(
+    deployment.database?.absence_adapter_implemented === true &&
+        deployment.database?.absence_operator_command_registered === false &&
+        deployment.database?.absence_api_endpoint ===
+            "GET /accounts/{account_id}/d1/database?name={exact_name}&page={page}&per_page=100" &&
+        deployment.database?.absence_token_permission === "D1 Read" &&
+        deployment.database?.absence_token_persisted_or_serialized === false &&
+        deployment.database?.absence_target_source === "opaque_created_database_context" &&
+        deployment.database?.absence_delete_outcome_required === true &&
+        deployment.database?.absence_plan_journal_hmac_id_and_name_reverified === true,
+    "D1 absence readback must bind the prior cleanup target and use the documented read endpoint"
+);
+check(
+    deployment.database?.absence_name_filter_exact_input === true &&
+        deployment.database?.absence_complete_pagination_required === true &&
+        deployment.database?.absence_per_page === 100 &&
+        deployment.database?.absence_max_pages === 4 &&
+        deployment.database?.absence_response_limit_bytes_per_page === 262144 &&
+        deployment.database?.absence_total_response_limit_bytes === 1048576 &&
+        deployment.database?.absence_total_timeout_ms === 20000 &&
+        deployment.database?.absence_redirects_followed === false &&
+        deployment.database?.absence_automatic_retries === 0 &&
+        deployment.database?.absence_read_reinvocation_allowed === true,
+    "D1 absence pagination and transport bounds changed"
+);
+check(
+    deployment.database?.absence_exact_id_or_name_present === "database_still_present" &&
+        deployment.database?.absence_success_status === "control_plane_absence_observed" &&
+        deployment.database?.absence_independent_proof === false &&
+        deployment.database?.absence_cleanup_confirmed === false &&
+        deployment.database?.absence_lifecycle_advanced === false &&
+        deployment.database?.absence_final_all_resource_confirmation_still_required === true &&
+        deployment.database?.absence_raw_database_id_in_output === false &&
+        deployment.database?.absence_eligible_for_attestation === false &&
+        deployment.database?.absence_authoritative === false,
+    "database-list absence cannot finish cleanup or claim independent proof"
+);
 check(deployment.database?.same_exact_database_id_for_all_workers === true, "all Workers must bind one exact D1 ID");
 check(deployment.database?.exact_database_id_commitment_required === true, "the database ID needs a commitment");
 check(deployment.database?.read_replication_setting_required === true, "the read-replication setting is required");

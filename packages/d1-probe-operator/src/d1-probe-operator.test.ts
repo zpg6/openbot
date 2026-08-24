@@ -25,6 +25,7 @@ import { readD1ProbeCloudflareRouteV1, type ObservedD1ProbeCloudflareRouteV1 } f
 import {
     createD1ProbeDatabaseV1,
     deleteD1ProbeDatabaseV1,
+    observeD1ProbeDatabaseAbsenceV1,
     resolveCreatedD1ProbeDatabaseV1,
 } from "./cloudflare-database.js";
 import { inspectD1ProbeRouteReadbackV1 } from "./route-precheck.js";
@@ -186,6 +187,23 @@ const cloudflareDatabaseCreateResponse = (
         read_replication: { mode: "auto" as const },
         version: "production",
         ...overrides,
+    },
+});
+
+const cloudflareDatabaseListResponse = (
+    page: number,
+    result: ReadonlyArray<{ uuid: string; name: string }>,
+    totalCount = result.length
+) => ({
+    success: true,
+    errors: [],
+    messages: [],
+    result,
+    result_info: {
+        count: result.length,
+        page,
+        per_page: 100,
+        total_count: totalCount,
     },
 });
 
@@ -1140,6 +1158,23 @@ describe("D1 probe Cloudflare database creation", () => {
         return journal;
     };
 
+    const acknowledgedDeletion = async () => {
+        const provisioned = await provisionedDatabase();
+        const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+        const deleted = await deleteD1ProbeDatabaseV1(
+            provisioned.created,
+            journal,
+            { hmac_key_base64url: key },
+            "d".repeat(32),
+            {
+                fetch: (async () =>
+                    jsonResponse({ success: true, errors: [], messages: [], result: {} })) as typeof globalThis.fetch,
+            }
+        );
+        if (!deleted.success) throw new Error(deleted.code);
+        return { ...provisioned, journal: deleted.journal };
+    };
+
     it("creates only the exact disposable database and records committed lifecycle evidence", async () => {
         const observed = await observedRoute();
         const { compiledPlan, journal } = await plannedJournal();
@@ -1631,6 +1666,285 @@ describe("D1 probe Cloudflare database creation", () => {
             )
         ).toEqual({ success: false, code: "invalid_api_token" });
         expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("observes exact-name database absence without claiming independent proof or completing cleanup", async () => {
+        const deleted = await acknowledgedDeletion();
+        const rawDatabase = resolveCreatedD1ProbeDatabaseV1(deleted.created);
+        if (rawDatabase === null) throw new Error("missing created database context");
+        const apiToken = "q".repeat(32);
+        const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            expect(String(input)).toBe(
+                `https://api.cloudflare.com/client/v4/accounts/${request().account_id}/d1/database?name=${rawDatabase.database_name}&page=1&per_page=100`
+            );
+            expect(init?.method).toBe("GET");
+            expect(init?.body).toBeUndefined();
+            expect(init?.redirect).toBe("manual");
+            expect(init?.cache).toBe("no-store");
+            expect(init?.credentials).toBe("omit");
+            expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${apiToken}`);
+            expect(new Headers(init?.headers).get("accept-encoding")).toBe("identity");
+            return jsonResponse(cloudflareDatabaseListResponse(1, [], 0));
+        });
+        const result = await observeD1ProbeDatabaseAbsenceV1(
+            deleted.created,
+            deleted.journal,
+            { hmac_key_base64url: key },
+            apiToken,
+            { fetch: fetchMock as typeof globalThis.fetch }
+        );
+        expect(result).toMatchObject({
+            success: true,
+            journal: {
+                state: "cleaning_up",
+                completed_steps: expect.not.arrayContaining(["all_resource_absence_confirmed"]),
+            },
+            observation: {
+                status: "control_plane_absence_observed",
+                deletion_outcome: "sdk_acknowledged",
+                authoritative: false,
+                absence_observed: true,
+                independent_proof: false,
+                cleanup_confirmed: false,
+                eligible_for_attestation: false,
+                gate_promotion_allowed: false,
+                page_count: 1,
+                candidate_count: 0,
+            },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(result)).not.toContain(rawDatabase.database_id);
+        expect(JSON.stringify(result)).not.toContain(apiToken);
+        expect(JSON.stringify(result)).not.toContain(key);
+        expect(JSON.stringify(result)).not.toContain(request().account_id);
+    });
+
+    it("denies a database that remains visible by exact ID or exact name", async () => {
+        for (const candidate of [
+            cloudflareDatabaseCreateResponse().result,
+            {
+                uuid: "44444444-4444-4444-8444-444444444444",
+                name: cloudflareDatabaseCreateResponse().result.name,
+            },
+        ]) {
+            const deleted = await acknowledgedDeletion();
+            const fetchMock = vi.fn(async () => jsonResponse(cloudflareDatabaseListResponse(1, [candidate])));
+            expect(
+                await observeD1ProbeDatabaseAbsenceV1(
+                    deleted.created,
+                    deleted.journal,
+                    { hmac_key_base64url: key },
+                    "q".repeat(32),
+                    { fetch: fetchMock as typeof globalThis.fetch }
+                )
+            ).toEqual({ success: false, code: "database_still_present" });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it("checks complete bounded pagination and rejects duplicated readback identities", async () => {
+        const candidates = Array.from({ length: 100 }, (_, index) => ({
+            uuid: (index + 1000).toString(16).padStart(32, "0"),
+            name: `openbot-d1-probe-other-${index.toString().padStart(3, "0")}`,
+        }));
+        const deleted = await acknowledgedDeletion();
+        const fetchMock = vi.fn(async (input: string | URL | Request) => {
+            const page = Number(new URL(String(input)).searchParams.get("page"));
+            return jsonResponse(cloudflareDatabaseListResponse(page, page === 1 ? candidates : [], 1000));
+        });
+        const result = await observeD1ProbeDatabaseAbsenceV1(
+            deleted.created,
+            deleted.journal,
+            { hmac_key_base64url: key },
+            "q".repeat(32),
+            { fetch: fetchMock as typeof globalThis.fetch }
+        );
+        expect(result).toMatchObject({
+            success: true,
+            observation: { page_count: 2, candidate_count: 100 },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+
+        const duplicateDeleted = await acknowledgedDeletion();
+        const duplicateFetch = vi.fn(async (input: string | URL | Request) => {
+            const page = Number(new URL(String(input)).searchParams.get("page"));
+            return jsonResponse(
+                cloudflareDatabaseListResponse(
+                    page,
+                    page === 1 ? candidates : [candidates[0] as (typeof candidates)[0]],
+                    1000
+                )
+            );
+        });
+        expect(
+            await observeD1ProbeDatabaseAbsenceV1(
+                duplicateDeleted.created,
+                duplicateDeleted.journal,
+                { hmac_key_base64url: key },
+                "q".repeat(32),
+                { fetch: duplicateFetch as typeof globalThis.fetch }
+            )
+        ).toEqual({ success: false, code: "database_list_duplicate_id" });
+    });
+
+    it("denies inconsistent or unbounded database-list pagination", async () => {
+        const inconsistent = await acknowledgedDeletion();
+        const inconsistentFetch = vi.fn(async () => jsonResponse(cloudflareDatabaseListResponse(2, [], 0)));
+        expect(
+            await observeD1ProbeDatabaseAbsenceV1(
+                inconsistent.created,
+                inconsistent.journal,
+                { hmac_key_base64url: key },
+                "q".repeat(32),
+                { fetch: inconsistentFetch as typeof globalThis.fetch }
+            )
+        ).toEqual({ success: false, code: "database_list_pagination_inconsistent" });
+
+        const unbounded = await acknowledgedDeletion();
+        const unboundedFetch = vi.fn(async (input: string | URL | Request) => {
+            const page = Number(new URL(String(input)).searchParams.get("page"));
+            const candidates = Array.from({ length: 100 }, (_, index) => ({
+                uuid: (page * 1000 + index).toString(16).padStart(32, "0"),
+                name: `openbot-d1-probe-page-${page}-${index.toString().padStart(3, "0")}`,
+            }));
+            return jsonResponse(cloudflareDatabaseListResponse(page, candidates, 1000));
+        });
+        expect(
+            await observeD1ProbeDatabaseAbsenceV1(
+                unbounded.created,
+                unbounded.journal,
+                { hmac_key_base64url: key },
+                "q".repeat(32),
+                { fetch: unboundedFetch as typeof globalThis.fetch }
+            )
+        ).toEqual({ success: false, code: "database_list_too_many_pages" });
+        expect(unboundedFetch).toHaveBeenCalledTimes(4);
+    });
+
+    it("uses absence readback to inspect an ambiguous delete without clearing manual review", async () => {
+        const provisioned = await provisionedDatabase();
+        const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+        const deletion = await deleteD1ProbeDatabaseV1(
+            provisioned.created,
+            journal,
+            { hmac_key_base64url: key },
+            "d".repeat(32),
+            {
+                fetch: (async () => {
+                    throw new Error("delete response lost");
+                }) as typeof globalThis.fetch,
+            }
+        );
+        if (deletion.success || !("journal" in deletion)) throw new Error("expected ambiguous deletion journal");
+        const result = await observeD1ProbeDatabaseAbsenceV1(
+            provisioned.created,
+            deletion.journal,
+            { hmac_key_base64url: key },
+            "q".repeat(32),
+            {
+                fetch: (async () => jsonResponse(cloudflareDatabaseListResponse(1, [], 0))) as typeof globalThis.fetch,
+            }
+        );
+        expect(result).toMatchObject({
+            success: true,
+            journal: { state: "manual_required", manual_required: { failed_step: "database_deleted" } },
+            observation: {
+                deletion_outcome: "outcome_unknown",
+                absence_observed: true,
+                cleanup_confirmed: false,
+            },
+        });
+    });
+
+    it("rejects unrequested, substituted, and uncredentialed absence reads before network", async () => {
+        const provisioned = await provisionedDatabase();
+        const beforeDelete = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+        const createdObservation = beforeDelete.observations.find(
+            observation => observation.step === "database_created"
+        );
+        if (
+            createdObservation?.resource_id_commitment === null ||
+            createdObservation?.resource_name_commitment === null ||
+            createdObservation === undefined
+        ) {
+            throw new Error("missing database creation commitments");
+        }
+        const advancedWithoutDelete = advanceD1ProbeLifecycleJournalV1(provisioned.compiledPlan, beforeDelete, {
+            step: "database_deleted",
+            observation_digest: hex("e"),
+            resource_kind: "database",
+            resource_name_commitment: createdObservation.resource_name_commitment,
+            resource_id_commitment: createdObservation.resource_id_commitment,
+        });
+        if (!advancedWithoutDelete.success) throw new Error(advancedWithoutDelete.code);
+        const fetchMock = vi.fn();
+        const dependencies = { fetch: fetchMock as typeof globalThis.fetch };
+        expect(
+            await observeD1ProbeDatabaseAbsenceV1(
+                provisioned.created,
+                advancedWithoutDelete.journal,
+                { hmac_key_base64url: key },
+                "q".repeat(32),
+                dependencies
+            )
+        ).toEqual({ success: false, code: "database_delete_not_requested" });
+
+        const deleted = await acknowledgedDeletion();
+        const substitutedJournal = {
+            ...deleted.journal,
+            observations: deleted.journal.observations.map(observation =>
+                observation.step === "database_created"
+                    ? { ...observation, resource_id_commitment: hex("f") }
+                    : observation
+            ),
+        };
+        expect(
+            await observeD1ProbeDatabaseAbsenceV1(
+                deleted.created,
+                substitutedJournal,
+                { hmac_key_base64url: key },
+                "q".repeat(32),
+                dependencies
+            )
+        ).toEqual({ success: false, code: "resource_binding_mismatch" });
+        expect(
+            await observeD1ProbeDatabaseAbsenceV1(
+                deleted.created,
+                deleted.journal,
+                { hmac_key_base64url: Buffer.alloc(32, 2).toString("base64url") },
+                "q".repeat(32),
+                dependencies
+            )
+        ).toEqual({ success: false, code: "preflight_reverification_failed" });
+        expect(
+            await observeD1ProbeDatabaseAbsenceV1(
+                deleted.created,
+                deleted.journal,
+                { hmac_key_base64url: key },
+                "short",
+                dependencies
+            )
+        ).toEqual({ success: false, code: "invalid_api_token" });
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("fails malformed absence readback without making the safe read one-use", async () => {
+        const deleted = await acknowledgedDeletion();
+        const fetchMock = vi.fn(
+            async () => new Response("bad", { status: 200, headers: { "content-type": "text/plain" } })
+        );
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+            expect(
+                await observeD1ProbeDatabaseAbsenceV1(
+                    deleted.created,
+                    deleted.journal,
+                    { hmac_key_base64url: key },
+                    "q".repeat(32),
+                    { fetch: fetchMock as typeof globalThis.fetch }
+                )
+            ).toEqual({ success: false, code: "database_list_response_invalid" });
+        }
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 });
 
