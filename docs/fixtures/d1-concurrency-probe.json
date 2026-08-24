@@ -134,6 +134,44 @@
             "sandbox_capacity": 5
         },
         "parent_ipc_go_release_required": true,
+        "gateway_parent_coordinator": {
+            "implemented": true,
+            "root_or_parent_cli_registered": false,
+            "exact_child_count": 2,
+            "fixed_child_order": ["writer_a", "writer_b"],
+            "shared_trial_fields": [
+                "probe_run_id",
+                "trial_id",
+                "call_kind",
+                "logical_call_id",
+                "attempt_id",
+                "call_sequence",
+                "reservation_id"
+            ],
+            "distinct_child_fields": [
+                "child_process_id",
+                "trial_request_id",
+                "trial_request_digest",
+                "go_receipt_digest",
+                "gateway_request_id",
+                "writer_route"
+            ],
+            "one_access_service_token_identity": true,
+            "one_writer_origin": true,
+            "one_request_timeout": true,
+            "all_children_ready_before_go_attempt": true,
+            "ready_timeout_ms": 5000,
+            "result_timeout_ms": 20000,
+            "termination_timeout_ms": 1000,
+            "partial_spawn_termination_required": true,
+            "substituted_ready_or_result_is_inconclusive": true,
+            "node_child_adapter_implemented": true,
+            "child_output_limit_bytes": 131072,
+            "completed_means_protocol_completed_not_gate_passed": true,
+            "authoritative": false,
+            "eligible_for_attestation": false,
+            "gate_promotion_allowed": false
+        },
         "writer_network_transport": {
             "package": "packages/d1-probe-driver",
             "private_node_only": true,

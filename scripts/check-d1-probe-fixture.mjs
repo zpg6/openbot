@@ -221,6 +221,64 @@ check(
     "the driver needs one child process per contender"
 );
 check(execution.parent_ipc_go_release_required === true, "the parent must release ready children over IPC");
+const gatewayParent = execution.gateway_parent_coordinator ?? {};
+check(gatewayParent.implemented === true, "the gateway parent coordinator is required");
+check(
+    gatewayParent.root_or_parent_cli_registered === false,
+    "the gateway parent coordinator must remain an unregistered private library"
+);
+check(gatewayParent.exact_child_count === 2, "the gateway parent must use two child processes");
+check(same(gatewayParent.fixed_child_order, ["writer_a", "writer_b"]), "the gateway child order changed");
+check(
+    same(gatewayParent.shared_trial_fields, [
+        "probe_run_id",
+        "trial_id",
+        "call_kind",
+        "logical_call_id",
+        "attempt_id",
+        "call_sequence",
+        "reservation_id",
+    ]),
+    "the gateway parent shared-trial binding changed"
+);
+check(
+    same(gatewayParent.distinct_child_fields, [
+        "child_process_id",
+        "trial_request_id",
+        "trial_request_digest",
+        "go_receipt_digest",
+        "gateway_request_id",
+        "writer_route",
+    ]),
+    "the gateway parent child-identity binding changed"
+);
+check(gatewayParent.one_access_service_token_identity === true, "the gateway parent Access identity changed");
+check(gatewayParent.one_writer_origin === true, "the gateway parent Writer origin changed");
+check(gatewayParent.one_request_timeout === true, "the gateway parent request-timeout binding changed");
+check(
+    gatewayParent.all_children_ready_before_go_attempt === true,
+    "the gateway parent must wait for every READY before attempting GO"
+);
+check(gatewayParent.ready_timeout_ms === 5000, "the gateway parent READY timeout changed");
+check(gatewayParent.result_timeout_ms === 20000, "the gateway parent result timeout changed");
+check(gatewayParent.termination_timeout_ms === 1000, "the gateway parent termination timeout changed");
+check(gatewayParent.partial_spawn_termination_required === true, "a partial gateway child spawn must terminate");
+check(
+    gatewayParent.substituted_ready_or_result_is_inconclusive === true,
+    "substituted gateway child messages must stay inconclusive"
+);
+check(gatewayParent.node_child_adapter_implemented === true, "the gateway Node child adapter is required");
+check(gatewayParent.child_output_limit_bytes === 131072, "the gateway child output cap changed");
+check(
+    gatewayParent.completed_means_protocol_completed_not_gate_passed === true,
+    "gateway parent completion must not mean the gate passed"
+);
+check(
+    gatewayParent.authoritative === false &&
+        gatewayParent.eligible_for_attestation === false &&
+        gatewayParent.gate_promotion_allowed === false,
+    "the gateway parent coordinator must remain non-authoritative"
+);
 check(
     execution.writer_network_transport?.package === "packages/d1-probe-driver",
     "the Writer network transport package changed"
