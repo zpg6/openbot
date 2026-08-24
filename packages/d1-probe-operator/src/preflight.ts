@@ -175,6 +175,7 @@ export const compileD1ProbePreflightPlanV1 = async (
         zone_id_commitment: zoneCommitment,
         probe_origin: request.data.probe_origin,
         probe_origin_commitment: originCommitment,
+        database_jurisdiction: request.data.database_jurisdiction,
         access_application_domain: accessApplicationDomain,
         access_application_domain_commitment: accessApplicationDomainCommitment,
         installation_digest: request.data.installation_digest,

@@ -92,6 +92,7 @@ check(
     preflightVerification.canonical_plan_bytes_must_match === true,
     "D1 preflight verification must compare canonical plan bytes"
 );
+check(preflightVerification.database_jurisdiction_bound === true, "D1 preflight must bind the database jurisdiction");
 check(
     preflightVerification.canonical_https_dns_origin_required === true &&
         preflightVerification.origin_path_port_credentials_query_and_fragment_forbidden === true,
@@ -211,6 +212,43 @@ check(
 );
 check(deployment.operational_identity?.wrangler_version_required === true, "the Wrangler version must be recorded");
 check(deployment.database?.count === 1, "the probe requires exactly one D1 database");
+check(deployment.database?.creation_adapter_implemented === true, "the D1 creation adapter is required");
+check(deployment.database?.operator_command_registered === false, "D1 creation must remain unwired this round");
+check(
+    deployment.database?.api_endpoint === "POST /accounts/{account_id}/d1/database" &&
+        deployment.database?.d1_write_token_required === true &&
+        deployment.database?.token_persisted_or_serialized === false,
+    "the D1 creation endpoint or credential boundary changed"
+);
+check(
+    deployment.database?.opaque_live_route_observation_required === true &&
+        deployment.database?.route_observation_max_age_ms === 300000 &&
+        deployment.database?.complete_plan_and_hmac_key_reverified_before_request === true &&
+        deployment.database?.exact_bound_lifecycle_journal_required === true,
+    "D1 creation must recheck every pre-mutation dependency"
+);
+check(
+    same(deployment.database?.request_body_fields, ["name", "read_replication", "jurisdiction_when_not_automatic"]) &&
+        deployment.database?.read_replication_create_mode === "auto" &&
+        deployment.database?.database_jurisdiction_source === "verified_preflight",
+    "the D1 create body changed"
+);
+check(
+    deployment.database?.redirects_followed === false &&
+        deployment.database?.automatic_retries === 0 &&
+        deployment.database?.response_limit_bytes === 262144 &&
+        deployment.database?.total_timeout_ms === 20000,
+    "the D1 create transport limits changed"
+);
+check(
+    deployment.database?.returned_id_name_jurisdiction_and_replication_verified === true &&
+        deployment.database?.production_id_collision === "manual_required_with_opaque_cleanup_target" &&
+        deployment.database?.ambiguous_response === "manual_required_without_retry" &&
+        deployment.database?.raw_database_id_in_output === false &&
+        deployment.database?.eligible_for_attestation === false &&
+        deployment.database?.authoritative === false,
+    "D1 create results must remain bound, opaque, and non-authoritative"
+);
 check(deployment.database?.same_exact_database_id_for_all_workers === true, "all Workers must bind one exact D1 ID");
 check(deployment.database?.exact_database_id_commitment_required === true, "the database ID needs a commitment");
 check(deployment.database?.read_replication_setting_required === true, "the read-replication setting is required");

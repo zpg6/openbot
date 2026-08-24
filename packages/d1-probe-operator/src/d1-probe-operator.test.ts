@@ -20,7 +20,8 @@ import {
     markD1ProbeLifecycleAmbiguousV1,
 } from "./lifecycle.js";
 import { compileD1ProbePreflightPlanV1 } from "./preflight.js";
-import { readD1ProbeCloudflareRouteV1 } from "./cloudflare-route-reader.js";
+import { readD1ProbeCloudflareRouteV1, type ObservedD1ProbeCloudflareRouteV1 } from "./cloudflare-route-reader.js";
+import { createD1ProbeDatabaseV1, resolveCreatedD1ProbeDatabaseV1 } from "./cloudflare-database.js";
 import { inspectD1ProbeRouteReadbackV1 } from "./route-precheck.js";
 import { executeD1ProbeRouteCheckV1 } from "./route-command.js";
 import {
@@ -42,6 +43,7 @@ const request = () => ({
     account_id: "a".repeat(32),
     zone_id: "b".repeat(32),
     probe_origin: "https://probe.example.test",
+    database_jurisdiction: "us" as const,
     installation_digest: hex("1"),
     environment_digest: hex("2"),
     configuration_digest: hex("3"),
@@ -64,6 +66,21 @@ const verifiedPreflight = async () => {
     const result = await verifyD1ProbePreflightV1(rawRequest, compiledPlan, { hmac_key_base64url: key });
     if (!result.success) throw new Error(result.code);
     return result.verified;
+};
+
+const observedRoute = async (): Promise<ObservedD1ProbeCloudflareRouteV1> => {
+    const result = await readD1ProbeCloudflareRouteV1(
+        await verifiedPreflight(),
+        { api_token: "r".repeat(32) },
+        {
+            fetch: (async (input: string | URL | Request) =>
+                String(input).includes("/dns_records?")
+                    ? jsonResponse(cloudflareDnsResponse(1))
+                    : jsonResponse(cloudflareZoneResponse())) as typeof globalThis.fetch,
+        }
+    );
+    if (!result.success) throw new Error(result.code);
+    return result.observed;
 };
 
 const routeReadback = () => ({
@@ -143,6 +160,27 @@ const cloudflareDnsResponse = (page: number, totalPages = 1) => ({
         per_page: 1000,
         total_count: totalPages,
         total_pages: totalPages,
+    },
+});
+
+const cloudflareDatabaseCreateResponse = (
+    overrides: Partial<{
+        uuid: string;
+        name: string;
+        jurisdiction: "eu" | "us" | "fedramp";
+        read_replication: { mode: "auto" | "disabled" };
+    }> = {}
+) => ({
+    success: true,
+    errors: [],
+    messages: [],
+    result: {
+        uuid: "33333333-3333-4333-8333-333333333333",
+        name: `openbot-d1-probe-${suffixes.database}`,
+        jurisdiction: "us" as const,
+        read_replication: { mode: "auto" as const },
+        version: "production",
+        ...overrides,
     },
 });
 
@@ -309,7 +347,7 @@ describe("D1 probe operator preflight", () => {
         expect(output).not.toContain(request().zone_id);
         expect(output).not.toContain(request().operator_database_deny_list[0]);
         expect(output).not.toContain(key);
-        expect(first.plan_digest).toBe("37a357b52f35f35cf4e80dbdb7baf529a1e6e1aa8871e7b3037d268beaf9b85e");
+        expect(first.plan_digest).toBe("fb89f02dba47f7116f3658e24ff5aff1d20ecd3686f0a3385653c1eaf5dddd7d");
     });
 
     it("rejects duplicate names, unsafe identifiers, noncanonical keys, and hostile input", async () => {
@@ -1057,6 +1095,296 @@ describe("D1 probe Cloudflare route reader", () => {
                 result: [{ ...cloudflareDnsResponse(1).result[0], proxied: false }],
             })
         ).toEqual({ success: false, code: "dns_record_not_proxied" });
+    });
+});
+
+describe("D1 probe Cloudflare database creation", () => {
+    const plannedJournal = async () => {
+        const compiledPlan = await plan();
+        const created = createD1ProbeLifecycleJournalV1(compiledPlan);
+        if (!created.success) throw new Error(created.code);
+        return { compiledPlan, journal: created.journal };
+    };
+
+    it("creates only the exact disposable database and records committed lifecycle evidence", async () => {
+        const observed = await observedRoute();
+        const { compiledPlan, journal } = await plannedJournal();
+        const apiToken = "w".repeat(32);
+        const response = cloudflareDatabaseCreateResponse();
+        const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            expect(String(input)).toBe(
+                `https://api.cloudflare.com/client/v4/accounts/${request().account_id}/d1/database`
+            );
+            expect(init?.method).toBe("POST");
+            expect(init?.redirect).toBe("manual");
+            expect(init?.cache).toBe("no-store");
+            expect(init?.credentials).toBe("omit");
+            expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${apiToken}`);
+            expect(new Headers(init?.headers).get("accept-encoding")).toBe("identity");
+            expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
+            expect(init?.body).toBe(
+                canonicalizeJsonV1({
+                    jurisdiction: "us",
+                    name: `openbot-d1-probe-${suffixes.database}`,
+                    read_replication: { mode: "auto" },
+                })
+            );
+            return jsonResponse(response);
+        });
+
+        const result = await createD1ProbeDatabaseV1(observed, journal, { hmac_key_base64url: key }, apiToken, {
+            fetch: fetchMock as typeof globalThis.fetch,
+        });
+        expect(result).toMatchObject({
+            success: true,
+            journal: { state: "provisioning", completed_steps: ["database_created"] },
+            observation: {
+                authoritative: false,
+                deploy_performed: true,
+                eligible_for_attestation: false,
+                gate_promotion_allowed: false,
+                plan_digest: compiledPlan.plan_digest,
+                database_jurisdiction: "us",
+                read_replication: "auto",
+            },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        if (!result.success) throw new Error(result.code);
+        expect(resolveCreatedD1ProbeDatabaseV1(result.created)).toEqual({
+            database_id: response.result.uuid,
+            database_name: response.result.name,
+            plan_digest: compiledPlan.plan_digest,
+        });
+        expect(JSON.stringify(result)).not.toContain(response.result.uuid);
+        expect(JSON.stringify(result)).not.toContain(apiToken);
+        expect(JSON.stringify(result)).not.toContain(key);
+        expect(JSON.stringify(result)).not.toContain(request().account_id);
+    });
+
+    it("omits jurisdiction only for an explicitly automatic preflight", async () => {
+        const automaticRequest = { ...request(), database_jurisdiction: "automatic" as const };
+        const compiled = await compileD1ProbePreflightPlanV1(automaticRequest, { hmac_key_base64url: key });
+        if (!compiled.success) throw new Error(compiled.code);
+        const verified = await verifyD1ProbePreflightV1(automaticRequest, compiled.plan, {
+            hmac_key_base64url: key,
+        });
+        if (!verified.success) throw new Error(verified.code);
+        const route = await readD1ProbeCloudflareRouteV1(
+            verified.verified,
+            { api_token: "r".repeat(32) },
+            {
+                fetch: (async (input: string | URL | Request) =>
+                    String(input).includes("/dns_records?")
+                        ? jsonResponse(cloudflareDnsResponse(1))
+                        : jsonResponse(cloudflareZoneResponse())) as typeof globalThis.fetch,
+            }
+        );
+        if (!route.success) throw new Error(route.code);
+        const journal = createD1ProbeLifecycleJournalV1(compiled.plan);
+        if (!journal.success) throw new Error(journal.code);
+        const responseWithJurisdiction = cloudflareDatabaseCreateResponse();
+        const { jurisdiction: _jurisdiction, ...resultWithoutJurisdiction } = responseWithJurisdiction.result;
+        const response = { ...responseWithJurisdiction, result: resultWithoutJurisdiction };
+        const fetchMock = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+            expect(init?.body).toBe(
+                canonicalizeJsonV1({
+                    name: `openbot-d1-probe-${suffixes.database}`,
+                    read_replication: { mode: "auto" },
+                })
+            );
+            return jsonResponse(response);
+        });
+        const result = await createD1ProbeDatabaseV1(
+            route.observed,
+            journal.journal,
+            { hmac_key_base64url: key },
+            "w".repeat(32),
+            { fetch: fetchMock as typeof globalThis.fetch }
+        );
+        expect(result).toMatchObject({
+            success: true,
+            observation: { database_jurisdiction: "automatic", read_replication: "auto" },
+        });
+    });
+
+    it("rejects forged route state, invalid journals, and credentials before mutation", async () => {
+        const { journal } = await plannedJournal();
+        const fetchMock = vi.fn();
+        const dependencies = { fetch: fetchMock as typeof globalThis.fetch };
+        const forged = Object.freeze({
+            schema_version: 1 as const,
+            kind: "observed_d1_probe_cloudflare_route" as const,
+        });
+        expect(
+            await createD1ProbeDatabaseV1(forged, journal, { hmac_key_base64url: key }, "w".repeat(32), dependencies)
+        ).toEqual({ success: false, code: "invalid_observed_route" });
+
+        const observed = await observedRoute();
+        const substitutedJournal = {
+            ...journal,
+            planned_resources: journal.planned_resources.map((resource, index) =>
+                index === 0 ? { ...resource, generated_name_commitment: hex("f") } : resource
+            ),
+        };
+        expect(
+            await createD1ProbeDatabaseV1(
+                observed,
+                substitutedJournal,
+                { hmac_key_base64url: key },
+                "w".repeat(32),
+                dependencies
+            )
+        ).toEqual({ success: false, code: "invalid_lifecycle_journal" });
+        const hostile = new Proxy(
+            {},
+            {
+                ownKeys: () => {
+                    throw new Error("hostile journal");
+                },
+            }
+        );
+        expect(
+            await createD1ProbeDatabaseV1(observed, hostile, { hmac_key_base64url: key }, "w".repeat(32), dependencies)
+        ).toEqual({ success: false, code: "invalid_lifecycle_journal" });
+        expect(await createD1ProbeDatabaseV1(observed, journal, {}, "w".repeat(32), dependencies)).toEqual({
+            success: false,
+            code: "invalid_commitment_key",
+        });
+        expect(
+            await createD1ProbeDatabaseV1(
+                observed,
+                journal,
+                { hmac_key_base64url: Buffer.alloc(32, 2).toString("base64url") },
+                "w".repeat(32),
+                dependencies
+            )
+        ).toEqual({
+            success: false,
+            code: "preflight_reverification_failed",
+        });
+        expect(
+            await createD1ProbeDatabaseV1(observed, journal, { hmac_key_base64url: key }, "short", dependencies)
+        ).toEqual({ success: false, code: "invalid_api_token" });
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("rejects a stale live route observation before mutation", async () => {
+        vi.useFakeTimers();
+        try {
+            vi.setSystemTime(new Date("2026-08-23T12:00:00.000Z"));
+            const observed = await observedRoute();
+            const { journal } = await plannedJournal();
+            vi.setSystemTime(new Date("2026-08-23T12:05:00.001Z"));
+            const fetchMock = vi.fn();
+            expect(
+                await createD1ProbeDatabaseV1(observed, journal, { hmac_key_base64url: key }, "w".repeat(32), {
+                    fetch: fetchMock as typeof globalThis.fetch,
+                })
+            ).toEqual({ success: false, code: "stale_observed_route" });
+            expect(fetchMock).not.toHaveBeenCalled();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it("makes a lost or malformed create response terminal without retrying", async () => {
+        for (const fetchImplementation of [
+            vi.fn(async () => {
+                throw new Error("response lost");
+            }),
+            vi.fn(async () => new Response("not json", { status: 200, headers: { "content-type": "text/plain" } })),
+            vi.fn(
+                async () =>
+                    new Response("{}", {
+                        status: 200,
+                        headers: {
+                            "content-length": "262145",
+                            "content-type": "application/json",
+                        },
+                    })
+            ),
+            vi.fn(
+                async () =>
+                    new Response("{}", {
+                        status: 200,
+                        headers: {
+                            "content-encoding": "gzip",
+                            "content-type": "application/json",
+                        },
+                    })
+            ),
+        ]) {
+            const observed = await observedRoute();
+            const { journal } = await plannedJournal();
+            const result = await createD1ProbeDatabaseV1(
+                observed,
+                journal,
+                { hmac_key_base64url: key },
+                "w".repeat(32),
+                { fetch: fetchImplementation as typeof globalThis.fetch }
+            );
+            expect(result).toMatchObject({
+                success: false,
+                code: "database_create_outcome_unknown",
+                journal: {
+                    state: "manual_required",
+                    manual_required: { failed_step: "database_created", reason: "ambiguous_create" },
+                },
+                cleanup_target: null,
+            });
+            expect(fetchImplementation).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it("retains an opaque cleanup target for mismatched created resources", async () => {
+        const cases = [
+            [cloudflareDatabaseCreateResponse({ name: "wrong-name" }), "database_name_mismatch", "name_mismatch"],
+            [
+                cloudflareDatabaseCreateResponse({ read_replication: { mode: "disabled" } }),
+                "database_configuration_mismatch",
+                "unexpected_platform_result",
+            ],
+            [
+                cloudflareDatabaseCreateResponse({ jurisdiction: "eu" }),
+                "database_configuration_mismatch",
+                "unexpected_platform_result",
+            ],
+            [
+                cloudflareDatabaseCreateResponse({
+                    uuid: request().operator_database_deny_list[0] as string,
+                }),
+                "production_database_denied",
+                "id_mismatch",
+            ],
+        ] as const;
+        for (const [response, code, reason] of cases) {
+            const observed = await observedRoute();
+            const { journal } = await plannedJournal();
+            const result = await createD1ProbeDatabaseV1(
+                observed,
+                journal,
+                { hmac_key_base64url: key },
+                "w".repeat(32),
+                { fetch: (async () => jsonResponse(response)) as typeof globalThis.fetch }
+            );
+            expect(result).toMatchObject({
+                success: false,
+                code,
+                journal: {
+                    state: "manual_required",
+                    manual_required: { failed_step: "database_created", reason },
+                },
+            });
+            if (result.success || !("cleanup_target" in result) || result.cleanup_target === null) {
+                throw new Error("expected opaque cleanup target");
+            }
+            expect(resolveCreatedD1ProbeDatabaseV1(result.cleanup_target)).toEqual({
+                database_id: response.result.uuid,
+                database_name: response.result.name,
+                plan_digest: (await plan()).plan_digest,
+            });
+            expect(JSON.stringify(result)).not.toContain(response.result.uuid);
+        }
     });
 });
 

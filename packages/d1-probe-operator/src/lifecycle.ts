@@ -270,6 +270,20 @@ export const markD1ProbeLifecycleAmbiguousV1 = (
 export const lifecycleResourceForStepV1 = (step: D1ProbeLifecycleStepV1): D1ProbeResourceKindV1 | null =>
     resourceByStep[step as keyof typeof resourceByStep] ?? null;
 
+export const isD1ProbeLifecycleJournalReadyForStepV1 = (
+    planInput: unknown,
+    journalInput: unknown,
+    expectedStep: D1ProbeLifecycleStepV1
+): boolean => {
+    const bound = parseBoundLifecycle(planInput, journalInput);
+    return (
+        bound !== null &&
+        bound.journal.state !== "manual_required" &&
+        bound.journal.state !== "cleanup_confirmed" &&
+        D1_PROBE_LIFECYCLE_STEPS_V1[bound.journal.completed_steps.length] === expectedStep
+    );
+};
+
 export const isD1ProbePlanV1 = (input: unknown): input is D1ProbePreflightPlanV1 => {
     try {
         return D1ProbePreflightPlanV1Schema.safeParse(input).success;

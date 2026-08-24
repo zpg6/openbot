@@ -140,9 +140,12 @@ function checkD1ProbeOperatorNetworkBoundary(file, content, imports) {
         /^(?:node:)?(?:dgram|dns|http|http2|https|net|tls)$|^(?:undici|wrangler)$/u.test(specifier)
     );
     const networkCall = /(?:\bfetch|\.fetch)\s*\(/u.test(content);
-    const isReviewedReader = file === "packages/d1-probe-operator/src/cloudflare-route-reader.ts";
-    if (forbiddenImport !== undefined || (networkCall && !isReviewedReader)) {
-        errors.push(`${file}: only the reviewed Cloudflare route reader may perform operator network I/O`);
+    const isReviewedAdapter = [
+        "packages/d1-probe-operator/src/cloudflare-database.ts",
+        "packages/d1-probe-operator/src/cloudflare-route-reader.ts",
+    ].includes(file);
+    if (forbiddenImport !== undefined || (networkCall && !isReviewedAdapter)) {
+        errors.push(`${file}: only reviewed Cloudflare adapters may perform operator network I/O`);
     }
 }
 
@@ -296,7 +299,7 @@ checkD1ProbeOperatorNetworkBoundary(
     []
 );
 if (errors.length !== beforeOperatorFetchSelfTest + 1) {
-    errors.push("D1 probe operator network-boundary self-test did not reject fetch outside the reviewed reader");
+    errors.push("D1 probe operator network-boundary self-test did not reject fetch outside reviewed adapters");
 }
 errors.splice(beforeOperatorFetchSelfTest, 1);
 

@@ -13,6 +13,7 @@ const CLOUDFLARE_RESPONSE_LIMIT_BYTES_V1 = 262_144;
 const CLOUDFLARE_AGGREGATE_LIMIT_BYTES_V1 = 1_048_576;
 const CLOUDFLARE_TOTAL_TIMEOUT_MS_V1 = 20_000;
 const CLOUDFLARE_DNS_PER_PAGE_V1 = 1000;
+export const D1_PROBE_ROUTE_OBSERVATION_MAX_AGE_MS_V1 = 300_000;
 
 const CloudflareIdentifierV1Schema = z.string().regex(/^[0-9a-f]{32}$/u);
 const CloudflareApiTokenV1Schema = z
@@ -77,6 +78,22 @@ const CloudflareDnsResponseV1Schema = z
 export interface D1ProbeCloudflareRouteReaderDependenciesV1 {
     readonly fetch: typeof globalThis.fetch;
 }
+
+export interface ObservedD1ProbeCloudflareRouteV1 {
+    readonly schema_version: 1;
+    readonly kind: "observed_d1_probe_cloudflare_route";
+}
+
+interface ObservedD1ProbeCloudflareRouteContextV1 {
+    readonly verified_preflight: VerifiedD1ProbePreflightV1;
+    readonly observed_at_ms: number;
+}
+
+const observedRoutes = new WeakMap<ObservedD1ProbeCloudflareRouteV1, ObservedD1ProbeCloudflareRouteContextV1>();
+
+export const resolveObservedD1ProbeCloudflareRouteV1 = (
+    observed: ObservedD1ProbeCloudflareRouteV1
+): ObservedD1ProbeCloudflareRouteContextV1 | null => observedRoutes.get(observed) ?? null;
 
 export type ReadD1ProbeCloudflareRouteDenialV1 =
     | InspectD1ProbeRouteReadbackDenialV1
@@ -220,7 +237,11 @@ export const readD1ProbeCloudflareRouteV1 = async (
     credentialInput: unknown,
     dependencies: D1ProbeCloudflareRouteReaderDependenciesV1 = { fetch: globalThis.fetch }
 ): Promise<
-    | Readonly<{ success: true; inspection: UntrustedD1ProbeRouteInspectionV1 }>
+    | Readonly<{
+          success: true;
+          inspection: UntrustedD1ProbeRouteInspectionV1;
+          observed: ObservedD1ProbeCloudflareRouteV1;
+      }>
     | Readonly<{ success: false; code: ReadD1ProbeCloudflareRouteDenialV1 }>
 > => {
     const context = resolveVerifiedD1ProbePreflightV1(verifiedPreflight);
@@ -306,7 +327,7 @@ export const readD1ProbeCloudflareRouteV1 = async (
             nextPage += 1;
         }
 
-        return inspectD1ProbeRouteReadbackV1(verifiedPreflight, {
+        const inspected = inspectD1ProbeRouteReadbackV1(verifiedPreflight, {
             schema_version: 1,
             kind: "untrusted_d1_probe_route_readback",
             zone: {
@@ -324,6 +345,16 @@ export const readD1ProbeCloudflareRouteV1 = async (
                 pages: dnsPages,
             },
         });
+        if (!inspected.success) return inspected;
+        const observed = Object.freeze({
+            schema_version: 1 as const,
+            kind: "observed_d1_probe_cloudflare_route" as const,
+        });
+        observedRoutes.set(
+            observed,
+            Object.freeze({ verified_preflight: verifiedPreflight, observed_at_ms: Date.now() })
+        );
+        return { ...inspected, observed };
     } finally {
         clearTimeout(timer);
     }
