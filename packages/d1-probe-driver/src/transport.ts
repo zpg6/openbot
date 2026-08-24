@@ -1,6 +1,7 @@
 import {
     D1ProbeHttpErrorV1Schema,
     D1ProbeAccessServiceTokenClientIdV1Schema,
+    D1ProbeGatewayTrialResponseV1Schema,
     D1ProbeWriterTriggerUrlV1Schema,
     canonicalD1ProbeGatewayTrialHttpBodyV1,
     canonicalD1ProbeGatewayTrialHttpResponseV1,
@@ -8,10 +9,8 @@ import {
     d1ProbeHttpErrorStatusV1,
     parseAndVerifyD1ProbeGatewayTrialRequestV1,
     parseD1ProbeGatewayTrialHttpResponseV1,
-    type D1ProbeGatewayTrialResponseV1,
     type D1ProbeGatewayTrialHttpResponseV1,
     type D1ProbeGatewayTrialRequestV1,
-    type D1ProbeWriterRoleV1,
 } from "@openbot/d1-probe-rpc";
 import { z } from "zod";
 
@@ -36,35 +35,77 @@ export const D1ProbeDriverServiceTokenV1Schema = z
     .strict();
 export type D1ProbeDriverServiceTokenV1 = z.infer<typeof D1ProbeDriverServiceTokenV1Schema>;
 
-export type D1ProbeDriverTransportResultV1 =
-    | Readonly<{
-          status: "delivered";
-          request_digest: string;
-          writer_role: D1ProbeWriterRoleV1;
-          http_status: number;
-          response_byte_count: number;
-          response: D1ProbeGatewayTrialResponseV1;
-      }>
-    | Readonly<{
-          status: "server_rejected";
-          request_digest: string;
-          writer_role: D1ProbeWriterRoleV1;
-          http_status: number;
-          response_byte_count: number;
-          response: z.infer<typeof D1ProbeHttpErrorV1Schema>;
-      }>
-    | Readonly<{
-          status: "local_rejected";
-          request_digest: null;
-          writer_role: D1ProbeWriterRoleV1;
-          error_code: "invalid_request";
-      }>
-    | Readonly<{
-          status: "outcome_unknown";
-          request_digest: string;
-          writer_role: D1ProbeWriterRoleV1;
-          error_code: "network_error" | "request_timeout" | "response_invalid" | "response_too_large";
-      }>;
+const DigestSchema = z.string().regex(/^[0-9a-f]{64}$/u);
+const WriterRoleSchema = z.enum(["writer_a", "writer_b"]);
+
+export const D1ProbeDriverTransportResultV1Schema = z
+    .discriminatedUnion("status", [
+        z
+            .object({
+                status: z.literal("delivered"),
+                request_digest: DigestSchema,
+                writer_role: WriterRoleSchema,
+                http_status: z.number().int().min(100).max(599),
+                response_byte_count: z.number().int().positive().max(D1_PROBE_DRIVER_RESPONSE_LIMIT_BYTES_V1),
+                response: D1ProbeGatewayTrialResponseV1Schema,
+            })
+            .strict(),
+        z
+            .object({
+                status: z.literal("server_rejected"),
+                request_digest: DigestSchema,
+                writer_role: WriterRoleSchema,
+                http_status: z.number().int().min(100).max(599),
+                response_byte_count: z.number().int().positive().max(D1_PROBE_DRIVER_RESPONSE_LIMIT_BYTES_V1),
+                response: D1ProbeHttpErrorV1Schema,
+            })
+            .strict(),
+        z
+            .object({
+                status: z.literal("local_rejected"),
+                request_digest: z.null(),
+                writer_role: WriterRoleSchema,
+                error_code: z.literal("invalid_request"),
+            })
+            .strict(),
+        z
+            .object({
+                status: z.literal("outcome_unknown"),
+                request_digest: DigestSchema,
+                writer_role: WriterRoleSchema,
+                error_code: z.enum(["network_error", "request_timeout", "response_invalid", "response_too_large"]),
+            })
+            .strict(),
+    ])
+    .superRefine((result, context) => {
+        if (result.status === "delivered") {
+            if (
+                result.response.request_digest !== result.request_digest ||
+                result.response.writer_role !== result.writer_role
+            ) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["response"],
+                    message: "Delivered Writer response must match the request digest and role",
+                });
+            }
+            if (result.http_status !== d1ProbeGatewayTrialHttpStatusV1(result.response)) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["http_status"],
+                    message: "Delivered Writer status must match its response",
+                });
+            }
+        }
+        if (result.status === "server_rejected" && result.http_status !== d1ProbeHttpErrorStatusV1(result.response)) {
+            context.addIssue({
+                code: "custom",
+                path: ["http_status"],
+                message: "Rejected Writer status must match its response",
+            });
+        }
+    });
+export type D1ProbeDriverTransportResultV1 = z.infer<typeof D1ProbeDriverTransportResultV1Schema>;
 
 export interface D1ProbeDriverTransportDependenciesV1 {
     readonly fetch: typeof globalThis.fetch;

@@ -229,10 +229,53 @@ check(
     execution.writer_network_transport?.private_node_only === true,
     "the network transport must stay private Node code"
 );
-check(execution.writer_network_transport?.cli_registered === false, "the network transport must not expose a CLI yet");
 check(
-    execution.writer_network_transport?.credential_loader_implemented === false,
-    "the network transport must not claim a credential loader"
+    execution.writer_network_transport?.root_cli_registered === false,
+    "the Writer child command must not be registered as a root operator command"
+);
+check(
+    execution.writer_network_transport?.parent_only_child_command_implemented === true,
+    "the parent-only Writer child command is required"
+);
+check(
+    execution.writer_network_transport?.assignment_body_limit_bytes === 32768,
+    "the child assignment byte cap changed"
+);
+check(execution.writer_network_transport?.ipc_required === true, "the Writer child must require parent IPC");
+check(execution.writer_network_transport?.ready_before_go === true, "the Writer child must signal READY before GO");
+check(execution.writer_network_transport?.go_timeout_ms === 10000, "the Writer child GO timeout changed");
+check(
+    same(execution.writer_network_transport?.go_binds, [
+        "child_process_id",
+        "writer_role",
+        "request_digest",
+        "go_receipt_digest",
+    ]),
+    "the Writer child GO binding changed"
+);
+check(
+    execution.writer_network_transport?.service_token_file_descriptor === 4,
+    "the Writer child service-token descriptor changed"
+);
+check(
+    execution.writer_network_transport?.service_token_read_after_valid_go === true,
+    "the Writer child must not read its service token before valid GO"
+);
+check(
+    execution.writer_network_transport?.service_token_max_bytes_excluding_optional_newline === 512,
+    "the Writer child service-token cap changed"
+);
+check(
+    execution.writer_network_transport?.service_token_optional_trailing_newline === true,
+    "the Writer child service-token newline rule changed"
+);
+check(
+    execution.writer_network_transport?.service_token_file_descriptor_closed_before_result === true,
+    "the Writer child must close its service-token descriptor before reporting"
+);
+check(
+    execution.writer_network_transport?.canonical_child_result_required === true,
+    "the Writer child result must be canonical JSON"
 );
 check(execution.writer_network_transport?.one_request_per_invocation === true, "each invocation sends one request");
 check(execution.writer_network_transport?.automatic_retries === 0, "the Writer network transport must not retry");
