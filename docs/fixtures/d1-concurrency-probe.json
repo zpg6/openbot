@@ -38,6 +38,16 @@
         "returned_resource_ids_must_match_cleanup_ids": true
     },
     "deployment": {
+        "preflight_verification": {
+            "shape_only_plan_accepted": false,
+            "complete_plan_recompiled_from_request_and_hmac_key": true,
+            "canonical_plan_bytes_must_match": true,
+            "verified_context_is_opaque_and_in_memory_only": true,
+            "resolved_request_and_plan_deeply_frozen": true,
+            "hmac_key_retained_or_serialized": false,
+            "performs_deployment": false,
+            "authoritative": false
+        },
         "operational_identity": {
             "account_id_hmac_commitment_required": true,
             "zone_id_hmac_commitment_required": true,

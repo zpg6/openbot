@@ -19,6 +19,11 @@ import {
     markD1ProbeLifecycleAmbiguousV1,
 } from "./lifecycle.js";
 import { compileD1ProbePreflightPlanV1 } from "./preflight.js";
+import {
+    resolveVerifiedD1ProbePreflightV1,
+    verifyD1ProbePreflightV1,
+    type VerifiedD1ProbePreflightV1,
+} from "./verified-preflight.js";
 
 const hex = (character: string): string => character.repeat(64);
 const key = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
@@ -370,5 +375,83 @@ describe("D1 probe resource lifecycle", () => {
                 eventForStep(compiledPlan, "database_created", 0, compiledPlan.operator_database_deny_id_commitments[0])
             )
         ).toEqual({ success: false, code: "production_database_denied" });
+    });
+});
+
+describe("D1 probe verified preflight", () => {
+    it("recompiles the exact plan and retains an immutable in-memory context without the HMAC key", async () => {
+        const rawRequest = request();
+        const compiledPlan = await plan();
+        const result = await verifyD1ProbePreflightV1(rawRequest, compiledPlan, { hmac_key_base64url: key });
+        expect(result.success).toBe(true);
+        if (!result.success) return;
+
+        expect(result.verified).toEqual({ schema_version: 1, kind: "verified_d1_probe_preflight" });
+        expect(JSON.stringify(result.verified)).not.toContain(key);
+        const context = resolveVerifiedD1ProbePreflightV1(result.verified);
+        expect(context?.request.account_id).toBe(rawRequest.account_id);
+        expect(context?.plan.plan_digest).toBe(compiledPlan.plan_digest);
+        expect(JSON.stringify(context)).not.toContain(key);
+
+        rawRequest.account_id = "f".repeat(32);
+        compiledPlan.resources[0]!.generated_name = "openbot-d1-probe-ffffffffffffffff";
+        expect(context?.request.account_id).toBe("a".repeat(32));
+        expect(context?.plan.resources[0]?.generated_name).not.toBe("openbot-d1-probe-ffffffffffffffff");
+        expect(() => {
+            (context?.request.resource_suffixes as { database: string }).database = "f".repeat(16);
+        }).toThrow(TypeError);
+    });
+
+    it("rejects substituted plans, requests, keys, and shape-only brand fabrication", async () => {
+        const compiledPlan = await plan();
+        expect(
+            await verifyD1ProbePreflightV1(
+                request(),
+                { ...compiledPlan, plan_digest: hex("f") },
+                { hmac_key_base64url: key }
+            )
+        ).toEqual({ success: false, code: "preflight_plan_mismatch" });
+
+        const substitutedRequest = request();
+        substitutedRequest.account_id = "c".repeat(32);
+        expect(await verifyD1ProbePreflightV1(substitutedRequest, compiledPlan, { hmac_key_base64url: key })).toEqual({
+            success: false,
+            code: "preflight_plan_mismatch",
+        });
+        expect(
+            await verifyD1ProbePreflightV1(request(), compiledPlan, {
+                hmac_key_base64url: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+            })
+        ).toEqual({ success: false, code: "preflight_plan_mismatch" });
+        expect(
+            resolveVerifiedD1ProbePreflightV1({
+                schema_version: 1,
+                kind: "verified_d1_probe_preflight",
+            } as VerifiedD1ProbePreflightV1)
+        ).toBeNull();
+    });
+
+    it("returns typed denials for malformed and hostile inputs", async () => {
+        const compiledPlan = await plan();
+        const hostile = new Proxy(
+            {},
+            {
+                ownKeys: () => {
+                    throw new Error("hostile input");
+                },
+            }
+        );
+        expect(await verifyD1ProbePreflightV1(hostile, compiledPlan, { hmac_key_base64url: key })).toEqual({
+            success: false,
+            code: "invalid_preflight_request",
+        });
+        expect(await verifyD1ProbePreflightV1(request(), hostile, { hmac_key_base64url: key })).toEqual({
+            success: false,
+            code: "invalid_preflight_plan",
+        });
+        expect(await verifyD1ProbePreflightV1(request(), compiledPlan, hostile)).toEqual({
+            success: false,
+            code: "invalid_commitment_key",
+        });
     });
 });

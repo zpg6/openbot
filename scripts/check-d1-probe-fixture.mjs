@@ -82,6 +82,32 @@ check(rules.cloudflare_account_and_zone_are_real === true, "Cloudflare account a
 check(rules.returned_resource_ids_must_match_cleanup_ids === true, "cleanup must bind returned resource IDs");
 
 const deployment = fixture.deployment ?? {};
+const preflightVerification = deployment.preflight_verification ?? {};
+check(preflightVerification.shape_only_plan_accepted === false, "shape-only D1 preflight plans must deny");
+check(
+    preflightVerification.complete_plan_recompiled_from_request_and_hmac_key === true,
+    "D1 preflight verification must recompile the complete plan"
+);
+check(
+    preflightVerification.canonical_plan_bytes_must_match === true,
+    "D1 preflight verification must compare canonical plan bytes"
+);
+check(
+    preflightVerification.verified_context_is_opaque_and_in_memory_only === true,
+    "the verified D1 preflight context must remain opaque and in memory"
+);
+check(
+    preflightVerification.resolved_request_and_plan_deeply_frozen === true,
+    "resolved D1 preflight data must be deeply frozen"
+);
+check(
+    preflightVerification.hmac_key_retained_or_serialized === false,
+    "the D1 preflight verifier must not retain or serialize the HMAC key"
+);
+check(
+    preflightVerification.performs_deployment === false && preflightVerification.authoritative === false,
+    "D1 preflight verification must perform no deployment and grant no authority"
+);
 check(
     deployment.operational_identity?.account_id_hmac_commitment_required === true,
     "account ID needs an HMAC commitment"

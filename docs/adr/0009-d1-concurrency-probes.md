@@ -22,6 +22,8 @@ The sink/readback Worker also has one temporary Access-protected readback route.
 
 The operator creates every 16-character lowercase suffix with a cryptographically secure random source before invoking the command. Preflight validates syntax and pairwise uniqueness; it does not treat that validation as evidence of randomness. The plan stores domain-separated HMAC commitments for the real Cloudflare account and zone, every operator-listed production database ID, and each generated resource name. The lifecycle journal copies those commitments from the plan. Every resource event must match the planned name and exact returned resource ID. Database creation stops if the returned database ID commitment matches the operator deny-list.
 
+The later deployment boundary cannot trust a parsed plan by shape. It must recompile the complete plan from the parsed request and HMAC key and compare the canonical bytes. Successful comparison creates an opaque in-memory verified preflight context. Its resolver accepts only the exact object minted by that verifier, returns deeply frozen copies of the request and recompiled plan, and retains no HMAC key. A copied or type-cast object does not resolve. This boundary still performs no deployment and grants no gate authority.
+
 The journal accepts only the fixed create and cleanup prefix below. Skipped, repeated, renamed, or substituted resources deny. An ambiguous create, delete, in-flight state, or absence observation moves the journal to terminal `manual_required`; the operator cannot continue the same plan blindly. This preflight and journal make a later deployment driver safer, but they do not implement that driver or close a D1 gate.
 
 ## Private receipt RPC
