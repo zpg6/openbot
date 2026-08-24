@@ -13,6 +13,7 @@ import {
 } from "./contracts.js";
 import {
     advanceD1ProbeLifecycleJournalV1,
+    isD1ProbeLifecycleJournalBoundV1,
     isD1ProbeLifecycleJournalReadyForStepV1,
     markD1ProbeLifecycleAmbiguousV1,
 } from "./lifecycle.js";
@@ -23,6 +24,7 @@ import {
 } from "./cloudflare-route-reader.js";
 import { resolveVerifiedD1ProbePreflightV1 } from "./verified-preflight.js";
 import { verifyD1ProbePreflightV1 } from "./verified-preflight.js";
+import type { VerifiedD1ProbePreflightV1 } from "./verified-preflight.js";
 
 const CLOUDFLARE_API_ORIGIN_V1 = "https://api.cloudflare.com";
 const CLOUDFLARE_API_PREFIX_V1 = "/client/v4";
@@ -47,6 +49,13 @@ const CloudflareDatabaseCreateResponseV1Schema = z
             .passthrough(),
     })
     .passthrough();
+const CloudflareDatabaseDeleteResponseV1Schema = z
+    .object({
+        success: z.literal(true),
+        errors: z.array(z.unknown()).length(0),
+        result: z.unknown(),
+    })
+    .passthrough();
 
 export interface D1ProbeCloudflareDatabaseDependenciesV1 {
     readonly fetch: typeof globalThis.fetch;
@@ -57,13 +66,16 @@ export interface CreatedD1ProbeDatabaseV1 {
     readonly kind: "created_d1_probe_database";
 }
 
-interface CreatedDatabaseContextV1 {
+export interface CreatedDatabaseContextV1 {
     readonly database_id: string;
     readonly database_name: string;
     readonly plan_digest: string;
+    readonly verified_preflight: VerifiedD1ProbePreflightV1;
 }
 
 const createdDatabases = new WeakMap<CreatedD1ProbeDatabaseV1, CreatedDatabaseContextV1>();
+const deleteRequestedDatabases = new WeakSet<CreatedD1ProbeDatabaseV1>();
+const emergencyCleanupBindings = new WeakMap<CreatedD1ProbeDatabaseV1, string>();
 
 export const resolveCreatedD1ProbeDatabaseV1 = (created: CreatedD1ProbeDatabaseV1): CreatedDatabaseContextV1 | null =>
     createdDatabases.get(created) ?? null;
@@ -83,6 +95,20 @@ export interface UntrustedD1ProbeDatabaseCreateObservationV1 {
     readonly observation_digest: string;
 }
 
+export interface UntrustedD1ProbeDatabaseDeleteObservationV1 {
+    readonly schema_version: 1;
+    readonly kind: "untrusted_d1_probe_database_delete_observation";
+    readonly status: "sdk_acknowledged";
+    readonly authoritative: false;
+    readonly absence_verified: false;
+    readonly eligible_for_attestation: false;
+    readonly gate_promotion_allowed: false;
+    readonly plan_digest: string;
+    readonly database_id_commitment: string;
+    readonly database_name_commitment: string;
+    readonly observation_digest: string;
+}
+
 export type CreateD1ProbeDatabaseDenialV1 =
     | "invalid_observed_route"
     | "stale_observed_route"
@@ -96,6 +122,18 @@ export type CreateD1ProbeDatabaseDenialV1 =
     | "database_name_mismatch"
     | "database_configuration_mismatch"
     | "production_database_denied";
+
+export type DeleteD1ProbeDatabaseDenialV1 =
+    | "invalid_created_database"
+    | "invalid_lifecycle_journal"
+    | "invalid_commitment_key"
+    | "invalid_api_token"
+    | "preflight_reverification_failed"
+    | "resource_binding_mismatch"
+    | "commitment_unavailable"
+    | "observation_digest_unavailable"
+    | "database_delete_already_requested"
+    | "database_delete_outcome_unknown";
 
 type PostDispatchFailureV1 = Readonly<{
     success: false;
@@ -230,14 +268,24 @@ const parseJournal = (input: unknown): D1ProbeLifecycleJournalV1 | null => {
     }
 };
 
-const mintCreatedDatabase = (databaseId: string, databaseName: string, planDigest: string) => {
+const mintCreatedDatabase = (
+    databaseId: string,
+    databaseName: string,
+    planDigest: string,
+    verifiedPreflight: VerifiedD1ProbePreflightV1
+) => {
     const created = Object.freeze({
         schema_version: 1 as const,
         kind: "created_d1_probe_database" as const,
     });
     createdDatabases.set(
         created,
-        Object.freeze({ database_id: databaseId, database_name: databaseName, plan_digest: planDigest })
+        Object.freeze({
+            database_id: databaseId,
+            database_name: databaseName,
+            plan_digest: planDigest,
+            verified_preflight: verifiedPreflight,
+        })
     );
     return created;
 };
@@ -248,7 +296,8 @@ const markManual = (
     reason: "ambiguous_create" | "id_mismatch" | "name_mismatch" | "unexpected_platform_result",
     observationDigest: string,
     code: CreateD1ProbeDatabaseDenialV1,
-    cleanupTarget: CreatedD1ProbeDatabaseV1 | null
+    cleanupTarget: CreatedD1ProbeDatabaseV1 | null,
+    emergencyCleanupAllowed = false
 ): PostDispatchFailureV1 => {
     const marked = markD1ProbeLifecycleAmbiguousV1(plan, journal, {
         failed_step: "database_created",
@@ -257,6 +306,9 @@ const markManual = (
     });
     if (!marked.success) {
         return { success: false, code: "invalid_lifecycle_journal", journal, cleanup_target: cleanupTarget };
+    }
+    if (cleanupTarget !== null && emergencyCleanupAllowed) {
+        emergencyCleanupBindings.set(cleanupTarget, observationDigest);
     }
     return { success: false, code, journal: marked.journal, cleanup_target: cleanupTarget };
 };
@@ -377,7 +429,12 @@ export const createD1ProbeDatabaseV1 = async (
     }
 
     const result = parsed.data.result;
-    const created = mintCreatedDatabase(result.uuid, result.name, context.plan.plan_digest);
+    const created = mintCreatedDatabase(
+        result.uuid,
+        result.name,
+        context.plan.plan_digest,
+        observedContext.verified_preflight
+    );
     const databaseIdCommitment = await hmacValue(key, "openbot.identity.cloudflare_d1_database_id.v1", result.uuid);
     const databaseNameCommitment = await hmacValue(
         key,
@@ -412,7 +469,15 @@ export const createD1ProbeDatabaseV1 = async (
         );
     }
     if (result.name !== databaseResource.generated_name) {
-        return markManual(context.plan, journal, "name_mismatch", observationDigest, "database_name_mismatch", created);
+        return markManual(
+            context.plan,
+            journal,
+            "name_mismatch",
+            observationDigest,
+            "database_name_mismatch",
+            created,
+            true
+        );
     }
     const jurisdictionMatches =
         context.request.database_jurisdiction === "automatic"
@@ -425,7 +490,8 @@ export const createD1ProbeDatabaseV1 = async (
             "unexpected_platform_result",
             observationDigest,
             "database_configuration_mismatch",
-            created
+            created,
+            true
         );
     }
     if (context.plan.operator_database_deny_id_commitments.includes(databaseIdCommitment)) {
@@ -435,7 +501,8 @@ export const createD1ProbeDatabaseV1 = async (
             "id_mismatch",
             observationDigest,
             "production_database_denied",
-            created
+            created,
+            true
         );
     }
 
@@ -453,7 +520,8 @@ export const createD1ProbeDatabaseV1 = async (
             "unexpected_platform_result",
             observationDigest,
             "invalid_lifecycle_journal",
-            created
+            created,
+            true
         );
     }
     return {
@@ -472,6 +540,217 @@ export const createD1ProbeDatabaseV1 = async (
             database_name_commitment: databaseResource.generated_name_commitment,
             database_jurisdiction: context.request.database_jurisdiction,
             read_replication: "auto",
+            observation_digest: observationDigest,
+        }),
+    };
+};
+
+const isEmergencyCreateCleanup = (journal: D1ProbeLifecycleJournalV1): boolean =>
+    journal.state === "manual_required" &&
+    journal.completed_steps.length === 0 &&
+    journal.manual_required?.failed_step === "database_created";
+
+export const deleteD1ProbeDatabaseV1 = async (
+    createdDatabase: CreatedD1ProbeDatabaseV1,
+    journalInput: unknown,
+    commitmentKeyInput: unknown,
+    apiTokenInput: unknown,
+    dependencies: D1ProbeCloudflareDatabaseDependenciesV1 = { fetch: globalThis.fetch }
+): Promise<
+    | Readonly<{
+          success: true;
+          journal: D1ProbeLifecycleJournalV1;
+          observation: UntrustedD1ProbeDatabaseDeleteObservationV1;
+      }>
+    | Readonly<{ success: false; code: DeleteD1ProbeDatabaseDenialV1 }>
+    | Readonly<{
+          success: false;
+          code: "database_delete_outcome_unknown" | "observation_digest_unavailable";
+          journal: D1ProbeLifecycleJournalV1;
+      }>
+> => {
+    const createdContext = resolveCreatedD1ProbeDatabaseV1(createdDatabase);
+    if (createdContext === null) return { success: false, code: "invalid_created_database" };
+    const preflightContext = resolveVerifiedD1ProbePreflightV1(createdContext.verified_preflight);
+    if (preflightContext === null || preflightContext.plan.plan_digest !== createdContext.plan_digest) {
+        return { success: false, code: "invalid_created_database" };
+    }
+    let journal: D1ProbeLifecycleJournalV1 | null = null;
+    try {
+        const parsed = D1ProbeLifecycleJournalV1Schema.safeParse(journalInput);
+        journal = parsed.success ? parsed.data : null;
+    } catch {
+        journal = null;
+    }
+    if (
+        journal === null ||
+        journal.plan_digest !== preflightContext.plan.plan_digest ||
+        !isD1ProbeLifecycleJournalBoundV1(preflightContext.plan, journal)
+    ) {
+        return { success: false, code: "invalid_lifecycle_journal" };
+    }
+    const normalCleanup = isD1ProbeLifecycleJournalReadyForStepV1(preflightContext.plan, journal, "database_deleted");
+    const emergencyCleanup = isEmergencyCreateCleanup(journal);
+    if (!normalCleanup && !emergencyCleanup) return { success: false, code: "invalid_lifecycle_journal" };
+    if (
+        emergencyCleanup &&
+        emergencyCleanupBindings.get(createdDatabase) !== journal.manual_required?.observation_digest
+    ) {
+        return { success: false, code: "resource_binding_mismatch" };
+    }
+
+    const reverified = await verifyD1ProbePreflightV1(
+        preflightContext.request,
+        preflightContext.plan,
+        commitmentKeyInput
+    );
+    if (!reverified.success) {
+        return {
+            success: false,
+            code:
+                reverified.code === "invalid_commitment_key"
+                    ? "invalid_commitment_key"
+                    : "preflight_reverification_failed",
+        };
+    }
+    const key = await importCommitmentKey(commitmentKeyInput);
+    if (key === null) return { success: false, code: "invalid_commitment_key" };
+    const databaseIdCommitment = await hmacValue(
+        key,
+        "openbot.identity.cloudflare_d1_database_id.v1",
+        createdContext.database_id
+    );
+    const databaseNameCommitment = await hmacValue(
+        key,
+        "openbot.d1-probe.generated-resource-name.database.v1",
+        createdContext.database_name
+    );
+    if (databaseIdCommitment === null || databaseNameCommitment === null) {
+        return { success: false, code: "commitment_unavailable" };
+    }
+    const plannedDatabase = preflightContext.plan.resources.find(resource => resource.resource_kind === "database");
+    const createdObservation = journal.observations.find(observation => observation.step === "database_created");
+    if (
+        plannedDatabase === undefined ||
+        (normalCleanup &&
+            (createdContext.database_name !== plannedDatabase.generated_name ||
+                databaseNameCommitment !== plannedDatabase.generated_name_commitment ||
+                createdObservation?.resource_id_commitment !== databaseIdCommitment ||
+                createdObservation.resource_name_commitment !== databaseNameCommitment))
+    ) {
+        return { success: false, code: "resource_binding_mismatch" };
+    }
+    const fallbackObservationDigest = await digestCanonicalJsonV1("openbot.d1-probe.database-delete-attempt.v1", {
+        plan_digest: preflightContext.plan.plan_digest,
+        database_id_commitment: databaseIdCommitment,
+        database_name_commitment: databaseNameCommitment,
+    });
+    if (fallbackObservationDigest === null) {
+        return { success: false, code: "observation_digest_unavailable" };
+    }
+
+    let token: ReturnType<typeof CloudflareApiTokenV1Schema.safeParse>;
+    try {
+        token = CloudflareApiTokenV1Schema.safeParse(apiTokenInput);
+    } catch {
+        return { success: false, code: "invalid_api_token" };
+    }
+    if (!token.success) return { success: false, code: "invalid_api_token" };
+    if (deleteRequestedDatabases.has(createdDatabase)) {
+        return { success: false, code: "database_delete_already_requested" };
+    }
+    deleteRequestedDatabases.add(createdDatabase);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CLOUDFLARE_TOTAL_TIMEOUT_MS_V1);
+    let responseValue: unknown | null = null;
+    try {
+        const response = await dependencies.fetch(
+            `${CLOUDFLARE_API_ORIGIN_V1}${CLOUDFLARE_API_PREFIX_V1}/accounts/${preflightContext.request.account_id}/d1/database/${createdContext.database_id}`,
+            {
+                method: "DELETE",
+                headers: {
+                    accept: "application/json",
+                    "accept-encoding": "identity",
+                    authorization: `Bearer ${token.data}`,
+                },
+                cache: "no-store",
+                credentials: "omit",
+                redirect: "manual",
+                signal: controller.signal,
+            }
+        );
+        responseValue = await readBoundedJson(response);
+    } catch {
+        responseValue = null;
+    } finally {
+        clearTimeout(timer);
+    }
+
+    const response = CloudflareDatabaseDeleteResponseV1Schema.safeParse(responseValue);
+    const observationDigest = await digestCanonicalJsonV1("openbot.d1-probe.database-delete-response.v1", {
+        plan_digest: preflightContext.plan.plan_digest,
+        database_id_commitment: databaseIdCommitment,
+        database_name_commitment: databaseNameCommitment,
+        sdk_acknowledged: response.success,
+    });
+    if (observationDigest === null) {
+        if (normalCleanup) {
+            const marked = markD1ProbeLifecycleAmbiguousV1(preflightContext.plan, journal, {
+                failed_step: "database_deleted",
+                reason: "ambiguous_delete",
+                observation_digest: fallbackObservationDigest,
+            });
+            return {
+                success: false,
+                code: "observation_digest_unavailable",
+                journal: marked.success ? marked.journal : journal,
+            };
+        }
+        return { success: false, code: "observation_digest_unavailable", journal };
+    }
+    if (!response.success) {
+        if (normalCleanup) {
+            const marked = markD1ProbeLifecycleAmbiguousV1(preflightContext.plan, journal, {
+                failed_step: "database_deleted",
+                reason: "ambiguous_delete",
+                observation_digest: observationDigest,
+            });
+            return {
+                success: false,
+                code: "database_delete_outcome_unknown",
+                journal: marked.success ? marked.journal : journal,
+            };
+        }
+        return { success: false, code: "database_delete_outcome_unknown", journal };
+    }
+
+    let nextJournal = journal;
+    if (normalCleanup) {
+        const advanced = advanceD1ProbeLifecycleJournalV1(preflightContext.plan, journal, {
+            step: "database_deleted",
+            observation_digest: observationDigest,
+            resource_kind: "database",
+            resource_name_commitment: databaseNameCommitment,
+            resource_id_commitment: databaseIdCommitment,
+        });
+        if (!advanced.success) return { success: false, code: "invalid_lifecycle_journal" };
+        nextJournal = advanced.journal;
+    }
+    return {
+        success: true,
+        journal: nextJournal,
+        observation: Object.freeze({
+            schema_version: 1,
+            kind: "untrusted_d1_probe_database_delete_observation",
+            status: "sdk_acknowledged",
+            authoritative: false,
+            absence_verified: false,
+            eligible_for_attestation: false,
+            gate_promotion_allowed: false,
+            plan_digest: preflightContext.plan.plan_digest,
+            database_id_commitment: databaseIdCommitment,
+            database_name_commitment: databaseNameCommitment,
             observation_digest: observationDigest,
         }),
     };

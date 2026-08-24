@@ -8,6 +8,7 @@ import {
     D1_PROBE_LIFECYCLE_STEPS_V1,
     D1_PROBE_RESOURCE_KINDS_V1,
     D1ProbeLifecycleJournalV1Schema,
+    type D1ProbeLifecycleJournalV1,
     D1ProbePreflightPlanV1Schema,
     type D1ProbeLifecycleStepV1,
     type D1ProbePreflightPlanV1,
@@ -21,7 +22,11 @@ import {
 } from "./lifecycle.js";
 import { compileD1ProbePreflightPlanV1 } from "./preflight.js";
 import { readD1ProbeCloudflareRouteV1, type ObservedD1ProbeCloudflareRouteV1 } from "./cloudflare-route-reader.js";
-import { createD1ProbeDatabaseV1, resolveCreatedD1ProbeDatabaseV1 } from "./cloudflare-database.js";
+import {
+    createD1ProbeDatabaseV1,
+    deleteD1ProbeDatabaseV1,
+    resolveCreatedD1ProbeDatabaseV1,
+} from "./cloudflare-database.js";
 import { inspectD1ProbeRouteReadbackV1 } from "./route-precheck.js";
 import { executeD1ProbeRouteCheckV1 } from "./route-command.js";
 import {
@@ -1106,6 +1111,35 @@ describe("D1 probe Cloudflare database creation", () => {
         return { compiledPlan, journal: created.journal };
     };
 
+    const provisionedDatabase = async () => {
+        const observed = await observedRoute();
+        const { compiledPlan, journal } = await plannedJournal();
+        const created = await createD1ProbeDatabaseV1(observed, journal, { hmac_key_base64url: key }, "w".repeat(32), {
+            fetch: (async () => jsonResponse(cloudflareDatabaseCreateResponse())) as typeof globalThis.fetch,
+        });
+        if (!created.success) throw new Error(created.code);
+        return { compiledPlan, created: created.created, journal: created.journal };
+    };
+
+    const journalBeforeDatabaseDelete = (
+        compiledPlan: D1ProbePreflightPlanV1,
+        createdJournal: D1ProbeLifecycleJournalV1
+    ) => {
+        let journal = createdJournal;
+        for (let index = 1; index < D1_PROBE_LIFECYCLE_STEPS_V1.length; index += 1) {
+            const step = D1_PROBE_LIFECYCLE_STEPS_V1[index] as D1ProbeLifecycleStepV1;
+            if (step === "database_deleted") break;
+            const advanced = advanceD1ProbeLifecycleJournalV1(
+                compiledPlan,
+                journal,
+                eventForStep(compiledPlan, step, index)
+            );
+            if (!advanced.success) throw new Error(advanced.code);
+            journal = advanced.journal;
+        }
+        return journal;
+    };
+
     it("creates only the exact disposable database and records committed lifecycle evidence", async () => {
         const observed = await observedRoute();
         const { compiledPlan, journal } = await plannedJournal();
@@ -1150,7 +1184,7 @@ describe("D1 probe Cloudflare database creation", () => {
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
         if (!result.success) throw new Error(result.code);
-        expect(resolveCreatedD1ProbeDatabaseV1(result.created)).toEqual({
+        expect(resolveCreatedD1ProbeDatabaseV1(result.created)).toMatchObject({
             database_id: response.result.uuid,
             database_name: response.result.name,
             plan_digest: compiledPlan.plan_digest,
@@ -1378,13 +1412,225 @@ describe("D1 probe Cloudflare database creation", () => {
             if (result.success || !("cleanup_target" in result) || result.cleanup_target === null) {
                 throw new Error("expected opaque cleanup target");
             }
-            expect(resolveCreatedD1ProbeDatabaseV1(result.cleanup_target)).toEqual({
+            expect(resolveCreatedD1ProbeDatabaseV1(result.cleanup_target)).toMatchObject({
                 database_id: response.result.uuid,
                 database_name: response.result.name,
                 plan_digest: (await plan()).plan_digest,
             });
             expect(JSON.stringify(result)).not.toContain(response.result.uuid);
         }
+    });
+
+    it("requests exact database deletion once and records acknowledgement without claiming absence", async () => {
+        const provisioned = await provisionedDatabase();
+        const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+        const rawDatabase = resolveCreatedD1ProbeDatabaseV1(provisioned.created);
+        if (rawDatabase === null) throw new Error("missing created database context");
+        const apiToken = "d".repeat(32);
+        const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            expect(String(input)).toBe(
+                `https://api.cloudflare.com/client/v4/accounts/${request().account_id}/d1/database/${rawDatabase.database_id}`
+            );
+            expect(init?.method).toBe("DELETE");
+            expect(init?.body).toBeUndefined();
+            expect(init?.redirect).toBe("manual");
+            expect(init?.cache).toBe("no-store");
+            expect(init?.credentials).toBe("omit");
+            expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${apiToken}`);
+            expect(new Headers(init?.headers).get("accept-encoding")).toBe("identity");
+            return jsonResponse({ success: true, errors: [], messages: [], result: {} });
+        });
+        const result = await deleteD1ProbeDatabaseV1(
+            provisioned.created,
+            journal,
+            { hmac_key_base64url: key },
+            apiToken,
+            { fetch: fetchMock as typeof globalThis.fetch }
+        );
+        expect(result).toMatchObject({
+            success: true,
+            journal: { state: "cleaning_up", completed_steps: expect.arrayContaining(["database_deleted"]) },
+            observation: {
+                status: "sdk_acknowledged",
+                authoritative: false,
+                absence_verified: false,
+                eligible_for_attestation: false,
+                gate_promotion_allowed: false,
+            },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(result)).not.toContain(rawDatabase.database_id);
+        expect(JSON.stringify(result)).not.toContain(apiToken);
+        expect(JSON.stringify(result)).not.toContain(key);
+
+        expect(
+            await deleteD1ProbeDatabaseV1(provisioned.created, journal, { hmac_key_base64url: key }, apiToken, {
+                fetch: fetchMock as typeof globalThis.fetch,
+            })
+        ).toEqual({ success: false, code: "database_delete_already_requested" });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("makes lost, malformed, oversized, and encoded delete responses terminal without retry", async () => {
+        for (const fetchImplementation of [
+            vi.fn(async () => {
+                throw new Error("delete response lost");
+            }),
+            vi.fn(async () => new Response("not json", { status: 200, headers: { "content-type": "text/plain" } })),
+            vi.fn(
+                async () =>
+                    new Response("{}", {
+                        status: 200,
+                        headers: { "content-length": "262145", "content-type": "application/json" },
+                    })
+            ),
+            vi.fn(
+                async () =>
+                    new Response("{}", {
+                        status: 200,
+                        headers: { "content-encoding": "gzip", "content-type": "application/json" },
+                    })
+            ),
+        ]) {
+            const provisioned = await provisionedDatabase();
+            const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+            const result = await deleteD1ProbeDatabaseV1(
+                provisioned.created,
+                journal,
+                { hmac_key_base64url: key },
+                "d".repeat(32),
+                { fetch: fetchImplementation as typeof globalThis.fetch }
+            );
+            expect(result).toMatchObject({
+                success: false,
+                code: "database_delete_outcome_unknown",
+                journal: {
+                    state: "manual_required",
+                    manual_required: { failed_step: "database_deleted", reason: "ambiguous_delete" },
+                },
+            });
+            expect(
+                await deleteD1ProbeDatabaseV1(
+                    provisioned.created,
+                    journal,
+                    { hmac_key_base64url: key },
+                    "d".repeat(32),
+                    { fetch: fetchImplementation as typeof globalThis.fetch }
+                )
+            ).toEqual({ success: false, code: "database_delete_already_requested" });
+            expect(fetchImplementation).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it("allows one exact emergency cleanup request without clearing manual review", async () => {
+        const observed = await observedRoute();
+        const { journal } = await plannedJournal();
+        const mismatched = await createD1ProbeDatabaseV1(
+            observed,
+            journal,
+            { hmac_key_base64url: key },
+            "w".repeat(32),
+            {
+                fetch: (async () =>
+                    jsonResponse(cloudflareDatabaseCreateResponse({ name: "wrong-name" }))) as typeof globalThis.fetch,
+            }
+        );
+        if (mismatched.success || !("cleanup_target" in mismatched) || mismatched.cleanup_target === null) {
+            throw new Error("missing emergency cleanup target");
+        }
+        const otherMismatch = await createD1ProbeDatabaseV1(
+            observed,
+            journal,
+            { hmac_key_base64url: key },
+            "w".repeat(32),
+            {
+                fetch: (async () =>
+                    jsonResponse(
+                        cloudflareDatabaseCreateResponse({
+                            uuid: "87654321-4321-4321-8321-210987654321",
+                            name: "another-wrong-name",
+                        })
+                    )) as typeof globalThis.fetch,
+            }
+        );
+        if (otherMismatch.success || !("cleanup_target" in otherMismatch) || otherMismatch.cleanup_target === null) {
+            throw new Error("missing second emergency cleanup target");
+        }
+        const fetchMock = vi.fn(async () => jsonResponse({ success: true, errors: [], messages: [], result: {} }));
+        expect(
+            await deleteD1ProbeDatabaseV1(
+                mismatched.cleanup_target,
+                otherMismatch.journal,
+                { hmac_key_base64url: key },
+                "d".repeat(32),
+                { fetch: fetchMock as typeof globalThis.fetch }
+            )
+        ).toEqual({ success: false, code: "resource_binding_mismatch" });
+        const result = await deleteD1ProbeDatabaseV1(
+            mismatched.cleanup_target,
+            mismatched.journal,
+            { hmac_key_base64url: key },
+            "d".repeat(32),
+            { fetch: fetchMock as typeof globalThis.fetch }
+        );
+        expect(result).toMatchObject({
+            success: true,
+            journal: { state: "manual_required", manual_required: { failed_step: "database_created" } },
+            observation: { status: "sdk_acknowledged", absence_verified: false },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+    });
+
+    it("rejects target, journal, key, and credential substitution before deletion", async () => {
+        const provisioned = await provisionedDatabase();
+        const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+        const fetchMock = vi.fn();
+        const dependencies = { fetch: fetchMock as typeof globalThis.fetch };
+        expect(
+            await deleteD1ProbeDatabaseV1(
+                { schema_version: 1, kind: "created_d1_probe_database" },
+                journal,
+                { hmac_key_base64url: key },
+                "d".repeat(32),
+                dependencies
+            )
+        ).toEqual({ success: false, code: "invalid_created_database" });
+        const substitutedJournal = {
+            ...journal,
+            observations: journal.observations.map(observation =>
+                observation.step === "database_created"
+                    ? { ...observation, resource_id_commitment: hex("f") }
+                    : observation
+            ),
+        };
+        expect(
+            await deleteD1ProbeDatabaseV1(
+                provisioned.created,
+                substitutedJournal,
+                { hmac_key_base64url: key },
+                "d".repeat(32),
+                dependencies
+            )
+        ).toEqual({ success: false, code: "resource_binding_mismatch" });
+        expect(
+            await deleteD1ProbeDatabaseV1(
+                provisioned.created,
+                journal,
+                { hmac_key_base64url: Buffer.alloc(32, 2).toString("base64url") },
+                "d".repeat(32),
+                dependencies
+            )
+        ).toEqual({ success: false, code: "preflight_reverification_failed" });
+        expect(
+            await deleteD1ProbeDatabaseV1(
+                provisioned.created,
+                journal,
+                { hmac_key_base64url: key },
+                "short",
+                dependencies
+            )
+        ).toEqual({ success: false, code: "invalid_api_token" });
+        expect(fetchMock).not.toHaveBeenCalled();
     });
 });
 

@@ -284,6 +284,9 @@ export const isD1ProbeLifecycleJournalReadyForStepV1 = (
     );
 };
 
+export const isD1ProbeLifecycleJournalBoundV1 = (planInput: unknown, journalInput: unknown): boolean =>
+    parseBoundLifecycle(planInput, journalInput) !== null;
+
 export const isD1ProbePlanV1 = (input: unknown): input is D1ProbePreflightPlanV1 => {
     try {
         return D1ProbePreflightPlanV1Schema.safeParse(input).success;

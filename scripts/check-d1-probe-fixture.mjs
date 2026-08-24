@@ -249,6 +249,33 @@ check(
         deployment.database?.authoritative === false,
     "D1 create results must remain bound, opaque, and non-authoritative"
 );
+check(
+    deployment.database?.delete_adapter_implemented === true &&
+        deployment.database?.delete_operator_command_registered === false &&
+        deployment.database?.delete_api_endpoint === "DELETE /accounts/{account_id}/d1/database/{database_id}" &&
+        deployment.database?.delete_target_source === "opaque_created_database_context" &&
+        deployment.database?.delete_normal_journal_step === "database_deleted" &&
+        deployment.database?.delete_emergency_journal === "exact_bound_database_create_failure_only" &&
+        deployment.database?.delete_plan_hmac_id_and_name_reverified === true &&
+        deployment.database?.delete_request_one_use === true,
+    "D1 deletion must bind the exact created target, plan, journal, and one-use request"
+);
+check(
+    deployment.database?.delete_redirects_followed === false &&
+        deployment.database?.delete_automatic_retries === 0 &&
+        deployment.database?.delete_response_limit_bytes === 262144 &&
+        deployment.database?.delete_total_timeout_ms === 20000 &&
+        deployment.database?.delete_ambiguous_response === "manual_required_without_retry",
+    "the D1 delete transport or ambiguity policy changed"
+);
+check(
+    deployment.database?.delete_success_status === "sdk_acknowledged" &&
+        deployment.database?.delete_absence_verified === false &&
+        deployment.database?.delete_raw_database_id_in_output === false &&
+        deployment.database?.delete_eligible_for_attestation === false &&
+        deployment.database?.delete_authoritative === false,
+    "a D1 delete acknowledgement cannot claim absence or gate authority"
+);
 check(deployment.database?.same_exact_database_id_for_all_workers === true, "all Workers must bind one exact D1 ID");
 check(deployment.database?.exact_database_id_commitment_required === true, "the database ID needs a commitment");
 check(deployment.database?.read_replication_setting_required === true, "the read-replication setting is required");
