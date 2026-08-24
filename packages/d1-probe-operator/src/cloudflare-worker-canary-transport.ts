@@ -37,6 +37,41 @@ export interface D1ProbeCloudflareWorkerCanaryTransportDependenciesV1 {
     readonly cleanup_window: D1ProbeCloudflareWorkerCanaryTransportWindowV1;
 }
 
+const preparedDispatchBrandV1: unique symbol = Symbol("openbot.cloudflare-worker-canary.prepared-dispatch.v1");
+
+export interface D1ProbeCloudflareWorkerCanaryPreparedDispatchV1 {
+    readonly [preparedDispatchBrandV1]: true;
+}
+
+export interface D1ProbeCloudflareWorkerCanaryDispatchIntentV1 {
+    readonly sequence: number;
+    readonly method: "GET" | "POST" | "DELETE";
+    readonly path_digest: string;
+    readonly request_digest: string;
+    readonly window_class: "forward" | "cleanup";
+    readonly intent_observed_at_ms: number;
+    readonly dispatch_started_at_ms: number;
+}
+
+// This caller-supplied ordering hook cannot prove that its return reflects durable or authentic storage.
+export type D1ProbeCloudflareWorkerCanaryRecordDispatchV1 = (
+    intent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1
+) => Promise<void>;
+
+type PrepareGetV1 = (
+    path: string,
+    acceptedStatuses?: readonly number[]
+) => Promise<D1ProbeCloudflareWorkerCanaryPreparedDispatchV1 | null>;
+type PreparePostV1 = (
+    path: string,
+    body: CanonicalJsonValueV1,
+    acceptedStatuses?: readonly number[]
+) => Promise<D1ProbeCloudflareWorkerCanaryPreparedDispatchV1 | null>;
+type PrepareDeleteV1 = (
+    path: string,
+    acceptedStatuses?: readonly number[]
+) => Promise<D1ProbeCloudflareWorkerCanaryPreparedDispatchV1 | null>;
+
 type GetV1 = (
     path: string,
     acceptedStatuses?: readonly number[]
@@ -53,8 +88,29 @@ type DeleteV1 = (
 
 export interface D1ProbeCloudflareWorkerCanaryTransportV1 {
     readonly transcript: readonly D1ProbeCloudflareWorkerCanaryTranscriptEntryV1[];
+    readonly prepare: {
+        readonly forward: { readonly get: PrepareGetV1; readonly post: PreparePostV1 };
+        readonly cleanup: { readonly get: PrepareGetV1; readonly delete: PrepareDeleteV1 };
+    };
+    readonly dispatch: (
+        prepared: D1ProbeCloudflareWorkerCanaryPreparedDispatchV1,
+        recordIntentAndStarted: D1ProbeCloudflareWorkerCanaryRecordDispatchV1
+    ) => Promise<D1ProbeCloudflareWorkerCanaryJsonResponseV1>;
     readonly forward: { readonly get: GetV1; readonly post: PostV1 };
     readonly cleanup: { readonly get: GetV1; readonly delete: DeleteV1 };
+}
+
+interface PreparedDispatchStateV1 {
+    readonly method: "GET" | "POST" | "DELETE";
+    readonly path: string;
+    readonly path_digest: string;
+    readonly request_digest: string;
+    readonly body: string | undefined;
+    readonly accepted_statuses: readonly number[];
+    readonly window: D1ProbeCloudflareWorkerCanaryTransportWindowV1;
+    readonly window_class: "forward" | "cleanup";
+    readonly intent_observed_at_ms: number;
+    consumed: boolean;
 }
 
 const arrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
@@ -66,10 +122,10 @@ const toHex = (value: ArrayBuffer): string =>
 const sha256 = async (bytes: Uint8Array): Promise<string> =>
     toHex(await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer(bytes)));
 
-const canonicalRequest = (method: string, path: string, body?: CanonicalJsonValueV1) => ({
+const canonicalRequest = (method: string, path: string, body?: string) => ({
     method,
     path,
-    ...(body === undefined ? {} : { body: canonicalizeJsonV1(body) }),
+    ...(body === undefined ? {} : { body }),
 });
 
 const insideWindow = (value: number, window: D1ProbeCloudflareWorkerCanaryTransportWindowV1): boolean =>
@@ -79,6 +135,7 @@ export const createD1ProbeCloudflareWorkerCanaryTransportV1 = (
     dependencies: D1ProbeCloudflareWorkerCanaryTransportDependenciesV1
 ): D1ProbeCloudflareWorkerCanaryTransportV1 => {
     const transcript: D1ProbeCloudflareWorkerCanaryTranscriptEntryV1[] = [];
+    const preparedDispatches = new WeakMap<D1ProbeCloudflareWorkerCanaryPreparedDispatchV1, PreparedDispatchStateV1>();
     let aggregateBytes = 0;
 
     const readClock = (): number | null => {
@@ -90,52 +147,102 @@ export const createD1ProbeCloudflareWorkerCanaryTransportV1 = (
         }
     };
 
-    const requestJson = async (
+    const prepareRequest = async (
         method: "GET" | "POST" | "DELETE",
         path: string,
         window: D1ProbeCloudflareWorkerCanaryTransportWindowV1,
         body?: CanonicalJsonValueV1,
-        acceptedStatuses: readonly number[] = [200]
-    ): Promise<D1ProbeCloudflareWorkerCanaryJsonResponseV1> => {
-        const observedAt = readClock();
-        if (observedAt === null || !insideWindow(observedAt, window)) return { ok: false, status: null };
+        acceptedStatuses: readonly number[] = [200],
+        legacyObservedAt?: number,
+        windowClass: "forward" | "cleanup" = "forward"
+    ): Promise<D1ProbeCloudflareWorkerCanaryPreparedDispatchV1 | null> => {
         let requestDigest: string | null;
         let pathDigest: string;
+        let canonicalBody: string | undefined;
+        let copiedAcceptedStatuses: readonly number[];
         try {
-            const requestProjection = canonicalRequest(method, path, body);
+            canonicalBody = body === undefined ? undefined : canonicalizeJsonV1(body);
+            const requestProjection = canonicalRequest(method, path, canonicalBody);
             requestDigest = await digestCanonicalJsonV1(
                 REQUEST_DIGEST_DOMAIN_V1,
                 requestProjection as CanonicalJsonValueV1
             );
             pathDigest = await sha256(new TextEncoder().encode(path));
+            copiedAcceptedStatuses = Object.freeze([...acceptedStatuses]);
         } catch {
-            return { ok: false, status: null };
+            return null;
         }
-        if (requestDigest === null) return { ok: false, status: null };
-        const entry: D1ProbeCloudflareWorkerCanaryTranscriptEntryV1 = {
-            sequence: transcript.length + 1,
+        if (requestDigest === null) return null;
+        const observedAt = legacyObservedAt ?? readClock();
+        if (observedAt === null || !insideWindow(observedAt, window)) return null;
+        const prepared = Object.freeze({
+            [preparedDispatchBrandV1]: true as const,
+        });
+        preparedDispatches.set(prepared, {
             method,
+            path,
             path_digest: pathDigest,
             request_digest: requestDigest,
+            body: canonicalBody,
+            accepted_statuses: copiedAcceptedStatuses,
+            window,
+            window_class: windowClass,
+            intent_observed_at_ms: observedAt,
+            consumed: false,
+        });
+        return prepared;
+    };
+
+    const dispatchPrepared = async (
+        prepared: D1ProbeCloudflareWorkerCanaryPreparedDispatchV1,
+        recordIntentAndStarted: D1ProbeCloudflareWorkerCanaryRecordDispatchV1,
+        legacyObservedAt?: number
+    ): Promise<D1ProbeCloudflareWorkerCanaryJsonResponseV1> => {
+        const state = preparedDispatches.get(prepared);
+        if (state === undefined || state.consumed) return { ok: false, status: null };
+        state.consumed = true;
+        const dispatchStartedAt = legacyObservedAt ?? readClock();
+        if (dispatchStartedAt === null || !insideWindow(dispatchStartedAt, state.window)) {
+            return { ok: false, status: null };
+        }
+        const entry: D1ProbeCloudflareWorkerCanaryTranscriptEntryV1 = {
+            sequence: transcript.length + 1,
+            method: state.method,
+            path_digest: state.path_digest,
+            request_digest: state.request_digest,
             response_digest: null,
             status: null,
-            observed_at_ms: observedAt,
+            observed_at_ms: dispatchStartedAt,
         };
         const transcriptIndex = transcript.push(entry) - 1;
+        const intent = Object.freeze({
+            sequence: entry.sequence,
+            method: state.method,
+            path_digest: state.path_digest,
+            request_digest: state.request_digest,
+            window_class: state.window_class,
+            intent_observed_at_ms: state.intent_observed_at_ms,
+            dispatch_started_at_ms: dispatchStartedAt,
+        });
         try {
-            const remainingMs = window.expires_at_ms - observedAt;
+            await recordIntentAndStarted(intent);
+            const fetchObservedAt = legacyObservedAt ?? readClock();
+            if (fetchObservedAt === null || !insideWindow(fetchObservedAt, state.window)) {
+                return { ok: false, status: null };
+            }
+            const remainingMs = state.window.expires_at_ms - fetchObservedAt;
             if (remainingMs <= 0) return { ok: false, status: null };
-            const response = await dependencies.fetch(`${API_ROOT_V1}${path}`, {
-                method,
+            const response = await dependencies.fetch(`${API_ROOT_V1}${state.path}`, {
+                method: state.method,
                 redirect: "manual",
                 signal: AbortSignal.timeout(Math.max(1, Math.min(MAX_REQUEST_DURATION_MS_V1, remainingMs))),
                 headers: {
                     Accept: "application/json",
                     "Accept-Encoding": "identity",
                     Authorization: `Bearer ${dependencies.api_token}`,
-                    ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+                    ...(state.body === undefined ? {} : { "Content-Type": "application/json" }),
                 },
-                ...(body === undefined ? {} : { body: canonicalizeJsonV1(body) }),
+                ...(state.body === undefined ? {} : { body: state.body }),
             });
             const encoding = response.headers.get("content-encoding");
             const contentType = response.headers.get("content-type") ?? "";
@@ -179,9 +286,9 @@ export const createD1ProbeCloudflareWorkerCanaryTransportV1 = (
                 observed_at_ms: responseObservedAt,
             };
             if (
-                !insideWindow(responseObservedAt, window) ||
+                !insideWindow(responseObservedAt, state.window) ||
                 aggregateBytes > MAX_AGGREGATE_RESPONSE_BYTES_V1 ||
-                !acceptedStatuses.includes(response.status)
+                !state.accepted_statuses.includes(response.status)
             ) {
                 return { ok: false, status: response.status };
             }
@@ -202,8 +309,56 @@ export const createD1ProbeCloudflareWorkerCanaryTransportV1 = (
         }
     };
 
+    const requestJson = async (
+        method: "GET" | "POST" | "DELETE",
+        path: string,
+        window: D1ProbeCloudflareWorkerCanaryTransportWindowV1,
+        body?: CanonicalJsonValueV1,
+        acceptedStatuses: readonly number[] = [200]
+    ): Promise<D1ProbeCloudflareWorkerCanaryJsonResponseV1> => {
+        const observedAt = readClock();
+        if (observedAt === null || !insideWindow(observedAt, window)) return { ok: false, status: null };
+        const windowClass = window === dependencies.cleanup_window ? "cleanup" : "forward";
+        const prepared = await prepareRequest(method, path, window, body, acceptedStatuses, observedAt, windowClass);
+        if (prepared === null) return { ok: false, status: null };
+        // The existing runner records nothing here. This adapter grants no persistence or dispatch authority.
+        const legacyOrderingAdapter: D1ProbeCloudflareWorkerCanaryRecordDispatchV1 = async () => undefined;
+        return await dispatchPrepared(prepared, legacyOrderingAdapter, observedAt);
+    };
+
     return {
         transcript,
+        prepare: {
+            forward: {
+                get: async (path, acceptedStatuses) =>
+                    await prepareRequest("GET", path, dependencies.forward_window, undefined, acceptedStatuses),
+                post: async (path, body, acceptedStatuses) =>
+                    await prepareRequest("POST", path, dependencies.forward_window, body, acceptedStatuses),
+            },
+            cleanup: {
+                get: async (path, acceptedStatuses) =>
+                    await prepareRequest(
+                        "GET",
+                        path,
+                        dependencies.cleanup_window,
+                        undefined,
+                        acceptedStatuses,
+                        undefined,
+                        "cleanup"
+                    ),
+                delete: async (path, acceptedStatuses) =>
+                    await prepareRequest(
+                        "DELETE",
+                        path,
+                        dependencies.cleanup_window,
+                        undefined,
+                        acceptedStatuses,
+                        undefined,
+                        "cleanup"
+                    ),
+            },
+        },
+        dispatch: async (prepared, recordIntentAndStarted) => await dispatchPrepared(prepared, recordIntentAndStarted),
         forward: {
             get: async (path, acceptedStatuses) =>
                 await requestJson("GET", path, dependencies.forward_window, undefined, acceptedStatuses),

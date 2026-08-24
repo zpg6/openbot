@@ -27,6 +27,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.credentialed_cli_fail_closed === true &&
             fixture.implementation?.shared_bounded_transport_implemented === true &&
             fixture.implementation?.unregistered_runner_uses_shared_bounded_transport === true &&
+            fixture.implementation?.caller_controlled_pre_dispatch_ordering_seam_implemented === true &&
+            fixture.implementation?.credentialed_runner_persists_pre_dispatch_claims === false &&
             fixture.implementation?.canonical_plan_generator_implemented === true &&
             fixture.implementation?.root_plan_command_registered === true &&
             fixture.implementation?.durable_operation_state_implemented === true &&
@@ -45,6 +47,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.read_only_recovery_inspector_implemented === true &&
             fixture.implementation?.root_recovery_inspector_command_registered === true &&
             fixture.implementation?.secure_secret_fd_launcher_implemented === false &&
+            fixture.implementation?.encrypted_response_preimage_archive_implemented === true &&
+            fixture.implementation?.credentialed_runner_writes_encrypted_response_preimages === false &&
             fixture.implementation?.response_preimage_capture_implemented === false &&
             fixture.implementation?.reviewed_observation_fixture_transition_implemented === false &&
             fixture.implementation?.credentials_recorded === false &&
@@ -97,6 +101,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.effect_claim_journal_scope === "caller_constructible_redacted_hash_chain_only" &&
             workflow.consistency_snapshot_scope === "locally_forgeable_may_stale_reassert_heads_before_effect" &&
             workflow.consistency_reader_filesystem_writes === false &&
+            workflow.pre_dispatch_ordering_scope === "caller_controlled_one_use_hook_no_persistence_proof" &&
+            workflow.response_archive_scope === "encrypted_write_only_caller_claim_bound_body_preimage" &&
+            workflow.response_archive_production_plaintext_reader_available === false &&
+            workflow.response_archive_claims_complete_transport_observation === false &&
             workflow.fresh_execution_ownership_tag_required === true &&
             workflow.durable_private_attempt_record_implemented === true &&
             workflow.credentialed_runner_records_raw_execution_ownership_tag === false &&
