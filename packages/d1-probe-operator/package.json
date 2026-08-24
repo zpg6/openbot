@@ -6,6 +6,7 @@
     "scripts": {
         "plan": "node --import tsx src/cli.ts",
         "check-route": "node --import tsx src/route-cli.ts",
+        "canary-worker-api": "node --import tsx src/cloudflare-worker-canary-cli.ts",
         "typecheck": "tsc -b --pretty false",
         "test": "vitest run --root ../.. packages/d1-probe-operator/src"
     },

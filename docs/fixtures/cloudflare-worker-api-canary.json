@@ -1,0 +1,247 @@
+{
+    "schema_version": 1,
+    "kind": "cloudflare_worker_api_interoperability_canary",
+    "recorded_date": "2026-08-24",
+    "status": "not_run",
+    "purpose": "isolated_beta_to_classic_worker_api_interoperability_only",
+    "implementation": {
+        "credentialed_runner_implemented": true,
+        "root_command_registered": true,
+        "credentials_recorded": false,
+        "observations_recorded": false
+    },
+    "authority": {
+        "fixture_is_evidence": false,
+        "caller_mutation_authority": false,
+        "authoritative": false,
+        "eligible_for_attestation": false,
+        "lifecycle_advance_allowed": false,
+        "gate_promotion_allowed": false,
+        "production_artifact_eligible_for_upload": false,
+        "production_deployment_ready": false
+    },
+    "isolation": {
+        "one_new_disposable_worker_required": true,
+        "generated_name_prefix": "openbot-d1-probe-canary-",
+        "production_worker_names_denied": true,
+        "d1_database_created": false,
+        "access_resources_created": false,
+        "routes_created": false,
+        "workers_dev_enabled": false,
+        "preview_urls_enabled": false,
+        "logpush_enabled": false,
+        "observability_enabled": false,
+        "tail_consumers": [],
+        "bindings": [],
+        "assets": []
+    },
+    "fixed_module": {
+        "main_module": "entry.js",
+        "content_type": "application/javascript+module",
+        "utf8_source": "export default { fetch() { return new Response(null, { status: 404 }); } };",
+        "sha256": "af90db18d8d6707e755a035fc78d7ebf066147edfaaeb22b95c52fbb654be7db",
+        "bindings": [],
+        "accepts_environment": false,
+        "performs_outbound_requests": false,
+        "writes_data": false,
+        "runtime_invocation_required": false
+    },
+    "workflow": {
+        "automatic_retries": 0,
+        "redirects_followed": false,
+        "response_encoding_requested": "identity",
+        "ambiguous_mutation_result": "manual_cleanup_required_no_retry",
+        "checkout_local_plan_reservation": true,
+        "distributed_plan_reservation": false,
+        "fresh_execution_ownership_tag_required": true,
+        "raw_execution_ownership_tag_recorded": false,
+        "uncertain_or_interrupted_exit_is_nonzero": true,
+        "steps_in_order": [
+            "beta_worker_list_name_absence",
+            "beta_empty_shell_create",
+            "beta_empty_shell_readback",
+            "classic_subdomain_readback_before_version",
+            "beta_version_list_empty",
+            "classic_deployment_list_empty",
+            "beta_version_create_deploy_false",
+            "beta_version_list_exact",
+            "beta_version_module_readback",
+            "classic_version_readback",
+            "classic_deployment_list_still_empty",
+            "classic_deployment_create_force_false",
+            "classic_deployment_list_exact",
+            "classic_deployment_readback",
+            "beta_worker_deployed_readback",
+            "classic_subdomain_readback_after_deployment",
+            "beta_worker_cleanup_ownership_readback",
+            "beta_worker_delete_by_immutable_id",
+            "beta_worker_get_absence",
+            "beta_worker_list_absence"
+        ],
+        "steps": {
+            "beta_worker_list_name_absence": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/workers",
+                "complete_pagination_required": true,
+                "exact_generated_name_present": false
+            },
+            "beta_empty_shell_create": {
+                "method": "POST",
+                "path": "/accounts/{account_id}/workers/workers",
+                "requires_disabled_exposure": true,
+                "requires_empty_version_and_deployment_lists": true
+            },
+            "beta_empty_shell_readback": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/workers/{worker_id}",
+                "exact_returned_id_and_generated_name_required": true
+            },
+            "classic_subdomain_readback_before_version": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/scripts/{script_name}/subdomain",
+                "enabled": false,
+                "previews_enabled": false
+            },
+            "beta_version_list_empty": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/workers/{worker_id}/versions",
+                "complete_single_page_required": true,
+                "exact_count": 0
+            },
+            "classic_deployment_list_empty": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
+                "exact_count": 0
+            },
+            "beta_version_create_deploy_false": {
+                "method": "POST",
+                "path": "/accounts/{account_id}/workers/workers/{worker_id}/versions",
+                "query": {
+                    "deploy": false
+                },
+                "fixed_module_only": true,
+                "bindings": []
+            },
+            "beta_version_module_readback": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}",
+                "exact_module_and_empty_bindings_required": true
+            },
+            "beta_version_list_exact": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/workers/{worker_id}/versions",
+                "complete_single_page_required": true,
+                "exact_count": 1
+            },
+            "classic_version_readback": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/scripts/{script_name}/versions/{version_id}",
+                "exact_beta_version_id_required": true,
+                "preview_disabled_required": true
+            },
+            "classic_deployment_list_still_empty": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
+                "exact_count": 0
+            },
+            "classic_deployment_create_force_false": {
+                "method": "POST",
+                "path": "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
+                "query": {
+                    "force": false
+                },
+                "exact_version_count": 1,
+                "traffic_percentage": 100
+            },
+            "classic_deployment_readback": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/scripts/{script_name}/deployments/{deployment_id}",
+                "exact_created_deployment_and_version_required": true,
+                "force_false_required": true
+            },
+            "classic_deployment_list_exact": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
+                "exact_count": 1
+            },
+            "beta_worker_deployed_readback": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/workers/{worker_id}",
+                "exact_returned_id_and_deployed_timestamp_required": true
+            },
+            "classic_subdomain_readback_after_deployment": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/scripts/{script_name}/subdomain",
+                "enabled": false,
+                "previews_enabled": false
+            },
+            "beta_worker_cleanup_ownership_readback": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/workers/{worker_id}",
+                "exact_returned_worker_id_generated_name_and_ownership_marker_required": true,
+                "private_settings_required": true
+            },
+            "beta_worker_delete_by_immutable_id": {
+                "method": "DELETE",
+                "path": "/accounts/{account_id}/workers/workers/{worker_id}",
+                "query": {},
+                "exact_returned_worker_id_generated_name_and_ownership_marker_required": true
+            },
+            "beta_worker_get_absence": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/workers/{worker_id}",
+                "not_found_required": true
+            },
+            "beta_worker_list_absence": {
+                "method": "GET",
+                "path": "/accounts/{account_id}/workers/workers",
+                "complete_pagination_required": true,
+                "exact_id_or_name_present": false
+            }
+        }
+    },
+    "claims": {
+        "beta_classic_api_canary_passed": false,
+        "access_protected_runtime_identity_canary_passed": false,
+        "runtime_identity_observed": false,
+        "proves_only": [
+            "beta_empty_shell_creation",
+            "beta_non_deploying_version_creation",
+            "classic_version_readback",
+            "classic_single_version_deployment_without_force",
+            "exact_beta_worker_deletion_by_immutable_id",
+            "exact_worker_control_plane_absence"
+        ],
+        "does_not_prove": [
+            "d1_binding_interoperability",
+            "service_binding_interoperability",
+            "access_protected_route_behavior",
+            "runtime_version_metadata_identity",
+            "production_artifact_byte_identity",
+            "production_digest_compatibility",
+            "production_cleanup_aggregation",
+            "d1_lifecycle_evidence",
+            "d1_gate_eligibility"
+        ]
+    },
+    "production_path_blocker": {
+        "status": "unresolved",
+        "artifact_upload_interface": "classic_multipart_metadata_and_module_parts",
+        "protocol_upload_interface": "beta_json_modules",
+        "artifact_binding_digest": "bare_canonical_role_and_caller_bound_sha256",
+        "protocol_binding_digest": "sha256_prefixed_beta_binding_only_sha256",
+        "lifecycle_digest_encoding": "bare_sha256_hex",
+        "protocol_carries_artifact_digest": false,
+        "artifact_protocol_lifecycle_digest_compatible": false,
+        "isolated_canary_may_resolve_this_blocker": false,
+        "required_resolution": "one_reviewed_upload_serialization_and_one_canonical_artifact_and_binding_digest_chain"
+    },
+    "observations": [],
+    "sources": [
+        "https://developers.cloudflare.com/api/resources/workers/subresources/beta/subresources/workers/methods/create/",
+        "https://developers.cloudflare.com/api/resources/workers/subresources/beta/subresources/workers/subresources/versions/methods/create/",
+        "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/get/",
+        "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/deployments/",
+        "https://developers.cloudflare.com/api/resources/workers/subresources/beta/subresources/workers/methods/delete/"
+    ]
+}

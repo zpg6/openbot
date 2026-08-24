@@ -1,7 +1,10 @@
 import { readFile } from "node:fs/promises";
 
+import { checkCloudflareWorkerApiCanaryFixture } from "./check-cloudflare-worker-api-canary.mjs";
+
 const fixturePath = "docs/fixtures/d1-concurrency-probe.json";
 const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
+const workerApiCanaryFixture = JSON.parse(await readFile("docs/fixtures/cloudflare-worker-api-canary.json", "utf8"));
 const item2Fixture = JSON.parse(await readFile("docs/fixtures/item-2-gates.json", "utf8"));
 const errors = [];
 const check = (condition, message) => {
@@ -499,16 +502,24 @@ check(
     "Worker mutation lifecycle must remain local, blocked, and non-authoritative"
 );
 check(
-    workerMutationLifecycle.upload_safety_blocker === "beta_worker_api_interoperability_canary_missing" &&
+    workerMutationLifecycle.upload_safety_blocker ===
+        "production_artifact_protocol_lifecycle_digest_compatibility_and_opaque_evidence_missing" &&
         workerMutationLifecycle.private_shell_protocol_contract_implemented === true &&
-        workerMutationLifecycle.beta_worker_api_interoperability_canary_passed === false &&
+        workerMutationLifecycle.isolated_worker_api_canary_fixture ===
+            "docs/fixtures/cloudflare-worker-api-canary.json" &&
+        workerMutationLifecycle.beta_classic_api_canary_passed === false &&
+        workerMutationLifecycle.access_protected_runtime_identity_canary_passed === false &&
+        workerMutationLifecycle.isolated_canary_uses_fixed_inert_no_binding_module === true &&
+        workerMutationLifecycle.isolated_canary_may_advance_lifecycle_or_gates === false &&
+        workerMutationLifecycle.production_artifact_protocol_lifecycle_digest_compatible === false &&
+        workerMutationLifecycle.isolated_canary_may_resolve_production_digest_blocker === false &&
         workerMutationLifecycle.first_version_preview_safety_resolved === false &&
         workerMutationLifecycle.private_shell_state ===
-            "blocked_pending_beta_interoperability_canary_and_opaque_evidence" &&
+            "blocked_pending_beta_classic_canary_digest_compatibility_and_opaque_evidence" &&
         workerMutationLifecycle.private_shell_adapter_implemented === false &&
         workerMutationLifecycle.upload_state === "blocked_pending_opaque_private_shell_evidence" &&
         workerMutationLifecycle.deployment_state === "blocked_pending_opaque_version_evidence",
-    "first-Version preview safety remains blocked pending the beta interoperability canary and opaque evidence"
+    "production Worker upload remains blocked after the isolated API canary until digest compatibility and opaque evidence exist"
 );
 check(
     JSON.stringify(workerMutationLifecycle.roles_in_order) === JSON.stringify(["sink", "writer_a", "writer_b"]) &&
@@ -1158,6 +1169,10 @@ check(cleanup.ambiguous_delete_result === "manual_required", "ambiguous deletion
 check(cleanup.unknown_in_flight_result === "manual_required", "unknown in-flight work must require manual work");
 check(cleanup.failed_absence_check === "manual_required", "failed absence checks must require manual work");
 check(cleanup.request_success_alone_proves_cleanup === false, "a delete response alone cannot prove cleanup");
+
+for (const error of checkCloudflareWorkerApiCanaryFixture(workerApiCanaryFixture)) {
+    errors.push(`cloudflare-worker-api-canary.json: ${error}`);
+}
 
 const serialized = JSON.stringify(fixture);
 for (const forbidden of ['"status":"passed"', '"may_promote_gate":true', '"fixture_is_evidence":true']) {

@@ -6,6 +6,7 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 
 ### Added
 
+- An operator-only Cloudflare Worker API interoperability canary and FD-only command. It uses one fixed inert no-binding module, per-execution ownership, fresh pre-delete ownership readback, checkout-local replay resistance, nonzero uncertainty exits, and bounded signal cleanup. Its checked-in result remains `not_run`, it grants no lifecycle or gate authority, and the production artifact/protocol/lifecycle digest mismatch remains a separate blocker.
 - A pure Cloudflare Worker provisioning protocol for private beta shells, non-deploying Versions, classic readback, 100 percent Deployment, runtime identity, and no-force cleanup. It exposes no Cloudflare-assigned ID, API token, HMAC key, or module bytes, performs no network call, and remains blocked on a disposable-account interoperability canary.
 - Role-specific D1 probe Worker HTTP entrypoints with direct Access checks, strict runtime-version observations, first-primary sink readback, and a lifecycle contract that separates Version upload from 100% Deployment. Remote upload remains blocked until preview-safety and opaque evidence consumers exist.
 - A private pure compiler for upload-ineligible D1 probe Worker artifact candidates. It binds exact module and canonical direct-API multipart metadata digests for the sink and both writers, while granting no upload, deployment, lifecycle, or gate authority.
