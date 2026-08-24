@@ -93,6 +93,25 @@ check(
     "D1 preflight verification must compare canonical plan bytes"
 );
 check(
+    preflightVerification.canonical_https_dns_origin_required === true &&
+        preflightVerification.origin_path_port_credentials_query_and_fragment_forbidden === true,
+    "D1 preflight must require one canonical HTTPS DNS origin"
+);
+check(
+    preflightVerification.exact_routes_derived_under_fixed_prefix === true &&
+        preflightVerification.route_target_script_and_method_bound === true,
+    "D1 preflight must derive exact role-bound routes"
+);
+check(
+    preflightVerification.single_access_application_path_derived === true &&
+        preflightVerification.origin_access_path_and_route_patterns_hmac_committed === true,
+    "D1 preflight must derive and commit the narrow Access path and route patterns"
+);
+check(
+    preflightVerification.deployment_must_verify_zone_and_proxied_dns === true,
+    "D1 deployment must verify the planned origin against the zone and proxied DNS"
+);
+check(
     preflightVerification.verified_context_is_opaque_and_in_memory_only === true,
     "the verified D1 preflight context must remain opaque and in memory"
 );
@@ -188,6 +207,16 @@ check(
 check(
     deployment.public_exposure?.writer_routes === "temporary_access_protected_exact_post_only",
     "writer routes must be temporary, Access protected, and exact POST only"
+);
+check(
+    deployment.public_exposure?.fixed_route_path_prefix === "/_openbot-d1-probe/" &&
+        deployment.public_exposure?.route_patterns_end_with_wildcard === false &&
+        deployment.public_exposure?.query_strings_match_worker_routes === false,
+    "Worker routes must use exact HTTPS paths that do not match query strings"
+);
+check(
+    deployment.public_exposure?.access_application_path === "<probe-hostname>/_openbot-d1-probe/*",
+    "the Access application must cover only the shared probe path"
 );
 check(deployment.public_exposure?.request_body_accepts_sql === false, "trigger requests must not accept SQL");
 check(

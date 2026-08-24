@@ -10,6 +10,7 @@ import {
     D1_PROBE_CREATE_STEPS_V1,
     D1_PROBE_RESOURCE_KINDS_V1,
     D1_PROBE_RESOURCE_PREFIX_V1,
+    D1_PROBE_ROUTE_PATH_PREFIX_V1,
     D1_PROBE_WRANGLER_VERSION_V1,
     D1ProbeCommitmentKeyV1Schema,
     D1ProbePreflightPlanV1Schema,
@@ -92,6 +93,7 @@ export const compileD1ProbePreflightPlanV1 = async (
 
     const accountCommitment = await hmac(key, "openbot.identity.cloudflare_account_id.v1", request.data.account_id);
     const zoneCommitment = await hmac(key, "openbot.identity.cloudflare_zone_id.v1", request.data.zone_id);
+    const originCommitment = await hmac(key, "openbot.identity.cloudflare_probe_origin.v1", request.data.probe_origin);
     const denyListCommitment = await hmac(
         key,
         "openbot.d1-probe.operator-database-deny-list.v1",
@@ -116,12 +118,47 @@ export const compileD1ProbePreflightPlanV1 = async (
             };
         })
     );
+    const resource = (kind: (typeof D1_PROBE_RESOURCE_KINDS_V1)[number]) =>
+        resources.find(candidate => candidate.resource_kind === kind)!;
+    const routeInputs = [
+        ["writer_a_route", "writer_a_script", "POST"],
+        ["writer_b_route", "writer_b_script", "POST"],
+        ["readback_route", "sink_script", "GET"],
+    ] as const;
+    const routes = await Promise.all(
+        routeInputs.map(async ([routeKind, targetKind, method]) => {
+            const suffix = request.data.resource_suffixes[routeKind];
+            const exactUrl = `${request.data.probe_origin}${D1_PROBE_ROUTE_PATH_PREFIX_V1}/${suffix}`;
+            return {
+                resource_kind: routeKind,
+                target_script_kind: targetKind,
+                target_script_name: resource(targetKind).generated_name,
+                http_method: method,
+                exact_url: exactUrl,
+                route_pattern: exactUrl,
+                route_pattern_commitment: await hmac(
+                    key,
+                    "openbot.identity.cloudflare_worker_route_pattern.v1",
+                    exactUrl
+                ),
+            };
+        })
+    );
+    const accessApplicationDomain = `${new URL(request.data.probe_origin).hostname}${D1_PROBE_ROUTE_PATH_PREFIX_V1}/*`;
+    const accessApplicationDomainCommitment = await hmac(
+        key,
+        "openbot.identity.cloudflare_access_application_domain.v1",
+        accessApplicationDomain
+    );
     if (
         accountCommitment === null ||
         zoneCommitment === null ||
+        originCommitment === null ||
+        accessApplicationDomainCommitment === null ||
         denyListCommitment === null ||
         denyIdCommitments.some(commitment => commitment === null) ||
-        resources.some(resource => resource.generated_name_commitment === null)
+        resources.some(resource => resource.generated_name_commitment === null) ||
+        routes.some(route => route.route_pattern_commitment === null)
     ) {
         return { success: false, code: "commitment_unavailable" };
     }
@@ -136,6 +173,10 @@ export const compileD1ProbePreflightPlanV1 = async (
         wrangler_version: D1_PROBE_WRANGLER_VERSION_V1,
         account_id_commitment: accountCommitment,
         zone_id_commitment: zoneCommitment,
+        probe_origin: request.data.probe_origin,
+        probe_origin_commitment: originCommitment,
+        access_application_domain: accessApplicationDomain,
+        access_application_domain_commitment: accessApplicationDomainCommitment,
         installation_digest: request.data.installation_digest,
         environment_digest: request.data.environment_digest,
         configuration_digest: request.data.configuration_digest,
@@ -148,6 +189,14 @@ export const compileD1ProbePreflightPlanV1 = async (
             ...resource,
             generated_name_commitment: resource.generated_name_commitment as string,
         })),
+        routes: routes.map(route => ({
+            ...route,
+            route_pattern_commitment: route.route_pattern_commitment as string,
+        })) as [
+            (typeof routes)[0] & { route_pattern_commitment: string },
+            (typeof routes)[1] & { route_pattern_commitment: string },
+            (typeof routes)[2] & { route_pattern_commitment: string },
+        ],
         create_steps: [...D1_PROBE_CREATE_STEPS_V1],
         cleanup_steps: [...D1_PROBE_CLEANUP_STEPS_V1],
     };

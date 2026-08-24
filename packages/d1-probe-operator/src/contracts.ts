@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 export const D1_PROBE_RESOURCE_PREFIX_V1 = "openbot-d1-probe-";
+export const D1_PROBE_ROUTE_PATH_PREFIX_V1 = "/_openbot-d1-probe";
 export const D1_PROBE_COMPATIBILITY_DATE_V1 = "2026-08-22";
 export const D1_PROBE_WRANGLER_VERSION_V1 = "4.125.0";
 
@@ -10,6 +11,33 @@ const DatabaseIdSchema = z
     .string()
     .regex(/^(?:[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u);
 const SuffixSchema = z.string().regex(/^[a-z0-9]{16}$/u);
+const ProbeHostnamePattern =
+    /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+
+const ProbeOriginSchema = z
+    .string()
+    .min(9)
+    .max(262)
+    .superRefine((origin, context) => {
+        try {
+            const url = new URL(origin);
+            if (
+                url.protocol !== "https:" ||
+                url.username !== "" ||
+                url.password !== "" ||
+                url.port !== "" ||
+                url.pathname !== "/" ||
+                url.search !== "" ||
+                url.hash !== "" ||
+                url.origin !== origin ||
+                !ProbeHostnamePattern.test(url.hostname)
+            ) {
+                context.addIssue({ code: "custom", message: "Probe origin must be one canonical HTTPS DNS origin" });
+            }
+        } catch {
+            context.addIssue({ code: "custom", message: "Probe origin must be one canonical HTTPS DNS origin" });
+        }
+    });
 
 export const D1ProbeResourceKindV1Schema = z.enum([
     "database",
@@ -45,6 +73,7 @@ export const D1ProbePreflightRequestV1Schema = z
         kind: z.literal("d1_probe_preflight_request"),
         account_id: AccountOrZoneIdSchema,
         zone_id: AccountOrZoneIdSchema,
+        probe_origin: ProbeOriginSchema,
         installation_digest: DigestSchema,
         environment_digest: DigestSchema,
         configuration_digest: DigestSchema,
@@ -109,6 +138,24 @@ export const D1_PROBE_LIFECYCLE_STEPS_V1 = Object.freeze([...D1_PROBE_CREATE_STE
 export const D1ProbeLifecycleStepV1Schema = z.enum(D1_PROBE_LIFECYCLE_STEPS_V1);
 export type D1ProbeLifecycleStepV1 = z.infer<typeof D1ProbeLifecycleStepV1Schema>;
 
+const D1ProbePlannedRouteV1Schema = z
+    .object({
+        resource_kind: z.enum(["writer_a_route", "writer_b_route", "readback_route"]),
+        target_script_kind: z.enum(["writer_a_script", "writer_b_script", "sink_script"]),
+        target_script_name: z.string().regex(/^openbot-d1-probe-[a-z0-9]{16}$/u),
+        http_method: z.enum(["GET", "POST"]),
+        exact_url: z.string().max(512),
+        route_pattern: z.string().max(512),
+        route_pattern_commitment: DigestSchema,
+    })
+    .strict();
+
+const D1ProbePlannedRoutesV1Schema = z.tuple([
+    D1ProbePlannedRouteV1Schema,
+    D1ProbePlannedRouteV1Schema,
+    D1ProbePlannedRouteV1Schema,
+]);
+
 export const D1ProbePreflightPlanV1Schema = z
     .object({
         schema_version: z.literal(1),
@@ -121,6 +168,10 @@ export const D1ProbePreflightPlanV1Schema = z
         wrangler_version: z.literal(D1_PROBE_WRANGLER_VERSION_V1),
         account_id_commitment: DigestSchema,
         zone_id_commitment: DigestSchema,
+        probe_origin: ProbeOriginSchema,
+        probe_origin_commitment: DigestSchema,
+        access_application_domain: z.string().min(1).max(512),
+        access_application_domain_commitment: DigestSchema,
         installation_digest: DigestSchema,
         environment_digest: DigestSchema,
         configuration_digest: DigestSchema,
@@ -155,6 +206,7 @@ export const D1ProbePreflightPlanV1Schema = z
                     message: "Generated resource names must be unique",
                 }
             ),
+        routes: D1ProbePlannedRoutesV1Schema,
         create_steps: z
             .array(z.enum(D1_PROBE_CREATE_STEPS_V1))
             .length(D1_PROBE_CREATE_STEPS_V1.length)
@@ -169,7 +221,56 @@ export const D1ProbePreflightPlanV1Schema = z
             }),
         plan_digest: DigestSchema,
     })
-    .strict();
+    .strict()
+    .superRefine((plan, context) => {
+        let hostname = "";
+        try {
+            hostname = new URL(plan.probe_origin).hostname;
+        } catch {
+            context.addIssue({
+                code: "custom",
+                path: ["probe_origin"],
+                message: "Probe origin could not be resolved for route validation",
+            });
+            return;
+        }
+        if (plan.access_application_domain !== `${hostname}${D1_PROBE_ROUTE_PATH_PREFIX_V1}/*`) {
+            context.addIssue({
+                code: "custom",
+                path: ["access_application_domain"],
+                message: "Access application domain must cover only the generated probe route prefix",
+            });
+        }
+        const expected = [
+            ["writer_a_route", "writer_a_script", "POST"],
+            ["writer_b_route", "writer_b_script", "POST"],
+            ["readback_route", "sink_script", "GET"],
+        ] as const;
+        for (const [index, [resourceKind, targetScriptKind, method]] of expected.entries()) {
+            const route = plan.routes[index];
+            const routeResource = plan.resources.find(resource => resource.resource_kind === resourceKind);
+            const targetResource = plan.resources.find(resource => resource.resource_kind === targetScriptKind);
+            const suffix = routeResource?.generated_name.slice(D1_PROBE_RESOURCE_PREFIX_V1.length);
+            const exactUrl = `${plan.probe_origin}${D1_PROBE_ROUTE_PATH_PREFIX_V1}/${suffix ?? ""}`;
+            if (
+                route?.resource_kind !== resourceKind ||
+                route.target_script_kind !== targetScriptKind ||
+                route.target_script_name !== targetResource?.generated_name ||
+                route.http_method !== method ||
+                route.exact_url !== exactUrl ||
+                route.route_pattern !== exactUrl
+            ) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["routes", index],
+                    message: "Planned route must match its generated route resource and target script",
+                });
+            }
+        }
+        if (new Set(plan.routes.map(route => route.route_pattern)).size !== plan.routes.length) {
+            context.addIssue({ code: "custom", path: ["routes"], message: "Planned route patterns must be unique" });
+        }
+    });
 export type D1ProbePreflightPlanV1 = z.infer<typeof D1ProbePreflightPlanV1Schema>;
 
 export const D1ProbeLifecycleJournalV1Schema = z

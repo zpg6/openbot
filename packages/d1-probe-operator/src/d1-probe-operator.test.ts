@@ -8,6 +8,7 @@ import {
     D1_PROBE_LIFECYCLE_STEPS_V1,
     D1_PROBE_RESOURCE_KINDS_V1,
     D1ProbeLifecycleJournalV1Schema,
+    D1ProbePreflightPlanV1Schema,
     type D1ProbeLifecycleStepV1,
     type D1ProbePreflightPlanV1,
     type D1ProbeResourceKindV1,
@@ -37,6 +38,7 @@ const request = () => ({
     kind: "d1_probe_preflight_request" as const,
     account_id: "a".repeat(32),
     zone_id: "b".repeat(32),
+    probe_origin: "https://probe.example.test",
     installation_digest: hex("1"),
     environment_digest: hex("2"),
     configuration_digest: hex("3"),
@@ -144,12 +146,33 @@ describe("D1 probe operator preflight", () => {
         expect(new Set(first.resources.map(resource => resource.generated_name)).size).toBe(
             D1_PROBE_RESOURCE_KINDS_V1.length
         );
+        expect(first.access_application_domain).toBe("probe.example.test/_openbot-d1-probe/*");
+        expect(first.routes).toEqual([
+            expect.objectContaining({
+                resource_kind: "writer_a_route",
+                target_script_kind: "writer_a_script",
+                http_method: "POST",
+                exact_url: `https://probe.example.test/_openbot-d1-probe/${suffixes.writer_a_route}`,
+            }),
+            expect.objectContaining({
+                resource_kind: "writer_b_route",
+                target_script_kind: "writer_b_script",
+                http_method: "POST",
+                exact_url: `https://probe.example.test/_openbot-d1-probe/${suffixes.writer_b_route}`,
+            }),
+            expect.objectContaining({
+                resource_kind: "readback_route",
+                target_script_kind: "sink_script",
+                http_method: "GET",
+                exact_url: `https://probe.example.test/_openbot-d1-probe/${suffixes.readback_route}`,
+            }),
+        ]);
         const output = JSON.stringify(first);
         expect(output).not.toContain(request().account_id);
         expect(output).not.toContain(request().zone_id);
         expect(output).not.toContain(request().operator_database_deny_list[0]);
         expect(output).not.toContain(key);
-        expect(first.plan_digest).toBe("96e139a553e6d47fe5bec2260fce8fbb0924796e17e60f7a72b445d78813f10a");
+        expect(first.plan_digest).toBe("37a357b52f35f35cf4e80dbdb7baf529a1e6e1aa8871e7b3037d268beaf9b85e");
     });
 
     it("rejects duplicate names, unsafe identifiers, noncanonical keys, and hostile input", async () => {
@@ -166,6 +189,20 @@ describe("D1 probe operator preflight", () => {
             success: false,
             code: "invalid_preflight_request",
         });
+        for (const probeOrigin of [
+            "http://probe.example.test",
+            "https://probe.example.test/path",
+            "https://probe.example.test:8443",
+            "https://127.0.0.1",
+            "https://Probe.example.test",
+        ]) {
+            expect(
+                await compileD1ProbePreflightPlanV1(
+                    { ...request(), probe_origin: probeOrigin },
+                    { hmac_key_base64url: key }
+                )
+            ).toEqual({ success: false, code: "invalid_preflight_request" });
+        }
         expect(await compileD1ProbePreflightPlanV1(request(), { hmac_key_base64url: `${key}=` })).toEqual({
             success: false,
             code: "invalid_commitment_key",
@@ -411,6 +448,20 @@ describe("D1 probe verified preflight", () => {
                 { hmac_key_base64url: key }
             )
         ).toEqual({ success: false, code: "preflight_plan_mismatch" });
+        expect(
+            await verifyD1ProbePreflightV1(
+                request(),
+                {
+                    ...compiledPlan,
+                    routes: [
+                        { ...compiledPlan.routes[0], route_pattern_commitment: hex("f") },
+                        compiledPlan.routes[1],
+                        compiledPlan.routes[2],
+                    ],
+                },
+                { hmac_key_base64url: key }
+            )
+        ).toEqual({ success: false, code: "preflight_plan_mismatch" });
 
         const substitutedRequest = request();
         substitutedRequest.account_id = "c".repeat(32);
@@ -449,6 +500,26 @@ describe("D1 probe verified preflight", () => {
             success: false,
             code: "invalid_preflight_plan",
         });
+        expect(() => D1ProbePreflightPlanV1Schema.safeParse({ ...compiledPlan, probe_origin: "://" })).not.toThrow();
+        expect(D1ProbePreflightPlanV1Schema.safeParse({ ...compiledPlan, probe_origin: "://" }).success).toBe(false);
+        expect(
+            D1ProbePreflightPlanV1Schema.safeParse({
+                ...compiledPlan,
+                access_application_domain: "probe.example.test/*",
+            }).success
+        ).toBe(false);
+        for (const changedRoute of [
+            { ...compiledPlan.routes[0], target_script_name: compiledPlan.routes[1].target_script_name },
+            { ...compiledPlan.routes[0], http_method: "GET" },
+            { ...compiledPlan.routes[0], exact_url: `${compiledPlan.routes[0].exact_url}/broader` },
+        ]) {
+            expect(
+                D1ProbePreflightPlanV1Schema.safeParse({
+                    ...compiledPlan,
+                    routes: [changedRoute, compiledPlan.routes[1], compiledPlan.routes[2]],
+                }).success
+            ).toBe(false);
+        }
         expect(await verifyD1ProbePreflightV1(request(), compiledPlan, hostile)).toEqual({
             success: false,
             code: "invalid_commitment_key",
