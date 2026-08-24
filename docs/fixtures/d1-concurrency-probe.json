@@ -134,6 +134,23 @@
             "sandbox_capacity": 5
         },
         "parent_ipc_go_release_required": true,
+        "writer_network_transport": {
+            "package": "packages/d1-probe-driver",
+            "private_node_only": true,
+            "cli_registered": false,
+            "credential_loader_implemented": false,
+            "one_request_per_invocation": true,
+            "automatic_retries": 0,
+            "redirect_policy": "error",
+            "standard_access_header_pair": true,
+            "request_timeout_max_ms": 15000,
+            "timeout_covers_response_body": true,
+            "response_body_limit_bytes": 65536,
+            "canonical_response_required": true,
+            "response_request_digest_and_writer_role_required": true,
+            "no_store_response_headers_required": true,
+            "ambiguous_result": "outcome_unknown"
+        },
         "one_go_receipt_per_child_required": true,
         "one_network_request_per_child_required": true,
         "readiness_identity_set_matches_child_set": true,

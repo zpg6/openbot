@@ -67,14 +67,17 @@ export type {
 
 export {
     D1_PROBE_GATEWAY_TRIAL_HTTP_BODY_LIMIT_BYTES_V1,
+    D1ProbeAccessServiceTokenClientIdV1Schema,
     D1ProbeGatewayTrialHttpResponseV1Schema,
     D1ProbeHttpErrorCodeV1Schema,
     D1ProbeHttpErrorV1Schema,
     D1ProbeWriterHttpConfigV1Schema,
+    D1ProbeWriterTriggerUrlV1Schema,
     canonicalD1ProbeGatewayTrialHttpBodyV1,
     canonicalD1ProbeGatewayTrialHttpResponseV1,
     d1ProbeGatewayTrialHttpStatusV1,
     d1ProbeHttpErrorV1,
+    d1ProbeHttpErrorStatusV1,
     parseD1ProbeGatewayTrialHttpResponseV1,
 } from "./http.js";
 

@@ -150,6 +150,25 @@ importers:
         specifier: 'catalog:'
         version: 4.1.11(@types/node@22.19.21)
 
+  packages/d1-probe-driver:
+    dependencies:
+      '@openbot/d1-probe-rpc':
+        specifier: workspace:*
+        version: link:../d1-probe-rpc
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.19.21
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@22.19.21)
+
   packages/d1-probe-operator:
     dependencies:
       '@openbot/gate-attestation':

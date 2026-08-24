@@ -11,8 +11,8 @@ import {
 export const D1_PROBE_GATEWAY_TRIAL_HTTP_BODY_LIMIT_BYTES_V1 = 16_384 as const;
 
 const AccessAudienceSchema = z.string().regex(/^[0-9a-f]{64}$/u);
-const AccessServiceTokenClientIdSchema = z.string().regex(/^[A-Za-z0-9_-]{16,128}\.access$/u);
-const ExactHttpsUrlSchema = z
+export const D1ProbeAccessServiceTokenClientIdV1Schema = z.string().regex(/^[A-Za-z0-9_-]{16,128}\.access$/u);
+export const D1ProbeWriterTriggerUrlV1Schema = z
     .string()
     .max(2_048)
     .superRefine((value, context) => {
@@ -38,9 +38,9 @@ const ExactHttpsUrlSchema = z
 export const D1ProbeWriterHttpConfigV1Schema = z
     .object({
         schema_version: z.literal(1),
-        exact_trigger_url: ExactHttpsUrlSchema,
+        exact_trigger_url: D1ProbeWriterTriggerUrlV1Schema,
         access_audience: AccessAudienceSchema,
-        access_service_token_client_id: AccessServiceTokenClientIdSchema,
+        access_service_token_client_id: D1ProbeAccessServiceTokenClientIdV1Schema,
         writer_role: z.enum(["writer_a", "writer_b"]),
     })
     .strict();
@@ -136,6 +136,26 @@ export const d1ProbeHttpErrorV1 = (code: D1ProbeHttpErrorCodeV1): D1ProbeHttpErr
         kind: "d1_probe_http_error",
         code,
     });
+
+export const d1ProbeHttpErrorStatusV1 = (error: D1ProbeHttpErrorV1): number => {
+    switch (error.code) {
+        case "access_required":
+            return 403;
+        case "not_found":
+            return 404;
+        case "method_not_allowed":
+            return 405;
+        case "content_type_required":
+        case "content_encoding_forbidden":
+            return 415;
+        case "content_length_required":
+            return 411;
+        case "body_too_large":
+            return 413;
+        case "invalid_body":
+            return 400;
+    }
+};
 
 export const d1ProbeGatewayTrialHttpStatusV1 = (response: D1ProbeGatewayTrialResponseV1): number => {
     switch (response.status) {

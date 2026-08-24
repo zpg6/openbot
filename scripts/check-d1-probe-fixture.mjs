@@ -221,6 +221,51 @@ check(
     "the driver needs one child process per contender"
 );
 check(execution.parent_ipc_go_release_required === true, "the parent must release ready children over IPC");
+check(
+    execution.writer_network_transport?.package === "packages/d1-probe-driver",
+    "the Writer network transport package changed"
+);
+check(
+    execution.writer_network_transport?.private_node_only === true,
+    "the network transport must stay private Node code"
+);
+check(execution.writer_network_transport?.cli_registered === false, "the network transport must not expose a CLI yet");
+check(
+    execution.writer_network_transport?.credential_loader_implemented === false,
+    "the network transport must not claim a credential loader"
+);
+check(execution.writer_network_transport?.one_request_per_invocation === true, "each invocation sends one request");
+check(execution.writer_network_transport?.automatic_retries === 0, "the Writer network transport must not retry");
+check(
+    execution.writer_network_transport?.redirect_policy === "error",
+    "the Writer network transport rejects redirects"
+);
+check(
+    execution.writer_network_transport?.standard_access_header_pair === true,
+    "the Writer transport uses the standard Access service-token headers"
+);
+check(execution.writer_network_transport?.request_timeout_max_ms === 15000, "the Writer transport timeout changed");
+check(
+    execution.writer_network_transport?.timeout_covers_response_body === true,
+    "the Writer timeout must cover the full response body"
+);
+check(execution.writer_network_transport?.response_body_limit_bytes === 65536, "the Writer response cap changed");
+check(
+    execution.writer_network_transport?.canonical_response_required === true,
+    "the Writer response must be canonical JSON"
+);
+check(
+    execution.writer_network_transport?.response_request_digest_and_writer_role_required === true,
+    "the Writer response must bind the request digest and role"
+);
+check(
+    execution.writer_network_transport?.no_store_response_headers_required === true,
+    "the Writer response must carry no-store headers"
+);
+check(
+    execution.writer_network_transport?.ambiguous_result === "outcome_unknown",
+    "ambiguous Writer transport results stay unknown"
+);
 check(execution.one_go_receipt_per_child_required === true, "every child needs one GO receipt");
 check(execution.one_network_request_per_child_required === true, "every child sends one network request");
 check(execution.readiness_identity_set_matches_child_set === true, "readiness rows must bind every child");
