@@ -10,6 +10,7 @@
         "test": "vitest run --root ../.. packages/d1-probe-operator/src"
     },
     "dependencies": {
+        "@openbot/d1-probe-rpc": "workspace:*",
         "@openbot/gate-attestation": "workspace:*",
         "zod": "catalog:"
     },

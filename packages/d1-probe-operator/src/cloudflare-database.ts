@@ -642,6 +642,13 @@ const isEmergencyCreateCleanup = (journal: D1ProbeLifecycleJournalV1): boolean =
     journal.completed_steps.length === 0 &&
     journal.manual_required?.failed_step === "database_created";
 
+const isEmergencyBootstrapCleanup = (journal: D1ProbeLifecycleJournalV1): boolean =>
+    journal.state === "manual_required" &&
+    journal.completed_steps.length === 1 &&
+    journal.completed_steps[0] === "database_created" &&
+    journal.manual_required?.failed_step === "sink_deployed" &&
+    journal.manual_required.reason === "unexpected_platform_result";
+
 export const deleteD1ProbeDatabaseV1 = async (
     createdDatabase: CreatedD1ProbeDatabaseV1,
     journalInput: unknown,
@@ -683,10 +690,19 @@ export const deleteD1ProbeDatabaseV1 = async (
     }
     const normalCleanup = isD1ProbeLifecycleJournalReadyForStepV1(preflightContext.plan, journal, "database_deleted");
     const emergencyCleanup = isEmergencyCreateCleanup(journal);
-    if (!normalCleanup && !emergencyCleanup) return { success: false, code: "invalid_lifecycle_journal" };
+    const bootstrapCleanup = isEmergencyBootstrapCleanup(journal);
+    if (!normalCleanup && !emergencyCleanup && !bootstrapCleanup) {
+        return { success: false, code: "invalid_lifecycle_journal" };
+    }
+    const bootstrapCleanupAuthorized = bootstrapCleanup
+        ? await import("./cloudflare-database-bootstrap.js").then(module =>
+              module.isD1ProbeDatabaseBootstrapCleanupAuthorizedV1(createdDatabase, journal)
+          )
+        : false;
     if (
-        emergencyCleanup &&
-        emergencyCleanupBindings.get(createdDatabase) !== journal.manual_required?.observation_digest
+        (emergencyCleanup &&
+            emergencyCleanupBindings.get(createdDatabase) !== journal.manual_required?.observation_digest) ||
+        (bootstrapCleanup && !bootstrapCleanupAuthorized)
     ) {
         return { success: false, code: "resource_binding_mismatch" };
     }
@@ -724,7 +740,7 @@ export const deleteD1ProbeDatabaseV1 = async (
     const createdObservation = journal.observations.find(observation => observation.step === "database_created");
     if (
         plannedDatabase === undefined ||
-        (normalCleanup &&
+        ((normalCleanup || bootstrapCleanup) &&
             (createdContext.database_name !== plannedDatabase.generated_name ||
                 databaseNameCommitment !== plannedDatabase.generated_name_commitment ||
                 createdObservation?.resource_id_commitment !== databaseIdCommitment ||
@@ -892,7 +908,8 @@ export const observeD1ProbeDatabaseAbsenceV1 = async (
     const reconcilingDelete =
         journal.state === "manual_required" && journal.manual_required?.failed_step === "database_deleted";
     const reconcilingCreate = isEmergencyCreateCleanup(journal);
-    if (!readyForFinalAbsence && !reconcilingDelete && !reconcilingCreate) {
+    const reconcilingBootstrap = isEmergencyBootstrapCleanup(journal);
+    if (!readyForFinalAbsence && !reconcilingDelete && !reconcilingCreate && !reconcilingBootstrap) {
         return { success: false, code: "invalid_lifecycle_journal" };
     }
     if (
@@ -900,6 +917,12 @@ export const observeD1ProbeDatabaseAbsenceV1 = async (
         emergencyCleanupBindings.get(createdDatabase) !== journal.manual_required?.observation_digest
     ) {
         return { success: false, code: "resource_binding_mismatch" };
+    }
+    if (reconcilingBootstrap) {
+        const authorized = await import("./cloudflare-database-bootstrap.js").then(module =>
+            module.isD1ProbeDatabaseBootstrapCleanupAuthorizedV1(createdDatabase, journal)
+        );
+        if (!authorized) return { success: false, code: "resource_binding_mismatch" };
     }
     const deletionOutcome = databaseDeleteOutcomes.get(createdDatabase);
     if (deletionOutcome === undefined) return { success: false, code: "database_delete_not_requested" };

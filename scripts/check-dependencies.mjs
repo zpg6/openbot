@@ -71,6 +71,8 @@ function checkManifest(file, manifest, catalog) {
             if (
                 name === "@openbot/d1-probe-rpc" &&
                 !file.startsWith("packages/d1-probe-rpc/") &&
+                !file.startsWith("packages/d1-probes/") &&
+                !file.startsWith("packages/d1-probe-operator/") &&
                 !file.startsWith("packages/d1-probe-driver/") &&
                 !file.startsWith("apps/d1-probe-sink/") &&
                 !file.startsWith("apps/d1-probe-writer/")
@@ -141,6 +143,7 @@ function checkD1ProbeOperatorNetworkBoundary(file, content, imports) {
     );
     const networkCall = /(?:\bfetch|\.fetch)\s*\(/u.test(content);
     const isReviewedAdapter = [
+        "packages/d1-probe-operator/src/cloudflare-database-bootstrap.ts",
         "packages/d1-probe-operator/src/cloudflare-database.ts",
         "packages/d1-probe-operator/src/cloudflare-route-reader.ts",
     ].includes(file);
@@ -150,8 +153,27 @@ function checkD1ProbeOperatorNetworkBoundary(file, content, imports) {
 }
 
 function checkD1ProbeRpcImportBoundary(file, specifier) {
+    const resolvedImport = specifier.startsWith(".") ? path.resolve(path.dirname(file), specifier) : null;
+    const schemaRoot = path.resolve("packages/d1-probe-rpc/src/schema");
+    const schemaImport =
+        specifier === "@openbot/d1-probe-rpc/schema" ||
+        specifier.startsWith("@openbot/d1-probe-rpc/schema/") ||
+        resolvedImport === schemaRoot ||
+        resolvedImport === `${schemaRoot}.js` ||
+        resolvedImport === `${schemaRoot}.ts`;
+    if (schemaImport) {
+        if (
+            file.startsWith("packages/d1-probes/") ||
+            file.startsWith("packages/d1-probe-operator/") ||
+            file === "packages/d1-probe-rpc/src/schema.test.ts"
+        ) {
+            return;
+        }
+        errors.push(`${file}: disposable D1 schema may enter only probe execution or operator code`);
+        return;
+    }
+    if (file.startsWith("packages/d1-probe-rpc/")) return;
     if (
-        file.startsWith("packages/d1-probe-rpc/") ||
         file.startsWith("packages/d1-probe-driver/") ||
         file.startsWith("apps/d1-probe-sink/") ||
         file.startsWith("apps/d1-probe-writer/") ||
@@ -161,7 +183,6 @@ function checkD1ProbeRpcImportBoundary(file, specifier) {
         return;
     }
     const packageImport = specifier === "@openbot/d1-probe-rpc" || specifier.startsWith("@openbot/d1-probe-rpc/");
-    const resolvedImport = specifier.startsWith(".") ? path.resolve(path.dirname(file), specifier) : null;
     const rpcRoot = path.resolve("packages/d1-probe-rpc");
     const resolvesIntoRpc =
         resolvedImport !== null && (resolvedImport === rpcRoot || resolvedImport.startsWith(`${rpcRoot}${path.sep}`));
@@ -320,6 +341,28 @@ if (errors.length !== beforeRpcImportSelfTest + 1) {
     errors.push("D1 probe RPC import-boundary self-test did not reject a product import");
 }
 errors.splice(beforeRpcImportSelfTest, 1);
+
+const beforeRpcSchemaAllowedSelfTest = errors.length;
+checkD1ProbeRpcImportBoundary("packages/d1-probes/<self-test>.ts", "@openbot/d1-probe-rpc/schema");
+checkD1ProbeRpcImportBoundary("packages/d1-probe-operator/<self-test>.ts", "@openbot/d1-probe-rpc/schema");
+if (errors.length !== beforeRpcSchemaAllowedSelfTest) {
+    errors.push("D1 probe schema import-boundary self-test rejected an allowed schema consumer");
+}
+
+const beforeRpcSchemaDeniedSelfTest = errors.length;
+checkD1ProbeRpcImportBoundary("packages/d1-probe-driver/<self-test>.ts", "@openbot/d1-probe-rpc/schema");
+checkD1ProbeRpcImportBoundary("packages/d1-probe-rpc/src/<self-test>.ts", "./schema.js");
+if (errors.length !== beforeRpcSchemaDeniedSelfTest + 2) {
+    errors.push("D1 probe schema import-boundary self-test did not reject an ordinary RPC consumer");
+}
+errors.splice(beforeRpcSchemaDeniedSelfTest, 2);
+
+const beforeRpcRootDeniedSelfTest = errors.length;
+checkD1ProbeRpcImportBoundary("packages/d1-probes/<self-test>.ts", "@openbot/d1-probe-rpc");
+if (errors.length !== beforeRpcRootDeniedSelfTest + 1) {
+    errors.push("D1 probe RPC import-boundary self-test did not restrict probe execution to the schema subpath");
+}
+errors.splice(beforeRpcRootDeniedSelfTest, 1);
 
 const beforeDriverManifestSelfTest = errors.length;
 checkManifest(

@@ -137,6 +137,7 @@ export const advanceD1ProbeLifecycleJournalV1 = (
               | "invalid_lifecycle_event"
               | "manual_review_required"
               | "unexpected_lifecycle_step"
+              | "evidence_required"
               | "resource_binding_mismatch"
               | "production_database_denied";
       } => {
@@ -185,6 +186,9 @@ export const advanceD1ProbeLifecycleJournalV1 = (
     }
     const expectedStep = D1_PROBE_LIFECYCLE_STEPS_V1[journal.completed_steps.length];
     if (step.data !== expectedStep) return { success: false, code: "unexpected_lifecycle_step" };
+    if (step.data === "all_resource_absence_confirmed") {
+        return { success: false, code: "evidence_required" };
+    }
     const expectedResource = resourceByStep[step.data as keyof typeof resourceByStep] ?? null;
     if (
         resourceKind.data !== expectedResource ||

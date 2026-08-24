@@ -8,5 +8,6 @@
         "types": ["@cloudflare/workers-types"]
     },
     "include": ["src/**/*.ts"],
-    "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"]
+    "exclude": ["src/**/*.spec.ts", "src/**/*.test.ts"],
+    "references": [{ "path": "../d1-probe-rpc" }]
 }

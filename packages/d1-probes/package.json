@@ -13,6 +13,9 @@
         "typecheck": "tsc -b --pretty false && tsc --project tsconfig.test.json --noEmit --pretty false",
         "test": "vitest run --root ../.. packages/d1-probes/src/scope.node.test.ts && vitest run --config vitest.config.ts"
     },
+    "dependencies": {
+        "@openbot/d1-probe-rpc": "workspace:*"
+    },
     "devDependencies": {
         "@cloudflare/vitest-plugin": "catalog:",
         "@cloudflare/workers-types": "catalog:",

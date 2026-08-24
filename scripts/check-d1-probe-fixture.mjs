@@ -250,12 +250,46 @@ check(
     "D1 create results must remain bound, opaque, and non-authoritative"
 );
 check(
+    deployment.database?.schema_contract_subpath === "@openbot/d1-probe-rpc/schema" &&
+        deployment.database?.schema_digest ===
+            "sha256:af03a7328447a2a254ce93ea6d66f912399645e610efe1422380c2f55e1aadad" &&
+        deployment.database?.schema_statement_count === 30 &&
+        deployment.database?.schema_table_count === 28 &&
+        deployment.database?.schema_trigger_count === 2,
+    "the disposable D1 schema contract or digest changed"
+);
+check(
+    deployment.database?.bootstrap_adapter_implemented === true &&
+        deployment.database?.bootstrap_operator_command_registered === false &&
+        deployment.database?.bootstrap_api_endpoint === "POST /accounts/{account_id}/d1/database/{database_id}/query" &&
+        deployment.database?.bootstrap_exact_database_created_prefix_required === true &&
+        deployment.database?.bootstrap_attempt_one_use === true &&
+        deployment.database?.bootstrap_mutation_retry === false &&
+        deployment.database?.bootstrap_readback_request_count === 3 &&
+        deployment.database?.bootstrap_redirects_followed === false &&
+        deployment.database?.bootstrap_response_limit_bytes === 262144 &&
+        deployment.database?.bootstrap_total_timeout_ms === 20000,
+    "D1 bootstrap transport or lifecycle bounds changed"
+);
+check(
+    deployment.database?.bootstrap_foreign_keys_readback === 1 &&
+        deployment.database?.bootstrap_empty_probe_namespace_precheck_required === true &&
+        deployment.database?.bootstrap_exact_schema_readback_required === true &&
+        deployment.database?.bootstrap_rollback_canary_required === true &&
+        deployment.database?.bootstrap_success_mints_opaque_context === true &&
+        deployment.database?.bootstrap_advances_lifecycle === false &&
+        deployment.database?.bootstrap_ambiguous_response === "manual_required_with_exact_cleanup_target" &&
+        deployment.database?.bootstrap_eligible_for_attestation === false &&
+        deployment.database?.bootstrap_authoritative === false,
+    "D1 bootstrap evidence cannot advance lifecycle or claim gate authority"
+);
+check(
     deployment.database?.delete_adapter_implemented === true &&
         deployment.database?.delete_operator_command_registered === false &&
         deployment.database?.delete_api_endpoint === "DELETE /accounts/{account_id}/d1/database/{database_id}" &&
         deployment.database?.delete_target_source === "opaque_created_database_context" &&
         deployment.database?.delete_normal_journal_step === "database_deleted" &&
-        deployment.database?.delete_emergency_journal === "exact_bound_database_create_failure_only" &&
+        deployment.database?.delete_emergency_journal === "exact_bound_database_create_or_bootstrap_failure_only" &&
         deployment.database?.delete_plan_hmac_id_and_name_reverified === true &&
         deployment.database?.delete_request_one_use === true,
     "D1 deletion must bind the exact created target, plan, journal, and one-use request"
@@ -319,6 +353,9 @@ check(
         deployment.database?.absence_exact_target_and_journal_match_required === true &&
         deployment.database?.absence_token_one_use_enforced === false &&
         deployment.database?.absence_future_aggregate_consumer_required === true &&
+        deployment.database?.generic_final_absence_advance_allowed === false &&
+        deployment.database?.untrusted_terminal_journal_parse_allowed === false &&
+        deployment.database?.final_absence_requires_opaque_aggregate === true &&
         deployment.database?.absence_independent_proof === false &&
         deployment.database?.absence_cleanup_confirmed === false &&
         deployment.database?.absence_lifecycle_advanced === false &&

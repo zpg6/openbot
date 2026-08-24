@@ -353,6 +353,16 @@ export const D1ProbeLifecycleJournalV1Schema = z
             });
         }
         const completedLength = journal.completed_steps.length;
+        if (
+            journal.state === "cleanup_confirmed" ||
+            journal.completed_steps.includes("all_resource_absence_confirmed")
+        ) {
+            context.addIssue({
+                code: "custom",
+                path: ["state"],
+                message: "Final cleanup requires the opaque all-resource evidence consumer",
+            });
+        }
         const expectedState =
             completedLength === 0
                 ? "planned"

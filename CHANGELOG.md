@@ -32,3 +32,5 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 - An unwired one-use D1 deletion adapter that rechecks the opaque created target and lifecycle binding, makes ambiguous responses terminal, and records Cloudflare acknowledgement without claiming verified absence.
 - An unwired D1 absence read that checks bounded Cloudflare list pagination for the exact created ID and name, while leaving final cleanup confirmation and gate authority unavailable.
 - An opaque D1 database-absence context that binds the exact created target and lifecycle journal. Forged or copied objects cannot satisfy the future cleanup matcher.
+- Final D1 cleanup now rejects shape-only lifecycle events until the future opaque all-resource evidence consumer exists.
+- One pinned disposable D1 schema contract now feeds both local workerd tests and the unwired Cloudflare bootstrap adapter. The adapter verifies foreign keys, exact schema readback, and rollback before minting opaque initialized-database evidence.

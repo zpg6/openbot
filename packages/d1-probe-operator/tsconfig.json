@@ -9,5 +9,5 @@
         "types": ["node", "vitest"]
     },
     "include": ["src/**/*.ts"],
-    "references": [{ "path": "../gate-attestation" }]
+    "references": [{ "path": "../d1-probe-rpc" }, { "path": "../gate-attestation" }]
 }

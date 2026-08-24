@@ -446,13 +446,13 @@ describe("D1 probe operator preflight", () => {
 });
 
 describe("D1 probe resource lifecycle", () => {
-    it("accepts only the exact provision and cleanup order with matching resource commitments", async () => {
+    it("accepts the exact lifecycle prefix and protects final cleanup behind evidence", async () => {
         const compiledPlan = await plan();
         const created = createD1ProbeLifecycleJournalV1(compiledPlan);
         expect(created.success).toBe(true);
         if (!created.success) return;
         let journal = created.journal;
-        for (const [index, step] of D1_PROBE_LIFECYCLE_STEPS_V1.entries()) {
+        for (const [index, step] of D1_PROBE_LIFECYCLE_STEPS_V1.slice(0, -1).entries()) {
             const result = advanceD1ProbeLifecycleJournalV1(
                 compiledPlan,
                 journal,
@@ -463,12 +463,32 @@ describe("D1 probe resource lifecycle", () => {
             journal = result.journal;
             if (index + 1 === D1_PROBE_CREATE_STEPS_V1.length) expect(journal.state).toBe("ready");
         }
-        expect(journal.state).toBe("cleanup_confirmed");
-        expect(journal.completed_steps).toEqual(D1_PROBE_LIFECYCLE_STEPS_V1);
-        expect(markD1ProbeLifecycleAmbiguousV1(compiledPlan, journal, {})).toEqual({
-            success: false,
-            code: "terminal_lifecycle_state",
-        });
+        expect(journal.state).toBe("cleaning_up");
+        expect(journal.completed_steps).toEqual(D1_PROBE_LIFECYCLE_STEPS_V1.slice(0, -1));
+        expect(
+            advanceD1ProbeLifecycleJournalV1(
+                compiledPlan,
+                journal,
+                eventForStep(compiledPlan, "all_resource_absence_confirmed", D1_PROBE_LIFECYCLE_STEPS_V1.length - 1)
+            )
+        ).toEqual({ success: false, code: "evidence_required" });
+        expect(
+            D1ProbeLifecycleJournalV1Schema.safeParse({
+                ...journal,
+                state: "cleanup_confirmed",
+                completed_steps: D1_PROBE_LIFECYCLE_STEPS_V1,
+                observations: [
+                    ...journal.observations,
+                    {
+                        step: "all_resource_absence_confirmed",
+                        observation_digest: hex("f"),
+                        resource_kind: null,
+                        resource_name_commitment: null,
+                        resource_id_commitment: null,
+                    },
+                ],
+            }).success
+        ).toBe(false);
     });
 
     it("denies skipped steps, repeated steps, and deletion under a substituted resource ID", async () => {
@@ -487,7 +507,7 @@ describe("D1 probe resource lifecycle", () => {
         });
 
         let journal = created.journal;
-        for (const [index, step] of D1_PROBE_LIFECYCLE_STEPS_V1.entries()) {
+        for (const [index, step] of D1_PROBE_LIFECYCLE_STEPS_V1.slice(0, -1).entries()) {
             if (step === "database_deleted") {
                 expect(
                     advanceD1ProbeLifecycleJournalV1(
