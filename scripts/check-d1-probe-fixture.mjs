@@ -304,6 +304,21 @@ check(
 check(
     deployment.database?.absence_exact_id_or_name_present === "database_still_present" &&
         deployment.database?.absence_success_status === "control_plane_absence_observed" &&
+        deployment.database?.absence_opaque_context_minted === true &&
+        same(deployment.database?.absence_context_binding_fields, [
+            "created_database_object_identity",
+            "plan_digest",
+            "journal_digest",
+            "database_id_commitment",
+            "database_name_commitment",
+            "deletion_outcome",
+            "observation_digest",
+        ]) &&
+        deployment.database?.absence_context_object_frozen === true &&
+        deployment.database?.absence_forged_or_serialized_copy_resolves === false &&
+        deployment.database?.absence_exact_target_and_journal_match_required === true &&
+        deployment.database?.absence_token_one_use_enforced === false &&
+        deployment.database?.absence_future_aggregate_consumer_required === true &&
         deployment.database?.absence_independent_proof === false &&
         deployment.database?.absence_cleanup_confirmed === false &&
         deployment.database?.absence_lifecycle_advanced === false &&
@@ -311,7 +326,7 @@ check(
         deployment.database?.absence_raw_database_id_in_output === false &&
         deployment.database?.absence_eligible_for_attestation === false &&
         deployment.database?.absence_authoritative === false,
-    "database-list absence cannot finish cleanup or claim independent proof"
+    "database-list absence must remain opaque and cannot finish cleanup or claim independent proof"
 );
 check(deployment.database?.same_exact_database_id_for_all_workers === true, "all Workers must bind one exact D1 ID");
 check(deployment.database?.exact_database_id_commitment_required === true, "the database ID needs a commitment");

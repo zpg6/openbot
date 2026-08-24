@@ -31,3 +31,4 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 - An unwired D1 creation adapter that requires an opaque live route observation, rechecks the HMAC-bound preflight and lifecycle journal, enables read replication, binds jurisdiction, and makes ambiguous creation terminal without exposing the returned database ID.
 - An unwired one-use D1 deletion adapter that rechecks the opaque created target and lifecycle binding, makes ambiguous responses terminal, and records Cloudflare acknowledgement without claiming verified absence.
 - An unwired D1 absence read that checks bounded Cloudflare list pagination for the exact created ID and name, while leaving final cleanup confirmation and gate authority unavailable.
+- An opaque D1 database-absence context that binds the exact created target and lifecycle journal. Forged or copied objects cannot satisfy the future cleanup matcher.

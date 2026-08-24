@@ -26,7 +26,9 @@ import {
     createD1ProbeDatabaseV1,
     deleteD1ProbeDatabaseV1,
     observeD1ProbeDatabaseAbsenceV1,
+    observedD1ProbeDatabaseAbsenceMatchesV1,
     resolveCreatedD1ProbeDatabaseV1,
+    resolveObservedD1ProbeDatabaseAbsenceV1,
 } from "./cloudflare-database.js";
 import { inspectD1ProbeRouteReadbackV1 } from "./route-precheck.js";
 import { executeD1ProbeRouteCheckV1 } from "./route-command.js";
@@ -1713,10 +1715,114 @@ describe("D1 probe Cloudflare database creation", () => {
             },
         });
         expect(fetchMock).toHaveBeenCalledTimes(1);
+        if (!result.success) throw new Error(result.code);
+        expect(Object.isFrozen(result.observed)).toBe(true);
+        const observedContext = resolveObservedD1ProbeDatabaseAbsenceV1(result.observed);
+        expect(observedContext).toMatchObject({
+            created_database: deleted.created,
+            plan_digest: deleted.compiledPlan.plan_digest,
+            journal_digest: result.observation.journal_digest,
+            deletion_outcome: "sdk_acknowledged",
+            observation_digest: result.observation.observation_digest,
+        });
+        expect(Object.isFrozen(observedContext)).toBe(true);
+        expect(
+            await observedD1ProbeDatabaseAbsenceMatchesV1(
+                result.observed,
+                deleted.created,
+                deleted.compiledPlan,
+                deleted.journal
+            )
+        ).toBe(true);
         expect(JSON.stringify(result)).not.toContain(rawDatabase.database_id);
         expect(JSON.stringify(result)).not.toContain(apiToken);
         expect(JSON.stringify(result)).not.toContain(key);
         expect(JSON.stringify(result)).not.toContain(request().account_id);
+    });
+
+    it("rejects forged, copied, target-substituted, and journal-substituted absence tokens", async () => {
+        const deleted = await acknowledgedDeletion();
+        const result = await observeD1ProbeDatabaseAbsenceV1(
+            deleted.created,
+            deleted.journal,
+            { hmac_key_base64url: key },
+            "q".repeat(32),
+            {
+                fetch: (async () => jsonResponse(cloudflareDatabaseListResponse(1, [], 0))) as typeof globalThis.fetch,
+            }
+        );
+        if (!result.success) throw new Error(result.code);
+        const forged = Object.freeze({
+            schema_version: 1 as const,
+            kind: "observed_d1_probe_database_absence" as const,
+        });
+        const copied = Object.freeze({ ...result.observed });
+        expect(resolveObservedD1ProbeDatabaseAbsenceV1(forged)).toBeNull();
+        expect(resolveObservedD1ProbeDatabaseAbsenceV1(copied)).toBeNull();
+        expect(
+            await observedD1ProbeDatabaseAbsenceMatchesV1(
+                forged,
+                deleted.created,
+                deleted.compiledPlan,
+                deleted.journal
+            )
+        ).toBe(false);
+        expect(
+            await observedD1ProbeDatabaseAbsenceMatchesV1(
+                copied,
+                deleted.created,
+                deleted.compiledPlan,
+                deleted.journal
+            )
+        ).toBe(false);
+
+        const otherTarget = await acknowledgedDeletion();
+        expect(
+            await observedD1ProbeDatabaseAbsenceMatchesV1(
+                result.observed,
+                otherTarget.created,
+                deleted.compiledPlan,
+                deleted.journal
+            )
+        ).toBe(false);
+        expect(
+            await observedD1ProbeDatabaseAbsenceMatchesV1(
+                result.observed,
+                deleted.created,
+                { ...deleted.compiledPlan, database_jurisdiction: "eu" },
+                deleted.journal
+            )
+        ).toBe(false);
+        const substitutedJournal = {
+            ...deleted.journal,
+            observations: deleted.journal.observations.map(observation =>
+                observation.step === "database_deleted" ? { ...observation, observation_digest: hex("f") } : observation
+            ),
+        };
+        expect(
+            await observedD1ProbeDatabaseAbsenceMatchesV1(
+                result.observed,
+                deleted.created,
+                deleted.compiledPlan,
+                substitutedJournal
+            )
+        ).toBe(false);
+        const hostile = new Proxy(
+            {},
+            {
+                ownKeys: () => {
+                    throw new Error("hostile journal");
+                },
+            }
+        );
+        expect(
+            await observedD1ProbeDatabaseAbsenceMatchesV1(
+                result.observed,
+                deleted.created,
+                deleted.compiledPlan,
+                hostile
+            )
+        ).toBe(false);
     });
 
     it("denies a database that remains visible by exact ID or exact name", async () => {

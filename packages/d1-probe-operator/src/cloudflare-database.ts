@@ -9,6 +9,7 @@ import {
 import {
     D1ProbeCommitmentKeyV1Schema,
     D1ProbeLifecycleJournalV1Schema,
+    D1ProbePreflightPlanV1Schema,
     type D1ProbeLifecycleJournalV1,
 } from "./contracts.js";
 import {
@@ -90,6 +91,11 @@ export interface CreatedD1ProbeDatabaseV1 {
     readonly kind: "created_d1_probe_database";
 }
 
+export interface ObservedD1ProbeDatabaseAbsenceV1 {
+    readonly schema_version: 1;
+    readonly kind: "observed_d1_probe_database_absence";
+}
+
 export interface CreatedDatabaseContextV1 {
     readonly database_id: string;
     readonly database_name: string;
@@ -97,13 +103,28 @@ export interface CreatedDatabaseContextV1 {
     readonly verified_preflight: VerifiedD1ProbePreflightV1;
 }
 
+export interface ObservedDatabaseAbsenceContextV1 {
+    readonly created_database: CreatedD1ProbeDatabaseV1;
+    readonly plan_digest: string;
+    readonly journal_digest: string;
+    readonly database_id_commitment: string;
+    readonly database_name_commitment: string;
+    readonly deletion_outcome: "sdk_acknowledged" | "outcome_unknown";
+    readonly observation_digest: string;
+}
+
 const createdDatabases = new WeakMap<CreatedD1ProbeDatabaseV1, CreatedDatabaseContextV1>();
 const deleteRequestedDatabases = new WeakSet<CreatedD1ProbeDatabaseV1>();
 const emergencyCleanupBindings = new WeakMap<CreatedD1ProbeDatabaseV1, string>();
 const databaseDeleteOutcomes = new WeakMap<CreatedD1ProbeDatabaseV1, "sdk_acknowledged" | "outcome_unknown">();
+const observedDatabaseAbsences = new WeakMap<ObservedD1ProbeDatabaseAbsenceV1, ObservedDatabaseAbsenceContextV1>();
 
 export const resolveCreatedD1ProbeDatabaseV1 = (created: CreatedD1ProbeDatabaseV1): CreatedDatabaseContextV1 | null =>
     createdDatabases.get(created) ?? null;
+
+export const resolveObservedD1ProbeDatabaseAbsenceV1 = (
+    observed: ObservedD1ProbeDatabaseAbsenceV1
+): ObservedDatabaseAbsenceContextV1 | null => observedDatabaseAbsences.get(observed) ?? null;
 
 export interface UntrustedD1ProbeDatabaseCreateObservationV1 {
     readonly schema_version: 1;
@@ -146,6 +167,7 @@ export interface UntrustedD1ProbeDatabaseAbsenceObservationV1 {
     readonly eligible_for_attestation: false;
     readonly gate_promotion_allowed: false;
     readonly plan_digest: string;
+    readonly journal_digest: string;
     readonly database_id_commitment: string;
     readonly database_name_commitment: string;
     readonly page_count: number;
@@ -349,6 +371,15 @@ const mintCreatedDatabase = (
         })
     );
     return created;
+};
+
+const mintObservedDatabaseAbsence = (context: ObservedDatabaseAbsenceContextV1) => {
+    const observed = Object.freeze({
+        schema_version: 1 as const,
+        kind: "observed_d1_probe_database_absence" as const,
+    });
+    observedDatabaseAbsences.set(observed, Object.freeze({ ...context }));
+    return observed;
 };
 
 const markManual = (
@@ -827,6 +858,7 @@ export const observeD1ProbeDatabaseAbsenceV1 = async (
 ): Promise<
     | Readonly<{
           success: true;
+          observed: ObservedD1ProbeDatabaseAbsenceV1;
           journal: D1ProbeLifecycleJournalV1;
           observation: UntrustedD1ProbeDatabaseAbsenceObservationV1;
       }>
@@ -992,8 +1024,14 @@ export const observeD1ProbeDatabaseAbsenceV1 = async (
     } finally {
         clearTimeout(timer);
     }
+    const journalDigest = await digestCanonicalJsonV1(
+        "openbot.d1-probe.database-absence-journal.v1",
+        journal as CanonicalJsonValueV1
+    );
+    if (journalDigest === null) return { success: false, code: "observation_digest_unavailable" };
     const observationDigest = await digestCanonicalJsonV1("openbot.d1-probe.database-absence-observation.v1", {
         plan_digest: preflightContext.plan.plan_digest,
+        journal_digest: journalDigest,
         database_id_commitment: databaseIdCommitment,
         database_name_commitment: databaseNameCommitment,
         deletion_outcome: deletionOutcome,
@@ -1001,8 +1039,18 @@ export const observeD1ProbeDatabaseAbsenceV1 = async (
         candidate_count: candidateCount,
     });
     if (observationDigest === null) return { success: false, code: "observation_digest_unavailable" };
+    const observed = mintObservedDatabaseAbsence({
+        created_database: createdDatabase,
+        plan_digest: preflightContext.plan.plan_digest,
+        journal_digest: journalDigest,
+        database_id_commitment: databaseIdCommitment,
+        database_name_commitment: databaseNameCommitment,
+        deletion_outcome: deletionOutcome,
+        observation_digest: observationDigest,
+    });
     return {
         success: true,
+        observed,
         journal,
         observation: Object.freeze({
             schema_version: 1,
@@ -1016,6 +1064,7 @@ export const observeD1ProbeDatabaseAbsenceV1 = async (
             eligible_for_attestation: false,
             gate_promotion_allowed: false,
             plan_digest: preflightContext.plan.plan_digest,
+            journal_digest: journalDigest,
             database_id_commitment: databaseIdCommitment,
             database_name_commitment: databaseNameCommitment,
             page_count: pageCount,
@@ -1023,4 +1072,50 @@ export const observeD1ProbeDatabaseAbsenceV1 = async (
             observation_digest: observationDigest,
         }),
     };
+};
+
+export const observedD1ProbeDatabaseAbsenceMatchesV1 = async (
+    observed: ObservedD1ProbeDatabaseAbsenceV1,
+    createdDatabase: CreatedD1ProbeDatabaseV1,
+    planInput: unknown,
+    journalInput: unknown
+): Promise<boolean> => {
+    const context = resolveObservedD1ProbeDatabaseAbsenceV1(observed);
+    if (context === null || context.created_database !== createdDatabase) return false;
+    const createdContext = resolveCreatedD1ProbeDatabaseV1(createdDatabase);
+    const preflightContext =
+        createdContext === null ? null : resolveVerifiedD1ProbePreflightV1(createdContext.verified_preflight);
+    if (
+        createdContext === null ||
+        preflightContext === null ||
+        createdContext.plan_digest !== context.plan_digest ||
+        preflightContext.plan.plan_digest !== context.plan_digest
+    ) {
+        return false;
+    }
+    let plan: ReturnType<typeof D1ProbePreflightPlanV1Schema.safeParse>;
+    let journal: ReturnType<typeof D1ProbeLifecycleJournalV1Schema.safeParse>;
+    let suppliedPlanBytes: string;
+    let verifiedPlanBytes: string;
+    try {
+        plan = D1ProbePreflightPlanV1Schema.safeParse(planInput);
+        journal = D1ProbeLifecycleJournalV1Schema.safeParse(journalInput);
+        if (!plan.success || !journal.success) return false;
+        suppliedPlanBytes = canonicalizeJsonV1(plan.data as CanonicalJsonValueV1);
+        verifiedPlanBytes = canonicalizeJsonV1(preflightContext.plan as unknown as CanonicalJsonValueV1);
+    } catch {
+        return false;
+    }
+    if (
+        suppliedPlanBytes !== verifiedPlanBytes ||
+        plan.data.plan_digest !== context.plan_digest ||
+        !isD1ProbeLifecycleJournalBoundV1(plan.data, journal.data)
+    ) {
+        return false;
+    }
+    const journalDigest = await digestCanonicalJsonV1(
+        "openbot.d1-probe.database-absence-journal.v1",
+        journal.data as CanonicalJsonValueV1
+    );
+    return journalDigest !== null && journalDigest === context.journal_digest;
 };
