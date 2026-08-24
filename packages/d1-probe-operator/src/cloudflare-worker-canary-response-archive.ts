@@ -25,8 +25,10 @@ const ARCHIVE_KEY_DOMAIN_V1 = "openbot.d1-probe.cloudflare-worker-api-canary-res
 const ARCHIVE_KEY_IDENTIFIER_DOMAIN_V1 =
     "openbot.d1-probe.cloudflare-worker-api-canary-response-preimage-key-identifier.v1";
 const ARCHIVE_RECORD_DIGEST_DOMAIN_V1 = "openbot.d1-probe.cloudflare-worker-api-canary-response-preimage-envelope.v1";
+const ARCHIVE_CONTENT_TYPE_DIGEST_DOMAIN_V1 = "openbot.d1-probe.cloudflare-worker-api-canary-response-content-type.v1";
 const MAX_RESPONSE_BYTES_V1 = 256 * 1024;
 const MAX_ENVELOPE_BYTES_V1 = 384 * 1024;
+const MAX_INVENTORY_RECORDS_V1 = 256;
 const DigestV1Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const Base64V1Schema = z.string().regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u);
 const SafeRevisionV1Schema = z.number().int().safe().nonnegative();
@@ -151,6 +153,67 @@ export type D1ProbeCloudflareWorkerCanaryResponseArchiveDenialV1 =
 export type D1ProbeCloudflareWorkerCanaryResponseArchiveResultV1 =
     | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryResponseArchiveDenialV1 }
     | { readonly success: true; readonly receipt: D1ProbeCloudflareWorkerCanaryResponseArchiveReceiptV1 };
+
+export interface D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryRecordV1 {
+    readonly schema_version: 1;
+    readonly kind: "d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory_record";
+    readonly claim_digest: string;
+    readonly journal_revision: number;
+    readonly transcript_sequence: number;
+    readonly response_status: number;
+    readonly response_digest: string;
+    readonly archive_key_identifier: string;
+    readonly plaintext_length: number;
+    readonly archive_record_digest: string;
+    readonly caller_asserted_response_content_type_digest: string | null;
+    readonly caller_asserted_response_content_encoding: "identity" | null;
+    readonly caller_asserted_response_observed_at_ms: number;
+    readonly caller_mutation_authority: false;
+    readonly cloudflare_origin_authenticated: false;
+    readonly archive_key_possession_proven: false;
+    readonly archive_decryptability_proven: false;
+    readonly effect_claim_persistence_proven: false;
+    readonly response_authenticated: false;
+    readonly authoritative: false;
+    readonly eligible_for_upload: false;
+    readonly eligible_for_attestation: false;
+    readonly lifecycle_advance_allowed: false;
+    readonly gate_promotion_allowed: false;
+}
+
+export interface D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryV1 {
+    readonly schema_version: 1;
+    readonly kind: "d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory";
+    readonly plan_digest: string;
+    readonly record_count: number;
+    readonly records: readonly D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryRecordV1[];
+    readonly cloudflare_origin_authenticated: false;
+    readonly archive_key_possession_proven: false;
+    readonly archive_decryptability_proven: false;
+    readonly effect_claim_persistence_proven: false;
+    readonly response_authenticated: false;
+    readonly authoritative: false;
+    readonly eligible_for_upload: false;
+    readonly eligible_for_attestation: false;
+    readonly lifecycle_advance_allowed: false;
+    readonly gate_promotion_allowed: false;
+}
+
+export type D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryDenialV1 =
+    | "invalid_plan_digest"
+    | "archive_not_found"
+    | "unsafe_archive_path"
+    | "unsafe_archive_permissions"
+    | "archive_io_unavailable"
+    | "archive_corrupt"
+    | "archive_unreconciled"
+    | "archive_inventory_too_large"
+    | "archive_inventory_unsafe_sequence"
+    | "archive_snapshot_unstable";
+
+export type D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryResultV1 =
+    | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryDenialV1 }
+    | { readonly success: true; readonly inventory: D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryV1 };
 
 type ArchiveRootResultV1 =
     | {
@@ -387,7 +450,8 @@ const readEnvelope = async (
     root: string,
     planDigest: string,
     claimDigest: string,
-    reconcile = true
+    reconcile = true,
+    expectedStat?: Awaited<ReturnType<typeof lstat>>
 ): Promise<
     | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryResponseArchiveDenialV1 }
     | { readonly success: true; readonly envelope: D1ProbeCloudflareWorkerCanaryEncryptedResponsePreimageV1 }
@@ -425,10 +489,36 @@ const readEnvelope = async (
             const stat = await handle.stat();
             if (!stat.isFile() || stat.nlink !== 1) return { success: false, code: "unsafe_archive_path" };
             if ((stat.mode & 0o777) !== 0o600) return { success: false, code: "unsafe_archive_permissions" };
+            if (
+                expectedStat !== undefined &&
+                (stat.dev !== expectedStat.dev ||
+                    stat.ino !== expectedStat.ino ||
+                    stat.mode !== expectedStat.mode ||
+                    stat.nlink !== expectedStat.nlink ||
+                    stat.size !== expectedStat.size ||
+                    stat.mtimeMs !== expectedStat.mtimeMs ||
+                    stat.ctimeMs !== expectedStat.ctimeMs)
+            ) {
+                return { success: false, code: "archive_unreconciled" };
+            }
             if (stat.size <= 0 || stat.size > MAX_ENVELOPE_BYTES_V1) {
                 return { success: false, code: "archive_corrupt" };
             }
             const bytes = await handle.readFile();
+            if (expectedStat !== undefined) {
+                const afterReadStat = await handle.stat();
+                if (
+                    afterReadStat.dev !== stat.dev ||
+                    afterReadStat.ino !== stat.ino ||
+                    afterReadStat.mode !== stat.mode ||
+                    afterReadStat.nlink !== stat.nlink ||
+                    afterReadStat.size !== stat.size ||
+                    afterReadStat.mtimeMs !== stat.mtimeMs ||
+                    afterReadStat.ctimeMs !== stat.ctimeMs
+                ) {
+                    return { success: false, code: "archive_unreconciled" };
+                }
+            }
             let text: string;
             let input: unknown;
             try {
@@ -595,6 +685,251 @@ export const archiveD1ProbeCloudflareWorkerCanaryResponsePreimageV1 = async (
         responseBytes?.fill(0);
     }
 };
+
+interface ArchiveSnapshotV1 {
+    readonly names: readonly string[];
+    readonly directory_identity: string;
+}
+
+const statIdentity = (stat: Awaited<ReturnType<typeof lstat>>): string =>
+    [stat.dev, stat.ino, stat.mode, stat.nlink, stat.size, stat.mtimeMs, stat.ctimeMs].join(":" as const);
+
+const readArchiveSnapshot = async (root: string): Promise<ArchiveSnapshotV1> => {
+    const before = await lstat(root);
+    const names = (await readdir(root)).sort();
+    const after = await lstat(root);
+    if (statIdentity(before) !== statIdentity(after)) throw new Error("unstable archive directory");
+    return Object.freeze({ names: Object.freeze(names), directory_identity: statIdentity(after) });
+};
+
+const sameArchiveSnapshot = (first: ArchiveSnapshotV1, second: ArchiveSnapshotV1): boolean =>
+    first.directory_identity === second.directory_identity &&
+    first.names.length === second.names.length &&
+    first.names.every((name, index) => name === second.names[index]);
+
+const inventoryReadDenial = (
+    code: D1ProbeCloudflareWorkerCanaryResponseArchiveDenialV1
+): D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryDenialV1 => {
+    switch (code) {
+        case "archive_not_found":
+        case "unsafe_archive_path":
+        case "unsafe_archive_permissions":
+        case "archive_io_unavailable":
+        case "archive_corrupt":
+        case "archive_unreconciled":
+            return code;
+        default:
+            return "archive_io_unavailable";
+    }
+};
+
+const contentTypeDigest = (contentType: string | null): string | null =>
+    contentType === null
+        ? null
+        : createHash("sha256")
+              .update(ARCHIVE_CONTENT_TYPE_DIGEST_DOMAIN_V1, "utf8")
+              .update("\0", "utf8")
+              .update(contentType, "utf8")
+              .digest("hex");
+
+const inventoryRecordFor = (
+    envelope: D1ProbeCloudflareWorkerCanaryEncryptedResponsePreimageV1
+): D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryRecordV1 =>
+    Object.freeze({
+        schema_version: 1,
+        kind: "d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory_record",
+        claim_digest: envelope.claim_digest,
+        journal_revision: envelope.journal_revision,
+        transcript_sequence: envelope.transcript_sequence,
+        response_status: envelope.response_status,
+        response_digest: envelope.response_digest,
+        archive_key_identifier: envelope.archive_key_identifier,
+        plaintext_length: envelope.plaintext_length,
+        archive_record_digest: envelope.archive_record_digest,
+        caller_asserted_response_content_type_digest: contentTypeDigest(envelope.caller_asserted_response_content_type),
+        caller_asserted_response_content_encoding: envelope.caller_asserted_response_content_encoding,
+        caller_asserted_response_observed_at_ms: envelope.caller_asserted_response_observed_at_ms,
+        caller_mutation_authority: false,
+        cloudflare_origin_authenticated: false,
+        archive_key_possession_proven: false,
+        archive_decryptability_proven: false,
+        effect_claim_persistence_proven: false,
+        response_authenticated: false,
+        authoritative: false,
+        eligible_for_upload: false,
+        eligible_for_attestation: false,
+        lifecycle_advance_allowed: false,
+        gate_promotion_allowed: false,
+    });
+
+const readResponseArchiveInventory = async (
+    planDigestInput: unknown,
+    afterFirstSnapshot?: () => void | Promise<void>,
+    afterRecordRead?: (recordIndex: number) => void | Promise<void>
+): Promise<D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryResultV1> => {
+    let planDigest: string;
+    try {
+        const parsed = DigestV1Schema.safeParse(planDigestInput);
+        if (!parsed.success) return { success: false, code: "invalid_plan_digest" };
+        planDigest = parsed.data;
+    } catch {
+        return { success: false, code: "invalid_plan_digest" };
+    }
+    const root = await ensureArchiveRoot(false);
+    if (!root.success) return root;
+    let firstSnapshot: ArchiveSnapshotV1;
+    try {
+        firstSnapshot = await readArchiveSnapshot(root.root);
+        await afterFirstSnapshot?.();
+    } catch {
+        return { success: false, code: "archive_snapshot_unstable" };
+    }
+    const planPrefix = `${planDigest}.`;
+    const finalPattern = new RegExp(`^${planDigest}\\.([0-9a-f]{64})\\.response-preimage\\.json$`, "u");
+    const planNames = firstSnapshot.names.filter(name => name.startsWith(planPrefix));
+    if (planNames.length > MAX_INVENTORY_RECORDS_V1) {
+        return { success: false, code: "archive_inventory_too_large" };
+    }
+    const claimDigests: string[] = [];
+    for (const name of planNames) {
+        const match = finalPattern.exec(name);
+        if (match === null || match[1] === undefined) {
+            return { success: false, code: "archive_unreconciled" };
+        }
+        claimDigests.push(match[1]);
+    }
+    const initialStats = new Map<string, Awaited<ReturnType<typeof lstat>>>();
+    for (const claimDigest of claimDigests) {
+        try {
+            initialStats.set(claimDigest, await lstat(archivePathFor(root.root, planDigest, claimDigest)));
+        } catch {
+            return { success: false, code: "archive_snapshot_unstable" };
+        }
+    }
+    const records: D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryRecordV1[] = [];
+    for (let recordIndex = 0; recordIndex < claimDigests.length; recordIndex += 1) {
+        const claimDigest = claimDigests[recordIndex];
+        if (claimDigest === undefined) return { success: false, code: "archive_snapshot_unstable" };
+        const path = archivePathFor(root.root, planDigest, claimDigest);
+        const before = initialStats.get(claimDigest);
+        if (before === undefined) return { success: false, code: "archive_snapshot_unstable" };
+        const read = await readEnvelope(root.root, planDigest, claimDigest, false, before);
+        if (!read.success) {
+            try {
+                const changed = !sameArchiveSnapshot(firstSnapshot, await readArchiveSnapshot(root.root));
+                return {
+                    success: false,
+                    code: changed ? "archive_snapshot_unstable" : inventoryReadDenial(read.code),
+                };
+            } catch {
+                return { success: false, code: "archive_snapshot_unstable" };
+            }
+        }
+        let after: Awaited<ReturnType<typeof lstat>>;
+        try {
+            after = await lstat(path);
+        } catch {
+            return { success: false, code: "archive_snapshot_unstable" };
+        }
+        if (statIdentity(before) !== statIdentity(after)) {
+            return { success: false, code: "archive_snapshot_unstable" };
+        }
+        records.push(inventoryRecordFor(read.envelope));
+        try {
+            await afterRecordRead?.(recordIndex);
+        } catch {
+            return { success: false, code: "archive_snapshot_unstable" };
+        }
+    }
+    for (const claimDigest of claimDigests) {
+        const initial = initialStats.get(claimDigest);
+        if (initial === undefined) return { success: false, code: "archive_snapshot_unstable" };
+        try {
+            const final = await lstat(archivePathFor(root.root, planDigest, claimDigest));
+            if (statIdentity(initial) !== statIdentity(final)) {
+                return { success: false, code: "archive_snapshot_unstable" };
+            }
+        } catch {
+            return { success: false, code: "archive_snapshot_unstable" };
+        }
+    }
+    let finalSnapshot: ArchiveSnapshotV1;
+    try {
+        finalSnapshot = await readArchiveSnapshot(root.root);
+    } catch {
+        return { success: false, code: "archive_snapshot_unstable" };
+    }
+    if (!sameArchiveSnapshot(firstSnapshot, finalSnapshot)) {
+        return { success: false, code: "archive_snapshot_unstable" };
+    }
+    records.sort(
+        (left, right) =>
+            left.journal_revision - right.journal_revision ||
+            left.transcript_sequence - right.transcript_sequence ||
+            left.claim_digest.localeCompare(right.claim_digest)
+    );
+    const claimIdentities = new Set<string>();
+    const journalRevisions = new Set<number>();
+    const transcriptSequences = new Set<number>();
+    for (let index = 0; index < records.length; index += 1) {
+        const record = records[index];
+        if (record === undefined) return { success: false, code: "archive_inventory_unsafe_sequence" };
+        if (
+            claimIdentities.has(record.claim_digest) ||
+            journalRevisions.has(record.journal_revision) ||
+            transcriptSequences.has(record.transcript_sequence)
+        ) {
+            return { success: false, code: "archive_inventory_unsafe_sequence" };
+        }
+        claimIdentities.add(record.claim_digest);
+        journalRevisions.add(record.journal_revision);
+        transcriptSequences.add(record.transcript_sequence);
+        const expectedJournalRevision = record.transcript_sequence * 3 - 1;
+        const previous = records[index - 1];
+        if (
+            !Number.isSafeInteger(expectedJournalRevision) ||
+            record.journal_revision !== expectedJournalRevision ||
+            (previous !== undefined &&
+                (record.journal_revision <= previous.journal_revision ||
+                    record.transcript_sequence <= previous.transcript_sequence))
+        ) {
+            return { success: false, code: "archive_inventory_unsafe_sequence" };
+        }
+    }
+    const frozenRecords = Object.freeze(records);
+    return {
+        success: true,
+        inventory: Object.freeze({
+            schema_version: 1,
+            kind: "d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory",
+            plan_digest: planDigest,
+            record_count: frozenRecords.length,
+            records: frozenRecords,
+            cloudflare_origin_authenticated: false,
+            archive_key_possession_proven: false,
+            archive_decryptability_proven: false,
+            effect_claim_persistence_proven: false,
+            response_authenticated: false,
+            authoritative: false,
+            eligible_for_upload: false,
+            eligible_for_attestation: false,
+            lifecycle_advance_allowed: false,
+            gate_promotion_allowed: false,
+        }),
+    };
+};
+
+export const readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1 = async (
+    planDigestInput: unknown
+): Promise<D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryResultV1> =>
+    await readResponseArchiveInventory(planDigestInput);
+
+export const readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyTestOnlyV1 = async (
+    planDigestInput: unknown,
+    afterFirstSnapshot: () => void | Promise<void>,
+    afterRecordRead?: (recordIndex: number) => void | Promise<void>
+): Promise<D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryResultV1> =>
+    await readResponseArchiveInventory(planDigestInput, afterFirstSnapshot, afterRecordRead);
 
 export const d1ProbeCloudflareWorkerCanaryResponseArchivePathTestOnlyV1 = (
     planDigestInput: unknown,

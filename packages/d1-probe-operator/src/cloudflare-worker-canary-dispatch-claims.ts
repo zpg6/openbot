@@ -373,7 +373,9 @@ const createWithDependencies = async (
                 before.claim_digest !== null &&
                 (before.claim_effect_phase === "response_observed" ||
                     before.claim_effect_phase === "dispatch_ambiguous");
-            if (!journalMissing && !terminalHead) failDispatch();
+            const terminalHeadHasCapacity =
+                terminalHead && before.claim_journal_revision !== null && before.claim_journal_revision <= 252;
+            if (!journalMissing && !terminalHeadHasCapacity) failDispatch();
             const intentRevision = journalMissing ? 0 : (before.claim_journal_revision as number) + 1;
             if (!Number.isSafeInteger(intentRevision) || intentRevision < 0) failDispatch();
             const intentClaim = await dependencies.build_effect_claim(

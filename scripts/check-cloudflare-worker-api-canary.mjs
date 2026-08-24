@@ -13,6 +13,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
     const isolation = fixture.isolation ?? {};
     const fixedModule = fixture.fixed_module ?? {};
     const workflow = fixture.workflow ?? {};
+    const baseLayer = fixture.base_layer_priority ?? {};
     const steps = workflow.steps ?? {};
     const claims = fixture.claims ?? {};
     const blocker = fixture.production_path_blocker ?? {};
@@ -52,7 +53,13 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.encrypted_response_preimage_archive_implemented === true &&
             fixture.implementation?.bounded_response_preimage_capture_hook_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_response_preimage_capture_hook === false &&
+            fixture.implementation?.joined_response_claim_adapter_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_joined_response_claim_adapter === false &&
             fixture.implementation?.credentialed_runner_writes_encrypted_response_preimages === false &&
+            fixture.implementation?.read_only_response_archive_inventory_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_response_archive_inventory === false &&
+            fixture.implementation?.tri_store_consistency_implemented === false &&
+            fixture.implementation?.archive_ahead_recovery_reducer_implemented === false &&
             fixture.implementation?.response_preimage_capture_implemented === false &&
             fixture.implementation?.reviewed_observation_fixture_transition_implemented === false &&
             fixture.implementation?.credentials_recorded === false &&
@@ -60,10 +67,27 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
         "the isolated canary implementation state drifted"
     );
     check(
+        baseLayer.priority === "base_layer_before_product_facing_work" &&
+            baseLayer.durable_identities_required === true &&
+            baseLayer.append_only_state_effect_archive_histories_required === true &&
+            baseLayer.lease_epochs_required === true &&
+            baseLayer.composed_dispatch_response_sessions_required === true &&
+            baseLayer.tri_store_consistency_required === true &&
+            baseLayer.recovery_reducers_required === true &&
+            baseLayer.cleanup_obligations_required === true &&
+            baseLayer.authority_separation_required === true &&
+            baseLayer.product_facing_work_may_precede_base_layer === false,
+        "the canary base-layer-first priority drifted"
+    );
+    check(
         Object.values(fixture.authority ?? {}).every(value => value === false) &&
             fixture.authority?.dispatch_claim_adapter_authenticates_transport === false &&
             fixture.authority?.response_capture_hook_proves_archive_publication === false &&
-            fixture.authority?.response_capture_hook_prevents_plaintext_retention === false,
+            fixture.authority?.response_capture_hook_prevents_plaintext_retention === false &&
+            fixture.authority?.response_claim_adapter_authenticates_cloudflare_effects === false &&
+            fixture.authority?.response_archive_inventory_authenticates_envelopes_or_responses === false &&
+            fixture.authority?.response_archive_inventory_proves_key_possession_or_decryptability === false &&
+            fixture.authority?.response_archive_inventory_authorizes_recovery_or_actions === false,
         "the isolated canary must grant no evidence, upload, lifecycle, attestation, or gate authority"
     );
     check(
@@ -116,9 +140,18 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.response_capture_scope === "caller_controlled_bounded_byte_copy_no_archive_or_claim_proof" &&
             workflow.response_capture_caller_can_retain_plaintext === true &&
             workflow.archive_before_response_observed_enforced === false &&
+            workflow.joined_response_claim_adapter_scope ===
+                "forward_only_started_bound_archive_before_append_unwired" &&
+            workflow.joined_response_claim_adapter_archive_before_append === true &&
+            workflow.direct_public_effect_journal_append_remains_caller_constructible === true &&
+            workflow.archive_ahead_of_effect_journal_requires_recovery === true &&
             workflow.response_archive_scope === "encrypted_write_only_caller_claim_bound_body_preimage" &&
             workflow.response_archive_production_plaintext_reader_available === false &&
             workflow.response_archive_claims_complete_transport_observation === false &&
+            workflow.response_archive_inventory_scope ===
+                "read_only_redacted_local_encrypted_envelope_shape_non_authenticating" &&
+            workflow.response_archive_inventory_filesystem_writes === false &&
+            workflow.response_archive_inventory_returns_plaintext_ciphertext_nonce_or_tag === false &&
             workflow.fresh_execution_ownership_tag_required === true &&
             workflow.durable_private_attempt_record_implemented === true &&
             workflow.credentialed_runner_records_raw_execution_ownership_tag === false &&

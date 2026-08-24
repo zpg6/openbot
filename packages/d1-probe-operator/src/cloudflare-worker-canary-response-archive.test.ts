@@ -1,5 +1,5 @@
 import { createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
-import { chmod, link, lstat, readFile, readdir, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, readFile, readdir, rename, symlink, unlink, writeFile } from "node:fs/promises";
 
 import { canonicalizeJsonV1, type CanonicalJsonValueV1 } from "@openbot/gate-attestation/internal";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,6 +14,8 @@ import {
     D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1,
     archiveD1ProbeCloudflareWorkerCanaryResponsePreimageV1,
     d1ProbeCloudflareWorkerCanaryResponseArchivePathTestOnlyV1,
+    readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyTestOnlyV1,
+    readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1,
     type D1ProbeCloudflareWorkerCanaryEncryptedResponsePreimageV1,
     type D1ProbeCloudflareWorkerCanaryResponseArchiveExpectedContextV1,
 } from "./cloudflare-worker-canary-response-archive.js";
@@ -559,5 +561,358 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
     it("rejects invalid path-helper inputs without constructing a path", () => {
         expect(d1ProbeCloudflareWorkerCanaryResponseArchivePathTestOnlyV1("../escape", randomDigest())).toBeNull();
         expect(d1ProbeCloudflareWorkerCanaryResponseArchivePathTestOnlyV1(randomDigest(), "../../escape")).toBeNull();
+    });
+
+    it("reads a bounded, sorted, redacted local envelope-shape inventory without a key", async () => {
+        const planDigest = randomDigest();
+        cleanupPrefixes.add(planDigest);
+        const firstBytes = new TextEncoder().encode('{"worker":"first-secret"}');
+        const secondBytes = new TextEncoder().encode('{"worker":"second-secret"}');
+        const first = await observedClaim(firstBytes, {
+            plan_digest: planDigest,
+            journal_revision: 2,
+            transcript_sequence: 1,
+        });
+        const second = await observedClaim(secondBytes, {
+            plan_digest: planDigest,
+            journal_revision: 5,
+            transcript_sequence: 2,
+        });
+        expect((await archive(second, secondBytes)).success).toBe(true);
+        expect((await archive(first, firstBytes)).success).toBe(true);
+        const archivePaths = [first, second].map(claim => {
+            const path = d1ProbeCloudflareWorkerCanaryResponseArchivePathTestOnlyV1(planDigest, claim.claim_digest);
+            if (path === null) throw new Error("archive path unavailable");
+            return path;
+        });
+        const beforeInventory = await Promise.all(
+            archivePaths.map(async path => ({
+                stat: await lstat(path),
+                bytes: await readFile(path),
+            }))
+        );
+
+        const result = await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(planDigest);
+        const afterInventory = await Promise.all(
+            archivePaths.map(async path => ({
+                stat: await lstat(path),
+                bytes: await readFile(path),
+            }))
+        );
+        expect(
+            afterInventory.map(({ stat, bytes }) => ({
+                identity: [stat.dev, stat.ino, stat.mode, stat.nlink, stat.size, stat.mtimeMs, stat.ctimeMs],
+                bytes,
+            }))
+        ).toEqual(
+            beforeInventory.map(({ stat, bytes }) => ({
+                identity: [stat.dev, stat.ino, stat.mode, stat.nlink, stat.size, stat.mtimeMs, stat.ctimeMs],
+                bytes,
+            }))
+        );
+        expect(result).toMatchObject({
+            success: true,
+            inventory: {
+                kind: "d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory",
+                plan_digest: planDigest,
+                record_count: 2,
+                cloudflare_origin_authenticated: false,
+                archive_key_possession_proven: false,
+                archive_decryptability_proven: false,
+                effect_claim_persistence_proven: false,
+                response_authenticated: false,
+                authoritative: false,
+                eligible_for_upload: false,
+                eligible_for_attestation: false,
+                lifecycle_advance_allowed: false,
+                gate_promotion_allowed: false,
+                records: [
+                    {
+                        claim_digest: first.claim_digest,
+                        journal_revision: 2,
+                        transcript_sequence: 1,
+                        response_digest: first.response_digest,
+                    },
+                    {
+                        claim_digest: second.claim_digest,
+                        journal_revision: 5,
+                        transcript_sequence: 2,
+                        response_digest: second.response_digest,
+                    },
+                ],
+            },
+        });
+        if (!result.success) throw new Error(result.code);
+        expect(Object.isFrozen(result.inventory)).toBe(true);
+        expect(Object.isFrozen(result.inventory.records)).toBe(true);
+        expect(result.inventory.records.every(record => Object.isFrozen(record))).toBe(true);
+        const output = JSON.stringify(result);
+        for (const forbidden of [
+            "first-secret",
+            "second-secret",
+            "application/json; charset=utf-8",
+            "ciphertext_base64",
+            "nonce_base64",
+            "authentication_tag_base64",
+            D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1,
+        ]) {
+            expect(output).not.toContain(forbidden);
+        }
+    });
+
+    it("does not create or repair a missing archive root", async () => {
+        const backup = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1}.test-${randomUUID()}`;
+        const rootExists = await lstat(D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1)
+            .then(() => true)
+            .catch(() => false);
+        if (rootExists) await rename(D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1, backup);
+        try {
+            await expect(
+                readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(randomDigest())
+            ).resolves.toEqual({ success: false, code: "archive_not_found" });
+            await expect(lstat(D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1)).rejects.toMatchObject({
+                code: "ENOENT",
+            });
+        } finally {
+            if (rootExists) await rename(backup, D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1);
+        }
+    });
+
+    it("rejects hostile plan inputs and plan-prefixed temp or unknown residue", async () => {
+        const throwingPlan = new Proxy(
+            {},
+            {
+                get: () => {
+                    throw new Error("hostile get");
+                },
+            }
+        );
+        await expect(
+            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(throwingPlan)
+        ).resolves.toEqual({ success: false, code: "invalid_plan_digest" });
+        await expect(readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1("../escape")).resolves.toEqual(
+            {
+                success: false,
+                code: "invalid_plan_digest",
+            }
+        );
+
+        for (const suffix of [
+            `${randomDigest()}.${randomUUID()}.response-preimage.tmp`,
+            `${randomDigest()}.response-preimage.json.backup`,
+        ]) {
+            const planDigest = randomDigest();
+            cleanupPrefixes.add(planDigest);
+            const residue = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1}/${planDigest}.${suffix}`;
+            await writeFile(residue, "residue", { mode: 0o600 });
+            await expect(
+                readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(planDigest)
+            ).resolves.toEqual({ success: false, code: "archive_unreconciled" });
+        }
+    });
+
+    it("rejects symlink, hard-link, permissive, corrupt, and ciphertext substitutions", async () => {
+        const response = new TextEncoder().encode("inventory shape");
+        const key = randomBytes(32);
+
+        const symlinkClaim = await observedClaim(response);
+        expect((await archive(symlinkClaim, response, key)).success).toBe(true);
+        const symlinkPath = pathFor(symlinkClaim);
+        const target = `/private/tmp/openbot-response-inventory-${randomUUID()}.target`;
+        cleanupPaths.add(target);
+        await writeFile(target, await readFile(symlinkPath), { mode: 0o600 });
+        await unlink(symlinkPath);
+        await symlink(target, symlinkPath);
+        expect(
+            (await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(symlinkClaim.plan_digest))
+                .success
+        ).toBe(false);
+
+        const hardlinkClaim = await observedClaim(response);
+        expect((await archive(hardlinkClaim, response, key)).success).toBe(true);
+        const foreign = `/private/tmp/openbot-response-inventory-${randomUUID()}.foreign`;
+        cleanupPaths.add(foreign);
+        await link(pathFor(hardlinkClaim), foreign);
+        expect(
+            (await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(hardlinkClaim.plan_digest))
+                .success
+        ).toBe(false);
+
+        const modeClaim = await observedClaim(response);
+        expect((await archive(modeClaim, response, key)).success).toBe(true);
+        await chmod(pathFor(modeClaim), 0o644);
+        await expect(
+            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(modeClaim.plan_digest)
+        ).resolves.toEqual({ success: false, code: "unsafe_archive_permissions" });
+
+        const corruptClaim = await observedClaim(response);
+        expect((await archive(corruptClaim, response, key)).success).toBe(true);
+        await writeFile(pathFor(corruptClaim), "not-json", { mode: 0o600 });
+        await expect(
+            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(corruptClaim.plan_digest)
+        ).resolves.toEqual({ success: false, code: "archive_corrupt" });
+
+        const noncanonicalClaim = await observedClaim(response);
+        expect((await archive(noncanonicalClaim, response, key)).success).toBe(true);
+        const noncanonicalPath = pathFor(noncanonicalClaim);
+        await writeFile(noncanonicalPath, `${await readFile(noncanonicalPath, "utf8")}\n`, { mode: 0o600 });
+        await expect(
+            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(noncanonicalClaim.plan_digest)
+        ).resolves.toEqual({ success: false, code: "archive_corrupt" });
+
+        const tamperedClaim = await observedClaim(response);
+        expect((await archive(tamperedClaim, response, key)).success).toBe(true);
+        const tamperedEnvelope = await readEnvelope(tamperedClaim);
+        await writeFile(
+            pathFor(tamperedClaim),
+            canonicalizeJsonV1({
+                ...tamperedEnvelope,
+                ciphertext_base64: `${tamperedEnvelope.ciphertext_base64.slice(0, -4)}AAAA`,
+            } as CanonicalJsonValueV1),
+            { mode: 0o600 }
+        );
+        await expect(
+            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(tamperedClaim.plan_digest)
+        ).resolves.toEqual({ success: false, code: "archive_corrupt" });
+    });
+
+    it("rejects duplicate identities, order substitutions, and gapped archive sequences", async () => {
+        const response = new Uint8Array([4, 2, 4, 2]);
+
+        const duplicatePlan = randomDigest();
+        const duplicateFirst = await observedClaim(response, {
+            plan_digest: duplicatePlan,
+            journal_revision: 2,
+            transcript_sequence: 1,
+        });
+        const duplicateSecond = await observedClaim(response, {
+            plan_digest: duplicatePlan,
+            journal_revision: 5,
+            transcript_sequence: 1,
+        });
+        expect((await archive(duplicateFirst, response)).success).toBe(true);
+        expect((await archive(duplicateSecond, response)).success).toBe(true);
+        await expect(
+            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(duplicatePlan)
+        ).resolves.toEqual({ success: false, code: "archive_inventory_unsafe_sequence" });
+
+        const subsetPlan = randomDigest();
+        const subset = await observedClaim(response, {
+            plan_digest: subsetPlan,
+            journal_revision: 5,
+            transcript_sequence: 2,
+        });
+        expect((await archive(subset, response)).success).toBe(true);
+        const subsetResult = await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(subsetPlan);
+        expect(subsetResult).toMatchObject({
+            success: true,
+            inventory: { records: [{ journal_revision: 5, transcript_sequence: 2 }] },
+        });
+
+        const mismatchPlan = randomDigest();
+        const mismatch = await observedClaim(response, {
+            plan_digest: mismatchPlan,
+            journal_revision: 5,
+            transcript_sequence: 1,
+        });
+        expect((await archive(mismatch, response)).success).toBe(true);
+        await expect(
+            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(mismatchPlan)
+        ).resolves.toEqual({
+            success: false,
+            code: "archive_inventory_unsafe_sequence",
+        });
+
+        const orderPlan = randomDigest();
+        const orderFirst = await observedClaim(response, {
+            plan_digest: orderPlan,
+            journal_revision: 2,
+            transcript_sequence: 1,
+        });
+        const orderSecond = await observedClaim(response, {
+            plan_digest: orderPlan,
+            journal_revision: 5,
+            transcript_sequence: 2,
+        });
+        expect((await archive(orderFirst, response)).success).toBe(true);
+        expect((await archive(orderSecond, response)).success).toBe(true);
+        const firstPath = pathFor(orderFirst);
+        const secondPath = pathFor(orderSecond);
+        const swapPath = `${firstPath}.swap`;
+        cleanupPaths.add(swapPath);
+        await rename(firstPath, swapPath);
+        await rename(secondPath, firstPath);
+        await rename(swapPath, secondPath);
+        expect((await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(orderPlan)).success).toBe(
+            false
+        );
+
+        const copiedPlan = randomDigest();
+        const copiedClaim = await observedClaim(response, { plan_digest: copiedPlan });
+        expect((await archive(copiedClaim, response)).success).toBe(true);
+        const copiedIdentityPath = d1ProbeCloudflareWorkerCanaryResponseArchivePathTestOnlyV1(
+            copiedPlan,
+            randomDigest()
+        );
+        if (copiedIdentityPath === null) throw new Error("copy path unavailable");
+        await writeFile(copiedIdentityPath, await readFile(pathFor(copiedClaim)), { mode: 0o600 });
+        expect((await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(copiedPlan)).success).toBe(
+            false
+        );
+    });
+
+    it("fails closed before returning more than the bounded record count", async () => {
+        const planDigest = randomDigest();
+        cleanupPrefixes.add(planDigest);
+        await Promise.all(
+            Array.from({ length: 257 }, async () => {
+                const path = d1ProbeCloudflareWorkerCanaryResponseArchivePathTestOnlyV1(planDigest, randomDigest());
+                if (path === null) throw new Error("bounded inventory path unavailable");
+                await writeFile(path, "bounded", { mode: 0o600 });
+            })
+        );
+        await expect(readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(planDigest)).resolves.toEqual({
+            success: false,
+            code: "archive_inventory_too_large",
+        });
+    });
+
+    it("rejects a directory snapshot that changes during inventory", async () => {
+        const planDigest = randomDigest();
+        cleanupPrefixes.add(planDigest);
+        const residue = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1}/${planDigest}.${randomDigest()}.response-preimage.json.backup`;
+        await expect(
+            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyTestOnlyV1(planDigest, async () => {
+                await writeFile(residue, "concurrent residue", { mode: 0o600 });
+            })
+        ).resolves.toEqual({ success: false, code: "archive_snapshot_unstable" });
+    });
+
+    it("rejects an earlier record rewritten while a later record is pending", async () => {
+        const planDigest = randomDigest();
+        const response = new Uint8Array([1, 3, 3, 7]);
+        const first = await observedClaim(response, {
+            plan_digest: planDigest,
+            journal_revision: 2,
+            transcript_sequence: 1,
+        });
+        const second = await observedClaim(response, {
+            plan_digest: planDigest,
+            journal_revision: 5,
+            transcript_sequence: 2,
+        });
+        expect((await archive(first, response)).success).toBe(true);
+        expect((await archive(second, response)).success).toBe(true);
+        const firstRead = [first, second].sort((left, right) => left.claim_digest.localeCompare(right.claim_digest))[0];
+        if (firstRead === undefined) throw new Error("first inventory record unavailable");
+        await expect(
+            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyTestOnlyV1(
+                planDigest,
+                () => undefined,
+                async recordIndex => {
+                    if (recordIndex === 0) await writeFile(pathFor(firstRead), "rewritten", { mode: 0o600 });
+                }
+            )
+        ).resolves.toEqual({ success: false, code: "archive_snapshot_unstable" });
     });
 });

@@ -469,6 +469,39 @@ describe("Cloudflare Worker canary dispatch claims", () => {
         ).resolves.toBeUndefined();
     });
 
+    it.each([
+        { priorRevision: 252, allowed: true },
+        { priorRevision: 253, allowed: false },
+    ])("reserves a terminal slot after prior revision $priorRevision", async ({ priorRevision, allowed }) => {
+        const operation = await prepared();
+        const harness = await harnessFor(operation);
+        harness.setAfterIntent({
+            ...harness.missing,
+            classification: "exact_sync",
+            missing_component: null,
+            claim_journal_revision: priorRevision,
+            claim_digest: digest("6"),
+            claim_operation_revision: operation.revision,
+            claim_operation_state: operation.state,
+            claim_operation_record_digest: harness.missing.state_operation_record_digest,
+            claim_execution_nonce_commitment: harness.missing.state_execution_nonce_commitment,
+            claim_workflow_step: "prepared_worker_list",
+            claim_effect_phase: "response_observed",
+            claim_ambiguity_classification: "none",
+        });
+        const adapter = await makeAdapter(operation, harness.dependencies);
+        const fetchSpy = vi.spyOn(globalThis, "fetch");
+        const recording = adapter.record_dispatch(canaryIntent());
+        if (allowed) {
+            await expect(recording).resolves.toBeUndefined();
+            expect(harness.claims.map(claim => claim.journal_revision)).toEqual([253, 254]);
+        } else {
+            await expect(recording).rejects.toThrow("dispatch claim recording denied");
+            expect(harness.claims).toHaveLength(0);
+        }
+        expect(fetchSpy).not.toHaveBeenCalled();
+    });
+
     it("rejects cleanup workflows until a persisted grace window is bound", async () => {
         const preparedOperation = await prepared();
         const cleanupOperation = {
