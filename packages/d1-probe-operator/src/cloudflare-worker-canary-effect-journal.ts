@@ -310,6 +310,7 @@ export type D1ProbeCloudflareWorkerCanaryEffectJournalDenialV1 =
     | "unsafe_journal_permissions"
     | "journal_io_unavailable"
     | "journal_corrupt"
+    | "journal_unreconciled"
     | "journal_full"
     | "journal_revision_mismatch"
     | "journal_chain_mismatch"
@@ -410,6 +411,11 @@ const finalRevisions = async (root: string, planDigest: string): Promise<number[
         .map(match => Number(match[1]))
         .filter(Number.isSafeInteger)
         .sort((left, right) => left - right);
+
+const hasUnexpectedPlanEntries = async (root: string, planDigest: string): Promise<boolean> => {
+    const finalName = new RegExp(`^${planDigest}\\.\\d+\\.effect-claim\\.json$`, "u");
+    return (await readdir(root)).some(name => name.startsWith(`${planDigest}.`) && !finalName.test(name));
+};
 
 const syncDirectory = async (path: string): Promise<void> => {
     const directory = await open(path, constants.O_RDONLY);
@@ -517,13 +523,18 @@ export const validateD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1 = async
 const readRevision = async (
     root: string,
     planDigest: string,
-    revision: number
+    revision: number,
+    reconcilePublishedLink = true
 ): Promise<D1ProbeCloudflareWorkerCanaryEffectJournalAppendResultV1> => {
     const path = revisionPathFor(root, planDigest, revision);
     try {
         let pathStat = await lstatOrNull(path);
         if (pathStat === null) return { success: false, code: "journal_not_found" };
-        if (pathStat.nlink === 2 && (await reconcilePublishedRevision(root, planDigest, revision, pathStat))) {
+        if (
+            reconcilePublishedLink &&
+            pathStat.nlink === 2 &&
+            (await reconcilePublishedRevision(root, planDigest, revision, pathStat))
+        ) {
             pathStat = await lstat(path);
         }
         if (pathStat.isSymbolicLink() || !pathStat.isFile() || pathStat.nlink !== 1) {
@@ -638,8 +649,12 @@ const transitionCode = (
 
 const readJournalFromRoot = async (
     root: string,
-    planDigest: string
+    planDigest: string,
+    reconcilePublishedLinks = true
 ): Promise<D1ProbeCloudflareWorkerCanaryEffectJournalReadResultV1> => {
+    if (!reconcilePublishedLinks && (await hasUnexpectedPlanEntries(root, planDigest))) {
+        return { success: false, code: "journal_unreconciled" };
+    }
     const revisions = await finalRevisions(root, planDigest);
     if (revisions.length === 0) return { success: false, code: "journal_not_found" };
     if (revisions.length > MAX_JOURNAL_REVISIONS_V1) return { success: false, code: "journal_full" };
@@ -648,7 +663,7 @@ const readJournalFromRoot = async (
     }
     const claims: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1[] = [];
     for (const revision of revisions) {
-        const read = await readRevision(root, planDigest, revision);
+        const read = await readRevision(root, planDigest, revision, reconcilePublishedLinks);
         if (!read.success) return read;
         if (revision === 0) {
             if (
@@ -712,6 +727,19 @@ export const readD1ProbeCloudflareWorkerCanaryEffectJournalV1 = async (
         const journalRoot = await ensureJournalRoot(false);
         if (!journalRoot.success) return journalRoot;
         return await readJournalFromRoot(journalRoot.root, planDigest);
+    } catch {
+        return { success: false, code: "journal_io_unavailable" };
+    }
+};
+
+export const readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1 = async (
+    planDigest: string
+): Promise<D1ProbeCloudflareWorkerCanaryEffectJournalReadResultV1> => {
+    if (!DigestV1Schema.safeParse(planDigest).success) return { success: false, code: "invalid_plan_digest" };
+    try {
+        const journalRoot = await ensureJournalRoot(false);
+        if (!journalRoot.success) return journalRoot;
+        return await readJournalFromRoot(journalRoot.root, planDigest, false);
     } catch {
         return { success: false, code: "journal_io_unavailable" };
     }

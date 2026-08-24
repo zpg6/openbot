@@ -30,12 +30,17 @@ export type D1ProbeCloudflareWorkerCanaryStateDenialV1 =
     | "concurrent_state_write"
     | "state_io_unavailable"
     | "state_corrupt"
+    | "state_unreconciled"
     | "state_revision_mismatch"
     | "state_transition_denied";
 
 export type D1ProbeCloudflareWorkerCanaryStateResultV1 =
     | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryStateDenialV1 }
     | { readonly success: true; readonly operation: D1ProbeCloudflareWorkerCanaryOperationV1 };
+
+export type D1ProbeCloudflareWorkerCanaryStateHistoryResultV1 =
+    | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryStateDenialV1 }
+    | { readonly success: true; readonly operations: readonly D1ProbeCloudflareWorkerCanaryOperationV1[] };
 
 type StateRootResultV1 =
     | {
@@ -114,6 +119,11 @@ const finalRevisions = async (root: string, planDigest: string): Promise<number[
         .map(match => Number(match[1]))
         .filter(Number.isSafeInteger)
         .sort((left, right) => left - right);
+
+const hasUnexpectedPlanEntries = async (root: string, planDigest: string): Promise<boolean> => {
+    const finalName = new RegExp(`^${planDigest}\\.\\d+\\.operation\\.json$`, "u");
+    return (await readdir(root)).some(name => name.startsWith(`${planDigest}.`) && !finalName.test(name));
+};
 
 const syncDirectory = async (path: string): Promise<void> => {
     const directory = await open(path, constants.O_RDONLY);
@@ -312,6 +322,38 @@ export const readD1ProbeCloudflareWorkerCanaryStateReadOnlyV1 = async (
         const stateRoot = await ensureStateRoot(false);
         if (!stateRoot.success) return stateRoot;
         return await readLatest(stateRoot.root, planDigest, false);
+    } catch {
+        return { success: false, code: "state_io_unavailable" };
+    }
+};
+
+export const readD1ProbeCloudflareWorkerCanaryStateHistoryReadOnlyV1 = async (
+    planDigest: string
+): Promise<D1ProbeCloudflareWorkerCanaryStateHistoryResultV1> => {
+    if (!DigestV1.test(planDigest)) return { success: false, code: "invalid_plan_digest" };
+    try {
+        const stateRoot = await ensureStateRoot(false);
+        if (!stateRoot.success) return stateRoot;
+        if (await hasUnexpectedPlanEntries(stateRoot.root, planDigest)) {
+            return { success: false, code: "state_unreconciled" };
+        }
+        const revisions = await finalRevisions(stateRoot.root, planDigest);
+        if (revisions.length === 0) return { success: false, code: "state_not_found" };
+        if (revisions.length > MAX_REVISIONS_V1 || revisions.some((revision, index) => revision !== index)) {
+            return { success: false, code: "state_corrupt" };
+        }
+        const operations: D1ProbeCloudflareWorkerCanaryOperationV1[] = [];
+        for (const revision of revisions) {
+            const read = await readRevision(stateRoot.root, planDigest, revision, false);
+            if (!read.success) return read;
+            const previous = operations.at(-1);
+            if (previous !== undefined) {
+                const transitioned = await transitionD1ProbeCloudflareWorkerCanaryOperationV1(previous, read.operation);
+                if (!transitioned.success) return { success: false, code: "state_corrupt" };
+            }
+            operations.push(read.operation);
+        }
+        return { success: true, operations };
     } catch {
         return { success: false, code: "state_io_unavailable" };
     }

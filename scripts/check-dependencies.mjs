@@ -322,6 +322,20 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
             "packages/d1-probe-operator/src/cloudflare-worker-canary-effect-journal.test.ts",
             new Set(["./cloudflare-worker-canary-effect-journal.js"]),
         ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-consistency.ts",
+            new Set(["./cloudflare-worker-canary-effect-journal.js", "./cloudflare-worker-canary-state.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-consistency.test.ts",
+            new Set([
+                "./cloudflare-worker-canary-consistency.js",
+                "./cloudflare-worker-canary-effect-journal.js",
+                "./cloudflare-worker-canary-operation.js",
+                "./cloudflare-worker-canary-plan.js",
+                "./cloudflare-worker-canary-state.js",
+            ]),
+        ],
         ["packages/d1-probe-operator/src/cloudflare-worker-canary-driver-lease.ts", new Set()],
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-driver-lease.test.ts",
@@ -778,6 +792,60 @@ function checkD1ProbeCanaryDriverLeaseBoundary(file, content, imports) {
     ) {
         errors.push(
             `${file}: the driver lease must retain fixed process identity, zero-signal liveness, private append-only CAS, and false authority`
+        );
+    }
+}
+
+function checkD1ProbeCanaryConsistencyBoundary(file, content, imports) {
+    const source = "packages/d1-probe-operator/src/cloudflare-worker-canary-consistency.ts";
+    const test = "packages/d1-probe-operator/src/cloudflare-worker-canary-consistency.test.ts";
+    const consistencyModule = path.resolve("packages/d1-probe-operator/src/cloudflare-worker-canary-consistency");
+    const importsConsistency = imports.some(
+        specifier =>
+            specifier.startsWith(".") &&
+            path.resolve(path.dirname(file), specifier).replace(/\.(?:js|ts)$/u, "") === consistencyModule
+    );
+    if (importsConsistency && file !== test) {
+        errors.push(`${file}: the unwired Worker canary consistency reader may be imported only by its focused test`);
+    }
+    const testOnlySymbol = "readD1ProbeCloudflareWorkerCanaryConsistencyWithReadersTestOnlyV1";
+    if (
+        file.startsWith("packages/d1-probe-operator/src/") &&
+        content.includes(testOnlySymbol) &&
+        file !== source &&
+        file !== test
+    ) {
+        errors.push(`${file}: the Worker canary consistency test seam may be consumed only by its focused test`);
+    }
+    if (file !== source) return;
+    const allowedImports = new Set([
+        "./cloudflare-worker-canary-effect-journal.js",
+        "./cloudflare-worker-canary-state.js",
+    ]);
+    if (
+        imports.some(specifier => !allowedImports.has(specifier)) ||
+        !content.includes("readD1ProbeCloudflareWorkerCanaryStateHistoryReadOnlyV1") ||
+        !content.includes("readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1") ||
+        !content.includes("effect_claims_authenticated: false") ||
+        !content.includes("caller_mutation_authority: false") ||
+        !content.includes("authoritative: false") ||
+        !content.includes("eligible_for_upload: false") ||
+        !content.includes("eligible_for_attestation: false") ||
+        !content.includes("lifecycle_advance_allowed: false") ||
+        !content.includes("gate_promotion_allowed: false") ||
+        !content.includes("const [firstState, firstJournal]") ||
+        !content.includes("const [secondState, secondJournal]") ||
+        !content.includes('claimHead.effect_phase !== "response_observed"') ||
+        !content.includes('claimHead.effect_phase !== "dispatch_ambiguous"') ||
+        /\b(?:fetch|FormData|WebSocket|EventSource|XMLHttpRequest|child_process|spawn|execFile|process|Authorization|Bearer|api_token|hmac_key_base64url|readFile|writeFile|mkdir|link|unlink|rename|chmod|fsync|syncDirectory)\b/u.test(
+            content
+        ) ||
+        /effect_claims_authenticated:\s*true|caller_mutation_authority:\s*true|authoritative:\s*true|eligible_for_upload:\s*true|eligible_for_attestation:\s*true|gate_promotion_allowed:\s*true|lifecycle_advance_allowed:\s*true/u.test(
+            content
+        )
+    ) {
+        errors.push(
+            `${file}: the consistency reader must remain read-only, locally forgeable, stable-head checked, and non-authoritative`
         );
     }
 }
@@ -1387,6 +1455,74 @@ for (const specifier of [
     errors.splice(beforeEquivalentCanaryDriverLeaseConsumerSelfTest, 1);
 }
 
+const canaryConsistencyBoundaryFixture = `
+readD1ProbeCloudflareWorkerCanaryStateHistoryReadOnlyV1;
+readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1;
+const [firstState, firstJournal] = first;
+const [secondState, secondJournal] = second;
+claimHead.effect_phase !== "response_observed";
+claimHead.effect_phase !== "dispatch_ambiguous";
+const report = {
+    effect_claims_authenticated: false,
+    caller_mutation_authority: false,
+    authoritative: false,
+    eligible_for_upload: false,
+    eligible_for_attestation: false,
+    lifecycle_advance_allowed: false,
+    gate_promotion_allowed: false,
+};
+readD1ProbeCloudflareWorkerCanaryConsistencyWithReadersTestOnlyV1;
+`;
+
+const beforeCanaryConsistencyPositiveSelfTest = errors.length;
+checkD1ProbeCanaryConsistencyBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-consistency.ts",
+    canaryConsistencyBoundaryFixture,
+    ["./cloudflare-worker-canary-effect-journal.js", "./cloudflare-worker-canary-state.js"]
+);
+if (errors.length !== beforeCanaryConsistencyPositiveSelfTest) {
+    errors.push("Worker API canary consistency self-test rejected its fixed read-only contract");
+}
+
+const beforeCanaryConsistencyCapabilitySelfTest = errors.length;
+checkD1ProbeCanaryConsistencyBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-consistency.ts",
+    `${canaryConsistencyBoundaryFixture}\nprocess.env.CLOUDFLARE_API_TOKEN; fetch('https://example.invalid'); authoritative: true`,
+    ["node:fs"]
+);
+if (errors.length !== beforeCanaryConsistencyCapabilitySelfTest + 1) {
+    errors.push("Worker API canary consistency self-test did not reject filesystem, network, or authority access");
+}
+errors.splice(beforeCanaryConsistencyCapabilitySelfTest, 1);
+
+for (const specifier of [
+    "./cloudflare-worker-canary-consistency.js",
+    "./cloudflare-worker-canary-consistency",
+    "./subdirectory/../cloudflare-worker-canary-consistency.js",
+]) {
+    const beforeCanaryConsistencyConsumerSelfTest = errors.length;
+    checkD1ProbeCanaryConsistencyBoundary(
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-command.ts",
+        "const consistency = reader.read;",
+        [specifier]
+    );
+    if (errors.length !== beforeCanaryConsistencyConsumerSelfTest + 1) {
+        errors.push(`Worker API canary consistency self-test did not reject import spelling ${specifier}`);
+    }
+    errors.splice(beforeCanaryConsistencyConsumerSelfTest, 1);
+}
+
+const beforeCanaryConsistencyTestSeamSelfTest = errors.length;
+checkD1ProbeCanaryConsistencyBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-command.ts",
+    "readD1ProbeCloudflareWorkerCanaryConsistencyWithReadersTestOnlyV1();",
+    []
+);
+if (errors.length !== beforeCanaryConsistencyTestSeamSelfTest + 1) {
+    errors.push("Worker API canary consistency self-test did not fence its injected reader seam");
+}
+errors.splice(beforeCanaryConsistencyTestSeamSelfTest, 1);
+
 const beforeRpcManifestSelfTest = errors.length;
 checkManifest(
     "apps/<self-test>/package.json",
@@ -1530,6 +1666,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
     checkD1ProbeCanaryStateBoundary(file, content, imports);
     checkD1ProbeCanaryEffectJournalBoundary(file, content, imports);
     checkD1ProbeCanaryDriverLeaseBoundary(file, content, imports);
+    checkD1ProbeCanaryConsistencyBoundary(file, content, imports);
     checkD1ProbeOperatorNetworkBoundary(file, content, imports);
 
     if (

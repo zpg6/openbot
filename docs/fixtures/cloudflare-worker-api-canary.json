@@ -18,6 +18,8 @@
         "credentialed_runner_uses_driver_lease": false,
         "untrusted_effect_claim_journal_implemented": true,
         "credentialed_runner_writes_effect_claim_journal": false,
+        "read_only_state_effect_consistency_implemented": true,
+        "credentialed_runner_uses_state_effect_consistency": false,
         "automatic_cleanup_core_implemented": true,
         "credentialed_runner_uses_automatic_cleanup_core": false,
         "cleanup_cli_registered": false,
@@ -41,7 +43,8 @@
         "production_artifact_eligible_for_upload": false,
         "production_deployment_ready": false,
         "driver_lease_is_security_or_distributed_lock": false,
-        "effect_claim_journal_authenticates_remote_effects": false
+        "effect_claim_journal_authenticates_remote_effects": false,
+        "consistency_snapshot_authorizes_actions": false
     },
     "isolation": {
         "one_new_disposable_worker_required": true,
@@ -81,6 +84,8 @@
         "distributed_plan_reservation": false,
         "driver_lease_scope": "cooperative_single_checkout_only",
         "effect_claim_journal_scope": "caller_constructible_redacted_hash_chain_only",
+        "consistency_snapshot_scope": "locally_forgeable_may_stale_reassert_heads_before_effect",
+        "consistency_reader_filesystem_writes": false,
         "fresh_execution_ownership_tag_required": true,
         "durable_private_attempt_record_implemented": true,
         "credentialed_runner_records_raw_execution_ownership_tag": false,

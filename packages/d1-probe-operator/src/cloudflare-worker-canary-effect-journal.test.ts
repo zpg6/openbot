@@ -11,6 +11,7 @@ import {
     digestD1ProbeCloudflareWorkerCanaryOperationRecordV1,
     d1ProbeCloudflareWorkerCanaryEffectJournalPathV1,
     readD1ProbeCloudflareWorkerCanaryEffectJournalV1,
+    readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1,
     validateD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
     type D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimDraftV1,
     type D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
@@ -642,6 +643,25 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
         });
         await expect(lstat(path)).resolves.toMatchObject({ nlink: 1 });
         await expect(lstat(tempPath)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("keeps read-only inspection from reconciling publication residue", async () => {
+        const initial = await record();
+        expect((await appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(initial)).success).toBe(true);
+        const path = d1ProbeCloudflareWorkerCanaryEffectJournalPathV1(initial.plan_digest, 0);
+        if (path === null) throw new Error("journal path unavailable");
+        const tempPath = path.replace(
+            ".0.effect-claim.json",
+            ".0.11111111-1111-4111-8111-111111111111.effect-claim.tmp"
+        );
+        cleanupPaths.add(tempPath);
+        await link(path, tempPath);
+        await expect(readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1(initial.plan_digest)).resolves.toEqual({
+            success: false,
+            code: "journal_unreconciled",
+        });
+        await expect(lstat(path)).resolves.toMatchObject({ nlink: 2 });
+        await expect(lstat(tempPath)).resolves.toMatchObject({ nlink: 2 });
     });
 
     it("allows only one competing publication for a revision", async () => {
