@@ -180,7 +180,11 @@ const deriveKeyId = async (raw: Uint8Array): Promise<string> => {
     const preimage = new Uint8Array(domain.byteLength + raw.byteLength);
     preimage.set(domain);
     preimage.set(raw, domain.byteLength);
-    return await sha256(preimage);
+    try {
+        return await sha256(preimage);
+    } finally {
+        preimage.fill(0);
+    }
 };
 
 const importHmacKey = async (raw: Uint8Array): Promise<CryptoKey> =>

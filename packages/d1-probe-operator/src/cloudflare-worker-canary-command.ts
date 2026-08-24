@@ -59,16 +59,22 @@ const deriveCommitmentKeyIdV1 = async (hmacKeyInput: unknown): Promise<string | 
     }
     if (!parsed.success) return null;
     const raw = decodeBase64Url(parsed.data.hmac_key_base64url);
-    if (raw === null || raw.byteLength < 32 || raw.byteLength > 64) return null;
+    if (raw === null) return null;
+    if (raw.byteLength < 32 || raw.byteLength > 64) {
+        raw.fill(0);
+        return null;
+    }
+    let preimage: Uint8Array | null = null;
     try {
         const domain = new TextEncoder().encode(`${KEY_ID_DOMAIN_V1}\u0000`);
-        const preimage = new Uint8Array(domain.byteLength + raw.byteLength);
+        preimage = new Uint8Array(domain.byteLength + raw.byteLength);
         preimage.set(domain);
         preimage.set(raw, domain.byteLength);
         return toHex(await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer(preimage)));
     } catch {
         return null;
     } finally {
+        preimage?.fill(0);
         raw.fill(0);
     }
 };

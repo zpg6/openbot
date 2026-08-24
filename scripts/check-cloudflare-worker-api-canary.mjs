@@ -24,6 +24,18 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
     check(
         fixture.implementation?.credentialed_runner_implemented === true &&
             fixture.implementation?.root_command_registered === true &&
+            fixture.implementation?.canonical_plan_generator_implemented === true &&
+            fixture.implementation?.root_plan_command_registered === true &&
+            fixture.implementation?.durable_operation_state_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_durable_operation_state === false &&
+            fixture.implementation?.automatic_cleanup_core_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_automatic_cleanup_core === false &&
+            fixture.implementation?.cleanup_cli_registered === false &&
+            fixture.implementation?.manual_cleanup_authority_implemented === false &&
+            fixture.implementation?.response_projection_contract_implemented === true &&
+            fixture.implementation?.secure_secret_fd_launcher_implemented === false &&
+            fixture.implementation?.response_preimage_capture_implemented === false &&
+            fixture.implementation?.reviewed_observation_fixture_transition_implemented === false &&
             fixture.implementation?.credentials_recorded === false &&
             fixture.implementation?.observations_recorded === false,
         "the isolated canary implementation state drifted"
@@ -68,7 +80,15 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.checkout_local_plan_reservation === true &&
             workflow.distributed_plan_reservation === false &&
             workflow.fresh_execution_ownership_tag_required === true &&
-            workflow.raw_execution_ownership_tag_recorded === false &&
+            workflow.durable_private_attempt_record_implemented === true &&
+            workflow.credentialed_runner_records_raw_execution_ownership_tag === false &&
+            workflow.durable_delete_dispatch_fence_implemented === true &&
+            workflow.credentialed_runner_uses_durable_delete_dispatch_fence === false &&
+            workflow.automatic_cleanup_grace_contract_implemented === true &&
+            workflow.credentialed_runner_uses_automatic_cleanup_grace === false &&
+            workflow.manual_cleanup_after_grace_implemented === false &&
+            workflow.complete_pagination_metadata_required_for_absence === true &&
+            workflow.optional_response_projection_contract_implemented === true &&
             workflow.uncertain_or_interrupted_exit_is_nonzero === true,
         "the canary mutation transport must not redirect or retry ambiguity"
     );
@@ -155,7 +175,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             steps.beta_worker_delete_by_immutable_id?.path === "/accounts/{account_id}/workers/workers/{worker_id}" &&
             same(steps.beta_worker_delete_by_immutable_id?.query, {}) &&
             steps.beta_worker_delete_by_immutable_id
-                ?.exact_returned_worker_id_generated_name_and_ownership_marker_required === true,
+                ?.exact_predelete_worker_id_generated_name_and_ownership_marker_required === true &&
+            steps.beta_worker_delete_by_immutable_id?.success_envelope_acknowledgement_required === true,
         "cleanup must bind and delete the exact returned immutable Worker ID"
     );
     check(
@@ -223,8 +244,24 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
 };
 
 export const readAndCheckCloudflareWorkerApiCanaryFixture = async () => {
-    const fixture = JSON.parse(await readFile(fixturePath, "utf8"));
-    return checkCloudflareWorkerApiCanaryFixture(fixture);
+    const [fixture, rootManifest, operatorManifest] = await Promise.all([
+        readFile(fixturePath, "utf8").then(JSON.parse),
+        readFile("package.json", "utf8").then(JSON.parse),
+        readFile("packages/d1-probe-operator/package.json", "utf8").then(JSON.parse),
+    ]);
+    const errors = checkCloudflareWorkerApiCanaryFixture(fixture);
+    if (
+        rootManifest.scripts?.["d1-probe:plan-worker-api-canary"] !==
+            "corepack pnpm --dir packages/d1-probe-operator plan-worker-api-canary" ||
+        operatorManifest.scripts?.["plan-worker-api-canary"] !==
+            "node --import tsx src/cloudflare-worker-canary-plan-cli.ts" ||
+        rootManifest.scripts?.["d1-probe:canary-worker-api"] !==
+            "corepack pnpm --dir packages/d1-probe-operator canary-worker-api" ||
+        operatorManifest.scripts?.["canary-worker-api"] !== "node --import tsx src/cloudflare-worker-canary-cli.ts"
+    ) {
+        errors.push("the Worker API canary root and package commands drifted");
+    }
+    return errors;
 };
 
 const invokedPath = process.argv[1];

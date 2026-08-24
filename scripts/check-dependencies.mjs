@@ -7,6 +7,10 @@ const sourceExtensions = new Set([".js", ".mjs", ".ts", ".tsx"]);
 const errors = [];
 const exactVersion = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 
+function importsFromSource(content) {
+    return [...content.matchAll(/(?:\bfrom\s+|\bimport\s*(?:\(\s*)?)(["'])([^"']+)\1/gu)].map(match => match[2]);
+}
+
 async function filesUnder(directory) {
     const files = [];
     for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -146,6 +150,7 @@ function checkD1ProbeOperatorNetworkBoundary(file, content, imports) {
         "packages/d1-probe-operator/src/cloudflare-database-bootstrap.ts",
         "packages/d1-probe-operator/src/cloudflare-database.ts",
         "packages/d1-probe-operator/src/cloudflare-route-reader.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup.ts",
         "packages/d1-probe-operator/src/cloudflare-worker-interoperability-canary.ts",
         "packages/d1-probe-operator/src/cloudflare-worker-interoperability-canary.test.ts",
     ].includes(file);
@@ -231,6 +236,56 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
             "packages/d1-probe-operator/src/cloudflare-worker-canary-review.test.ts",
             new Set(["./cloudflare-worker-canary-review.js"]),
         ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-plan-cli.ts",
+            new Set(["./cloudflare-worker-canary-plan.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-plan-cli.test.ts",
+            new Set(["./cloudflare-worker-interoperability-canary.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup.ts",
+            new Set([
+                "./cloudflare-worker-interoperability-canary.js",
+                "./cloudflare-worker-canary-operation.js",
+                "./cloudflare-worker-canary-state.js",
+                "./contracts.js",
+            ]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup.test.ts",
+            new Set([
+                "./cloudflare-worker-canary-cleanup.js",
+                "./cloudflare-worker-canary-operation.js",
+                "./cloudflare-worker-canary-state.js",
+            ]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-operation.ts",
+            new Set(["./cloudflare-worker-interoperability-canary.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-operation.test.ts",
+            new Set(["./cloudflare-worker-canary-operation.js", "./cloudflare-worker-canary-plan.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-state.ts",
+            new Set(["./cloudflare-worker-canary-operation.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-state.test.ts",
+            new Set([
+                "./cloudflare-worker-canary-operation.js",
+                "./cloudflare-worker-canary-plan.js",
+                "./cloudflare-worker-canary-state.js",
+            ]),
+        ],
+        ["packages/d1-probe-operator/src/cloudflare-worker-canary-projection.ts", new Set()],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-projection.test.ts",
+            new Set(["./cloudflare-worker-canary-projection.js"]),
+        ],
     ]);
     const allowedRelativeImports = reviewedCanaryImports.get(file);
     if (allowedRelativeImports === undefined) return;
@@ -263,21 +318,32 @@ function checkD1ProbePureTransformBoundary(file, content, imports) {
     const pureTransforms = new Map([
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-plan.ts",
-            new Set(["./cloudflare-worker-interoperability-canary.js", "./contracts.js"]),
+            new Set([
+                "zod",
+                "@openbot/gate-attestation/internal",
+                "./cloudflare-worker-interoperability-canary.js",
+                "./contracts.js",
+            ]),
         ],
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-review.ts",
-            new Set(["./cloudflare-worker-interoperability-canary.js"]),
+            new Set(["zod", "@openbot/gate-attestation/internal", "./cloudflare-worker-interoperability-canary.js"]),
         ],
-        ["packages/d1-probe-operator/src/worker-version-contract.ts", new Set(["./contracts.js"])],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-operation.ts",
+            new Set(["zod", "@openbot/gate-attestation/internal", "./cloudflare-worker-interoperability-canary.js"]),
+        ],
+        ["packages/d1-probe-operator/src/cloudflare-worker-canary-projection.ts", new Set(["zod"])],
+        [
+            "packages/d1-probe-operator/src/worker-version-contract.ts",
+            new Set(["@openbot/gate-attestation/internal", "./contracts.js"]),
+        ],
     ]);
     const allowedRelativeImports = pureTransforms.get(file);
     if (allowedRelativeImports === undefined) return;
-    const unexpectedRelativeImport = imports.find(
-        specifier => specifier.startsWith(".") && !allowedRelativeImports.has(specifier)
-    );
-    if (unexpectedRelativeImport !== undefined) {
-        errors.push(`${file}: offline D1 probe transforms may import only their reviewed local closure`);
+    const unexpectedImport = imports.find(specifier => !allowedRelativeImports.has(specifier));
+    if (unexpectedImport !== undefined) {
+        errors.push(`${file}: offline D1 probe transforms may import only their reviewed dependency closure`);
     }
     const nodeCapabilityImport = imports.find(specifier =>
         /^(?:node:)?(?:assert|async_hooks|buffer|child_process|cluster|console|crypto|dgram|diagnostics_channel|dns|events|fs(?:\/promises)?|http|http2|https|module|net|os|path|perf_hooks|process|readline|repl|stream|timers|tls|tty|url|util|v8|vm|wasi|worker_threads|zlib)$/u.test(
@@ -300,6 +366,99 @@ function checkD1ProbePureTransformBoundary(file, content, imports) {
         )
     ) {
         errors.push(`${file}: offline D1 probe transforms cannot mint mutation or authority`);
+    }
+}
+
+function checkD1ProbeCanaryPlanCliBoundary(file, content, imports) {
+    if (file !== "packages/d1-probe-operator/src/cloudflare-worker-canary-plan-cli.ts") return;
+    const allowedImports = new Set([
+        "node:crypto",
+        "node:fs",
+        "@openbot/gate-attestation/internal",
+        "./cloudflare-worker-canary-plan.js",
+    ]);
+    if (
+        imports.some(specifier => !allowedImports.has(specifier)) ||
+        imports.some(specifier => /^(?:node:)?(?:http|http2|https|net|tls|child_process)$/u.test(specifier)) ||
+        /\b(?:fetch|FormData|WebSocket|EventSource|XMLHttpRequest|process\.env|execFile|spawn|readFile|writeFile|openSync)\b/u.test(
+            content
+        )
+    ) {
+        errors.push(`${file}: the canary plan CLI may only read canonical stdin and secret file descriptor 3`);
+    }
+    const secretDescriptorArguments = [...content.matchAll(/\breadSecret\(\s*([^,\n]+)/gu)].map(match =>
+        match[1]?.trim()
+    );
+    if (secretDescriptorArguments.length !== 1 || secretDescriptorArguments[0] !== "3") {
+        errors.push(`${file}: the canary plan CLI must read its only secret from file descriptor 3`);
+    }
+    if (
+        /eligible_for_attestation:\s*true|gate_promotion_allowed:\s*true|lifecycle_advance_allowed:\s*true/u.test(
+            content
+        )
+    ) {
+        errors.push(`${file}: the canary plan CLI cannot mint authority`);
+    }
+}
+
+function checkD1ProbeCanaryCleanupBoundary(file, content, imports) {
+    if (file !== "packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup.ts") return;
+    const allowedImports = new Set([
+        "zod",
+        "@openbot/gate-attestation/internal",
+        "./cloudflare-worker-interoperability-canary.js",
+        "./cloudflare-worker-canary-operation.js",
+        "./cloudflare-worker-canary-state.js",
+        "./contracts.js",
+    ]);
+    const requiredImports = ["./cloudflare-worker-canary-operation.js", "./cloudflare-worker-canary-state.js"];
+    if (
+        requiredImports.some(specifier => !imports.includes(specifier)) ||
+        imports.some(specifier => !allowedImports.has(specifier))
+    ) {
+        errors.push(`${file}: canary cleanup must use the reviewed durable delete fence`);
+    }
+    const requestMethods = [...content.matchAll(/\brequestJson\(\s*([^,\n]+)/gu)].map(match => match[1]?.trim());
+    const directFetchCount = [...content.matchAll(/\bdependencies\.fetch\s*\(/gu)].length;
+    if (
+        !content.includes('const API_ROOT_V1 = "https://api.cloudflare.com/client/v4"') ||
+        directFetchCount !== 1 ||
+        requestMethods.some(method => method !== '"GET"' && method !== '"DELETE"') ||
+        /method:\s*"(?:POST|PUT|PATCH)"|requestJson\("(?:POST|PUT|PATCH)"/u.test(content) ||
+        /\bforce\s*[:=]\s*true\b/u.test(content)
+    ) {
+        errors.push(`${file}: canary cleanup is limited to fixed Cloudflare GET and DELETE requests`);
+    }
+    if (
+        /eligible_for_upload:\s*true|eligible_for_attestation:\s*true|gate_promotion_allowed:\s*true|lifecycle_advance_allowed:\s*true/u.test(
+            content
+        )
+    ) {
+        errors.push(`${file}: canary cleanup cannot mint upload, lifecycle, attestation, or gate authority`);
+    }
+}
+
+function checkD1ProbeCanaryStateBoundary(file, content, imports) {
+    if (file !== "packages/d1-probe-operator/src/cloudflare-worker-canary-state.ts") return;
+    const allowedImports = new Set([
+        "node:fs",
+        "node:crypto",
+        "node:fs/promises",
+        "node:path",
+        "node:url",
+        "@openbot/gate-attestation/internal",
+        "./cloudflare-worker-canary-operation.js",
+    ]);
+    if (
+        imports.some(specifier => !allowedImports.has(specifier)) ||
+        /\b(?:fetch|FormData|WebSocket|EventSource|XMLHttpRequest|child_process|spawn|execFile|process\.env)\b/u.test(
+            content
+        ) ||
+        /eligible_for_attestation:\s*true|gate_promotion_allowed:\s*true|lifecycle_advance_allowed:\s*true/u.test(
+            content
+        )
+    ) {
+        errors.push(`${file}: canary state may use only its fixed private filesystem contract`);
     }
 }
 
@@ -464,6 +623,11 @@ if (errors.length !== beforeOperatorNetworkSelfTest + 1) {
 }
 errors.splice(beforeOperatorNetworkSelfTest, 1);
 
+const sideEffectImportSelfTest = importsFromSource('import "node:https";');
+if (sideEffectImportSelfTest.length !== 1 || sideEffectImportSelfTest[0] !== "node:https") {
+    errors.push("dependency import parser self-test did not detect a side-effect import");
+}
+
 const beforeOperatorFetchSelfTest = errors.length;
 checkD1ProbeOperatorNetworkBoundary(
     "packages/d1-probe-operator/src/preflight.ts",
@@ -525,10 +689,10 @@ checkD1ProbePureTransformBoundary(
     'import fs from "fs"; fs.openSync("result.json", "r")',
     ["fs"]
 );
-if (errors.length !== beforePureTransformCapabilitySelfTest + 2) {
+if (errors.length !== beforePureTransformCapabilitySelfTest + 3) {
     errors.push("offline D1 probe transform boundary self-test did not reject bare Node and filesystem capabilities");
 }
-errors.splice(beforePureTransformCapabilitySelfTest, 2);
+errors.splice(beforePureTransformCapabilitySelfTest, 3);
 
 const beforeWorkerVersionConsumerSelfTest = errors.length;
 checkD1ProbeWorkerVersionContractImportBoundary(
@@ -539,6 +703,97 @@ if (errors.length !== beforeWorkerVersionConsumerSelfTest + 1) {
     errors.push("Worker Version contract boundary self-test did not reject an unreviewed raw-body consumer");
 }
 errors.splice(beforeWorkerVersionConsumerSelfTest, 1);
+
+const beforeCanaryPlanCliSelfTest = errors.length;
+checkD1ProbeCanaryPlanCliBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-plan-cli.ts",
+    "readSecret(3, MAX_HMAC_KEY_BYTES); const token = process.env.CLOUDFLARE_API_TOKEN; fetch('https://example.invalid')",
+    []
+);
+if (errors.length !== beforeCanaryPlanCliSelfTest + 1) {
+    errors.push("Worker API canary plan CLI self-test did not reject environment or network access");
+}
+errors.splice(beforeCanaryPlanCliSelfTest, 1);
+
+const beforeCanaryPlanCliImportSelfTest = errors.length;
+checkD1ProbeCanaryPlanCliBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-plan-cli.ts",
+    "readSecret(3, MAX_HMAC_KEY_BYTES)",
+    ["node:dns/promises"]
+);
+if (errors.length !== beforeCanaryPlanCliImportSelfTest + 1) {
+    errors.push("Worker API canary plan CLI self-test did not reject an unreviewed Node capability");
+}
+errors.splice(beforeCanaryPlanCliImportSelfTest, 1);
+
+const beforeCanaryPlanCliDescriptorSelfTest = errors.length;
+checkD1ProbeCanaryPlanCliBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-plan-cli.ts",
+    "readSecret(5, MAX_HMAC_KEY_BYTES)",
+    ["node:crypto", "node:fs", "@openbot/gate-attestation/internal", "./cloudflare-worker-canary-plan.js"]
+);
+if (errors.length !== beforeCanaryPlanCliDescriptorSelfTest + 1) {
+    errors.push("Worker API canary plan CLI self-test did not reject another secret descriptor");
+}
+errors.splice(beforeCanaryPlanCliDescriptorSelfTest, 1);
+
+const beforeCanaryCleanupSelfTest = errors.length;
+checkD1ProbeCanaryCleanupBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup.ts",
+    'const API_ROOT_V1 = "https://api.cloudflare.com/client/v4"; requestJson("POST", "/workers")',
+    ["./cloudflare-worker-canary-operation.js", "./cloudflare-worker-canary-state.js"]
+);
+if (errors.length !== beforeCanaryCleanupSelfTest + 1) {
+    errors.push("Worker API canary cleanup self-test did not reject a forward mutation");
+}
+errors.splice(beforeCanaryCleanupSelfTest, 1);
+
+const beforeCanaryCleanupMethodSelfTest = errors.length;
+checkD1ProbeCanaryCleanupBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup.ts",
+    'const API_ROOT_V1 = "https://api.cloudflare.com/client/v4"; requestJson(method, "/workers")',
+    [
+        "zod",
+        "@openbot/gate-attestation/internal",
+        "./cloudflare-worker-interoperability-canary.js",
+        "./cloudflare-worker-canary-operation.js",
+        "./cloudflare-worker-canary-state.js",
+        "./contracts.js",
+    ]
+);
+if (errors.length !== beforeCanaryCleanupMethodSelfTest + 1) {
+    errors.push("Worker API canary cleanup self-test did not reject a nonliteral request method");
+}
+errors.splice(beforeCanaryCleanupMethodSelfTest, 1);
+
+const beforeCanaryCleanupDirectFetchSelfTest = errors.length;
+checkD1ProbeCanaryCleanupBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup.ts",
+    'const API_ROOT_V1 = "https://api.cloudflare.com/client/v4"; dependencies.fetch("a"); dependencies.fetch("b"); requestJson("GET", "/workers")',
+    [
+        "zod",
+        "@openbot/gate-attestation/internal",
+        "./cloudflare-worker-interoperability-canary.js",
+        "./cloudflare-worker-canary-operation.js",
+        "./cloudflare-worker-canary-state.js",
+        "./contracts.js",
+    ]
+);
+if (errors.length !== beforeCanaryCleanupDirectFetchSelfTest + 1) {
+    errors.push("Worker API canary cleanup self-test did not reject a second direct fetch path");
+}
+errors.splice(beforeCanaryCleanupDirectFetchSelfTest, 1);
+
+const beforeCanaryStateCapabilitySelfTest = errors.length;
+checkD1ProbeCanaryStateBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-state.ts",
+    'import { spawn } from "node:child_process"',
+    ["node:child_process"]
+);
+if (errors.length !== beforeCanaryStateCapabilitySelfTest + 1) {
+    errors.push("Worker API canary state self-test did not reject a process capability");
+}
+errors.splice(beforeCanaryStateCapabilitySelfTest, 1);
 
 const beforeRpcManifestSelfTest = errors.length;
 checkManifest(
@@ -621,7 +876,7 @@ for (const file of forbiddenFiles) errors.push(`${file}: deferred profile or art
 
 for (const file of files.filter(file => sourceExtensions.has(path.extname(file)))) {
     const content = await readFile(file, "utf8");
-    const imports = [...content.matchAll(/(?:from\s+|import\s*\()["']([^"']+)["']/gu)].map(match => match[1]);
+    const imports = importsFromSource(content);
     for (const specifier of imports) {
         if (file.startsWith("apps/control-plane/") && specifier === "@openbot/contracts/internal") {
             errors.push(`${file}: the public control plane may import only route-safe OpenBot contracts`);
@@ -674,6 +929,9 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
     checkD1ProbeWorkerArtifactCandidateBoundary(file, content, imports);
     checkD1ProbeWorkerApiCanaryBoundary(file, content, imports);
     checkD1ProbePureTransformBoundary(file, content, imports);
+    checkD1ProbeCanaryPlanCliBoundary(file, content, imports);
+    checkD1ProbeCanaryCleanupBoundary(file, content, imports);
+    checkD1ProbeCanaryStateBoundary(file, content, imports);
     checkD1ProbeOperatorNetworkBoundary(file, content, imports);
 
     if (

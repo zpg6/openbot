@@ -7,6 +7,18 @@
     "implementation": {
         "credentialed_runner_implemented": true,
         "root_command_registered": true,
+        "canonical_plan_generator_implemented": true,
+        "root_plan_command_registered": true,
+        "durable_operation_state_implemented": true,
+        "credentialed_runner_uses_durable_operation_state": false,
+        "automatic_cleanup_core_implemented": true,
+        "credentialed_runner_uses_automatic_cleanup_core": false,
+        "cleanup_cli_registered": false,
+        "manual_cleanup_authority_implemented": false,
+        "response_projection_contract_implemented": true,
+        "secure_secret_fd_launcher_implemented": false,
+        "response_preimage_capture_implemented": false,
+        "reviewed_observation_fixture_transition_implemented": false,
         "credentials_recorded": false,
         "observations_recorded": false
     },
@@ -54,7 +66,15 @@
         "checkout_local_plan_reservation": true,
         "distributed_plan_reservation": false,
         "fresh_execution_ownership_tag_required": true,
-        "raw_execution_ownership_tag_recorded": false,
+        "durable_private_attempt_record_implemented": true,
+        "credentialed_runner_records_raw_execution_ownership_tag": false,
+        "durable_delete_dispatch_fence_implemented": true,
+        "credentialed_runner_uses_durable_delete_dispatch_fence": false,
+        "automatic_cleanup_grace_contract_implemented": true,
+        "credentialed_runner_uses_automatic_cleanup_grace": false,
+        "manual_cleanup_after_grace_implemented": false,
+        "complete_pagination_metadata_required_for_absence": true,
+        "optional_response_projection_contract_implemented": true,
         "uncertain_or_interrupted_exit_is_nonzero": true,
         "steps_in_order": [
             "beta_worker_list_name_absence",
@@ -185,7 +205,8 @@
                 "method": "DELETE",
                 "path": "/accounts/{account_id}/workers/workers/{worker_id}",
                 "query": {},
-                "exact_returned_worker_id_generated_name_and_ownership_marker_required": true
+                "exact_predelete_worker_id_generated_name_and_ownership_marker_required": true,
+                "success_envelope_acknowledgement_required": true
             },
             "beta_worker_get_absence": {
                 "method": "GET",
@@ -242,6 +263,8 @@
     },
     "observations": [],
     "sources": [
+        "https://developers.cloudflare.com/api/resources/workers/subresources/beta/subresources/workers/methods/list/",
+        "https://developers.cloudflare.com/api/resources/workers/subresources/beta/subresources/workers/methods/get/",
         "https://developers.cloudflare.com/api/resources/workers/subresources/beta/subresources/workers/methods/create/",
         "https://developers.cloudflare.com/api/resources/workers/subresources/beta/subresources/workers/subresources/versions/methods/create/",
         "https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/get/",
