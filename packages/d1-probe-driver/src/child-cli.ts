@@ -119,7 +119,9 @@ const readServiceToken = (): { client_secret: string } => {
     const text = size >= 0 && size <= MAX_SERVICE_TOKEN_BYTES ? decodeUtf8(bytes.subarray(0, size)) : null;
     if (text === null) return fail("service_token_unavailable");
     const tokenText: string = text;
-    const clientSecret = tokenText.endsWith("\n") ? tokenText.slice(0, -1) : tokenText;
+    const hasTrailingNewline = tokenText.endsWith("\n");
+    const clientSecret = hasTrailingNewline ? tokenText.slice(0, -1) : tokenText;
+    if (size - (hasTrailingNewline ? 1 : 0) > 512) return fail("service_token_unavailable");
     if (clientSecret.length === 0 || clientSecret.includes("\n") || clientSecret.includes("\r")) {
         return fail("service_token_unavailable");
     }

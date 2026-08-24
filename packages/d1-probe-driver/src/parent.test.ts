@@ -282,6 +282,37 @@ describe("D1 probe gateway parent", () => {
         });
     });
 
+    it("waits for every termination attempt when another termination fails", async () => {
+        const input = await parentAssignment();
+        const rejectedReady = Promise.reject<D1ProbeGatewayChildReadyV1>(new Error("ready failed"));
+        void rejectedReady.catch(() => undefined);
+        const first = handleFor(input.children[0], rejectedReady);
+        const second = handleFor(input.children[1]);
+        const secondTermination = deferred<undefined>();
+        first.terminate.mockRejectedValueOnce(new Error("termination failed"));
+        second.terminate.mockImplementationOnce(async () => await secondTermination.promise);
+        let settled = false;
+        const executionPromise = executeD1ProbeGatewayParentV1(
+            input,
+            { client_secret: clientSecret },
+            {
+                spawnChild: vi.fn().mockResolvedValueOnce(first.handle).mockResolvedValueOnce(second.handle),
+            }
+        ).finally(() => {
+            settled = true;
+        });
+        await vi.waitFor(() => {
+            expect(first.terminate).toHaveBeenCalledOnce();
+            expect(second.terminate).toHaveBeenCalledOnce();
+        });
+        expect(settled).toBe(false);
+        secondTermination.resolve(undefined);
+        expect(await executionPromise).toMatchObject({
+            success: true,
+            result: { status: "inconclusive", error_code: "child_termination_failed" },
+        });
+    });
+
     it("does not release GO when either READY fails or is substituted", async () => {
         const input = await parentAssignment();
         for (const readyFactory of [
@@ -306,6 +337,95 @@ describe("D1 probe gateway parent", () => {
             expect(first.terminate).toHaveBeenCalledOnce();
             expect(second.terminate).toHaveBeenCalledOnce();
         }
+    });
+
+    it("terminates both children when the parent is interrupted before GO", async () => {
+        const input = await parentAssignment();
+        const controller = new AbortController();
+        const secondReady = deferred<D1ProbeGatewayChildReadyV1>();
+        const first = handleFor(input.children[0]);
+        const second = handleFor(input.children[1], secondReady.promise);
+        const spawnChild = vi.fn().mockResolvedValueOnce(first.handle).mockResolvedValueOnce(second.handle);
+        const executionPromise = executeD1ProbeGatewayParentV1(
+            input,
+            { client_secret: clientSecret },
+            {
+                signal: controller.signal,
+                spawnChild,
+            }
+        );
+        await vi.waitFor(() => expect(spawnChild).toHaveBeenCalledTimes(2));
+        controller.abort();
+        expect(await executionPromise).toMatchObject({
+            success: true,
+            result: {
+                status: "inconclusive",
+                error_code: "parent_interrupted",
+                go_release_attempted: false,
+            },
+        });
+        expect(first.release).not.toHaveBeenCalled();
+        expect(second.release).not.toHaveBeenCalled();
+        expect(first.terminate).toHaveBeenCalledOnce();
+        expect(second.terminate).toHaveBeenCalledOnce();
+    });
+
+    it("does not spawn a child when the parent signal is already aborted", async () => {
+        const controller = new AbortController();
+        controller.abort();
+        const spawnChild = vi.fn();
+        expect(
+            await executeD1ProbeGatewayParentV1(
+                await parentAssignment(),
+                { client_secret: clientSecret },
+                {
+                    signal: controller.signal,
+                    spawnChild,
+                }
+            )
+        ).toMatchObject({
+            success: true,
+            result: {
+                status: "inconclusive",
+                error_code: "parent_interrupted",
+                go_release_attempted: false,
+            },
+        });
+        expect(spawnChild).not.toHaveBeenCalled();
+    });
+
+    it("terminates both children when the parent is interrupted after GO", async () => {
+        const input = await parentAssignment();
+        const controller = new AbortController();
+        const firstResult = deferred<D1ProbeGatewayChildResultV1>();
+        const secondResult = deferred<D1ProbeGatewayChildResultV1>();
+        const first = handleFor(input.children[0]);
+        const second = handleFor(input.children[1]);
+        first.release.mockImplementationOnce(async () => await firstResult.promise);
+        second.release.mockImplementationOnce(async () => await secondResult.promise);
+        const executionPromise = executeD1ProbeGatewayParentV1(
+            input,
+            { client_secret: clientSecret },
+            {
+                signal: controller.signal,
+                spawnChild: vi.fn().mockResolvedValueOnce(first.handle).mockResolvedValueOnce(second.handle),
+            }
+        );
+        await vi.waitFor(() => {
+            expect(first.release).toHaveBeenCalledOnce();
+            expect(second.release).toHaveBeenCalledOnce();
+        });
+        controller.abort();
+        expect(await executionPromise).toMatchObject({
+            success: true,
+            result: {
+                status: "inconclusive",
+                error_code: "parent_interrupted",
+                go_release_attempted: true,
+            },
+        });
+        expect(first.terminate).toHaveBeenCalledOnce();
+        expect(second.terminate).toHaveBeenCalledOnce();
     });
 
     it("marks release failure and substituted results inconclusive without retry", async () => {

@@ -21,6 +21,7 @@ export const D1_PROBE_PARENT_CHILD_OUTPUT_LIMIT_BYTES_V1 = 131_072 as const;
 
 export interface D1ProbeNodeChildDependenciesV1 {
     readonly entrypoint?: URL;
+    readonly signal?: AbortSignal | undefined;
     readonly spawn?: typeof spawn;
 }
 
@@ -79,12 +80,14 @@ const waitForClose = (child: ChildProcess): Promise<Readonly<{ code: number | nu
 export const createNodeD1ProbeGatewayParentDependenciesV1 = (
     options: D1ProbeNodeChildDependenciesV1 = {}
 ): D1ProbeGatewayParentDependenciesV1 => ({
+    signal: options.signal,
     spawnChild: async (assignment, serviceToken) => {
         const canonicalAssignment = await canonicalD1ProbeGatewayChildAssignmentV1(assignment);
         const spawnImplementation = options.spawn ?? spawn;
         const entrypoint = options.entrypoint ?? new URL("./child-cli.ts", import.meta.url);
         const child = spawnImplementation(process.execPath, ["--import", "tsx", fileURLToPath(entrypoint)], {
             cwd: fileURLToPath(new URL("../", import.meta.url)),
+            env: {},
             stdio: ["pipe", "pipe", "pipe", "ipc", "pipe"],
         });
         if (child.stdin === null || child.stdout === null || child.stderr === null) {

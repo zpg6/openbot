@@ -322,4 +322,15 @@ describe("D1 probe driver child", () => {
         expect(run).toMatchObject({ code: 1, stdout: "", stderr: "service_token_unavailable\n" });
         expect(run.messages).toHaveLength(1);
     }, 20_000);
+
+    it("rejects 513 secret bytes without treating the last byte as an optional newline", async () => {
+        const input = await assignment();
+        const run = await runChild({
+            assignmentText: await canonicalD1ProbeGatewayChildAssignmentV1(input),
+            go: () => goFor(input),
+            secret: "c".repeat(513),
+        });
+        expect(run).toMatchObject({ code: 1, stdout: "", stderr: "service_token_unavailable\n" });
+        expect(run.messages).toHaveLength(1);
+    }, 20_000);
 });

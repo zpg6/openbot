@@ -16,7 +16,10 @@ const readStdin = async (): Promise<string> => {
 const assignmentInput = JSON.parse(await readStdin()) as unknown;
 const assignment = D1ProbeGatewayChildAssignmentV1Schema.parse(assignmentInput);
 const ready = readyForD1ProbeGatewayChildV1(assignment);
-if (ready === null || !process.connected || process.send === undefined) process.exit(1);
+const unexpectedEnvironment = Object.keys(process.env).some(key => key !== "__CF_USER_TEXT_ENCODING");
+if (ready === null || !process.connected || process.send === undefined || unexpectedEnvironment) {
+    process.exit(1);
+}
 
 const goPromise = new Promise<unknown>((resolve, reject) => {
     process.once("message", resolve);

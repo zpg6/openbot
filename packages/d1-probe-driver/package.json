@@ -5,6 +5,7 @@
     "type": "module",
     "scripts": {
         "child": "node --import tsx src/child-cli.ts",
+        "parent": "node --import tsx src/parent-cli.ts",
         "typecheck": "tsc -b --pretty false",
         "test": "vitest run --root ../.. packages/d1-probe-driver/src"
     },

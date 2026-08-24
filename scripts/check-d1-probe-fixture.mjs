@@ -224,9 +224,31 @@ check(execution.parent_ipc_go_release_required === true, "the parent must releas
 const gatewayParent = execution.gateway_parent_coordinator ?? {};
 check(gatewayParent.implemented === true, "the gateway parent coordinator is required");
 check(
-    gatewayParent.root_or_parent_cli_registered === false,
-    "the gateway parent coordinator must remain an unregistered private library"
+    gatewayParent.root_cli_registered === false,
+    "the gateway parent command must not be registered at the repository root"
 );
+check(gatewayParent.package_parent_command_implemented === true, "the private package parent command is required");
+check(gatewayParent.command_arguments_allowed === false, "the gateway parent command must reject arguments");
+check(gatewayParent.assignment_body_limit_bytes === 65536, "the gateway parent assignment cap changed");
+check(gatewayParent.canonical_assignment_required === true, "the gateway parent assignment must be canonical");
+check(gatewayParent.service_token_file_descriptor === 3, "the gateway parent credential descriptor changed");
+check(
+    gatewayParent.service_token_read_and_closed_before_child_spawn === true,
+    "the gateway parent must close its credential descriptor before child spawn"
+);
+check(
+    gatewayParent.service_token_max_bytes_excluding_optional_newline === 512,
+    "the gateway parent service-token cap changed"
+);
+check(
+    gatewayParent.service_token_optional_trailing_newline === true,
+    "the gateway parent service-token newline rule changed"
+);
+check(
+    gatewayParent.credential_arguments_or_environment_allowed === false,
+    "the gateway parent must not accept credentials through arguments or environment variables"
+);
+check(gatewayParent.child_environment_inherited === false, "gateway children must not inherit the parent environment");
 check(gatewayParent.exact_child_count === 2, "the gateway parent must use two child processes");
 check(same(gatewayParent.fixed_child_order, ["writer_a", "writer_b"]), "the gateway child order changed");
 check(
@@ -264,6 +286,10 @@ check(gatewayParent.result_timeout_ms === 20000, "the gateway parent result time
 check(gatewayParent.termination_timeout_ms === 1000, "the gateway parent termination timeout changed");
 check(gatewayParent.partial_spawn_termination_required === true, "a partial gateway child spawn must terminate");
 check(
+    gatewayParent.sigint_and_sigterm_abort_and_terminate_children === true,
+    "gateway parent signals must terminate spawned children"
+);
+check(
     gatewayParent.substituted_ready_or_result_is_inconclusive === true,
     "substituted gateway child messages must stay inconclusive"
 );
@@ -273,6 +299,8 @@ check(
     gatewayParent.completed_means_protocol_completed_not_gate_passed === true,
     "gateway parent completion must not mean the gate passed"
 );
+check(gatewayParent.canonical_result_only === true, "the gateway parent must emit one canonical result");
+check(gatewayParent.inconclusive_exit_code === 2, "the gateway parent inconclusive exit code changed");
 check(
     gatewayParent.authoritative === false &&
         gatewayParent.eligible_for_attestation === false &&

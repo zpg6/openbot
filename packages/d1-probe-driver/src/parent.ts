@@ -128,6 +128,7 @@ export const D1ProbeGatewayParentResultV1Schema = z
                 "child_go_failed",
                 "child_result_failed",
                 "child_termination_failed",
+                "parent_interrupted",
             ]),
             go_release_attempted: z.boolean(),
             children: z.tuple([]),
@@ -161,6 +162,7 @@ export interface D1ProbeGatewayParentChildHandleV1 {
 }
 
 export interface D1ProbeGatewayParentDependenciesV1 {
+    readonly signal?: AbortSignal | undefined;
     spawnChild(
         assignment: D1ProbeGatewayChildAssignmentV1,
         serviceToken: D1ProbeDriverServiceTokenV1
@@ -221,11 +223,23 @@ const buildResult = (
     });
 
 const terminateAll = async (handles: readonly D1ProbeGatewayParentChildHandleV1[]): Promise<boolean> => {
+    const results = await Promise.allSettled(handles.map(async handle => await handle.terminate()));
+    return results.every(result => result.status === "fulfilled");
+};
+
+const withAbort = async <T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> => {
+    if (signal === undefined) return await promise;
+    if (signal.aborted) throw new Error("Parent interrupted");
+    let rejectAbort: ((reason?: unknown) => void) | undefined;
+    const aborted = new Promise<T>((_resolve, reject) => {
+        rejectAbort = reject;
+    });
+    const onAbort = () => rejectAbort?.(new Error("Parent interrupted"));
+    signal.addEventListener("abort", onAbort, { once: true });
     try {
-        await Promise.all(handles.map(async handle => await handle.terminate()));
-        return true;
-    } catch {
-        return false;
+        return await Promise.race([promise, aborted]);
+    } finally {
+        signal.removeEventListener("abort", onAbort);
     }
 };
 
@@ -249,9 +263,11 @@ export const executeD1ProbeGatewayParentV1 = async (
     const handles: D1ProbeGatewayParentChildHandleV1[] = [];
     try {
         for (const child of parent.children) {
+            if (dependencies.signal?.aborted) throw new Error("Parent interrupted");
             const handle = await dependencies.spawnChild(child, serviceToken);
             void handle.ready.catch(() => undefined);
             handles.push(handle);
+            if (dependencies.signal?.aborted) throw new Error("Parent interrupted");
         }
     } catch {
         const terminated = await terminateAll(handles);
@@ -259,7 +275,11 @@ export const executeD1ProbeGatewayParentV1 = async (
             success: true,
             result: buildResult(parent, {
                 status: "inconclusive",
-                error_code: terminated ? "child_spawn_failed" : "child_termination_failed",
+                error_code: terminated
+                    ? dependencies.signal?.aborted
+                        ? "parent_interrupted"
+                        : "child_spawn_failed"
+                    : "child_termination_failed",
                 go_release_attempted: false,
                 children: [],
             }),
@@ -268,7 +288,7 @@ export const executeD1ProbeGatewayParentV1 = async (
 
     let ready: D1ProbeGatewayChildReadyV1[];
     try {
-        ready = await Promise.all(handles.map(async handle => await handle.ready));
+        ready = await withAbort(Promise.all(handles.map(async handle => await handle.ready)), dependencies.signal);
         if (
             ready.some((message, index) => {
                 const parsed = safeParse(D1ProbeGatewayChildReadyV1Schema, message);
@@ -283,7 +303,11 @@ export const executeD1ProbeGatewayParentV1 = async (
             success: true,
             result: buildResult(parent, {
                 status: "inconclusive",
-                error_code: terminated ? "child_ready_failed" : "child_termination_failed",
+                error_code: terminated
+                    ? dependencies.signal?.aborted
+                        ? "parent_interrupted"
+                        : "child_ready_failed"
+                    : "child_termination_failed",
                 go_release_attempted: false,
                 children: [],
             }),
@@ -315,7 +339,10 @@ export const executeD1ProbeGatewayParentV1 = async (
 
     let results: D1ProbeGatewayChildResultV1[];
     try {
-        results = await Promise.all(handles.map(async (handle, index) => await handle.release(go[index]!)));
+        results = await withAbort(
+            Promise.all(handles.map(async (handle, index) => await handle.release(go[index]!))),
+            dependencies.signal
+        );
         if (
             results.some((message, index) => {
                 const parsed = safeParse(D1ProbeGatewayChildResultV1Schema, message);
@@ -330,7 +357,11 @@ export const executeD1ProbeGatewayParentV1 = async (
             success: true,
             result: buildResult(parent, {
                 status: "inconclusive",
-                error_code: terminated ? "child_result_failed" : "child_termination_failed",
+                error_code: terminated
+                    ? dependencies.signal?.aborted
+                        ? "parent_interrupted"
+                        : "child_result_failed"
+                    : "child_termination_failed",
                 go_release_attempted: true,
                 children: [],
             }),
