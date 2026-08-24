@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { canonicalizeJsonV1, type CanonicalJsonValueV1 } from "@openbot/gate-attestation/internal";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
     D1_PROBE_CREATE_STEPS_V1,
@@ -20,6 +20,7 @@ import {
     markD1ProbeLifecycleAmbiguousV1,
 } from "./lifecycle.js";
 import { compileD1ProbePreflightPlanV1 } from "./preflight.js";
+import { readD1ProbeCloudflareRouteV1 } from "./cloudflare-route-reader.js";
 import { inspectD1ProbeRouteReadbackV1 } from "./route-precheck.js";
 import {
     resolveVerifiedD1ProbePreflightV1,
@@ -97,6 +98,50 @@ const routeReadback = () => ({
                 ],
             },
         ],
+    },
+});
+
+const jsonResponse = (value: unknown, init?: ResponseInit): Response =>
+    new Response(JSON.stringify(value), {
+        ...init,
+        headers: { "content-type": "application/json; charset=utf-8", ...init?.headers },
+    });
+
+const cloudflareZoneResponse = () => ({
+    success: true,
+    errors: [],
+    messages: [],
+    result: {
+        id: request().zone_id,
+        account: { id: request().account_id, name: "Probe account" },
+        name: "example.test",
+        status: "active",
+        type: "full",
+        paused: false,
+        unrelated_future_field: true,
+    },
+});
+
+const cloudflareDnsResponse = (page: number, totalPages = 1) => ({
+    success: true,
+    errors: [],
+    messages: [],
+    result: [
+        {
+            id: (page + 11).toString(16).padStart(32, "0"),
+            name: "probe.example.test",
+            type: page % 2 === 0 ? "AAAA" : "A",
+            proxiable: true,
+            proxied: true,
+            content: page % 2 === 0 ? "2001:db8::1" : "192.0.2.1",
+        },
+    ],
+    result_info: {
+        count: 1,
+        page,
+        per_page: 1000,
+        total_count: totalPages,
+        total_pages: totalPages,
     },
 });
 
@@ -739,5 +784,231 @@ describe("D1 probe route readback inspection", () => {
         mutable.zone.account_id = "f".repeat(32);
         expect(result.success).toBe(true);
         if (result.success) expect(result.inspection.dns_record_count).toBe(1);
+    });
+});
+
+describe("D1 probe Cloudflare route reader", () => {
+    it("performs two bounded read-only API calls and returns no credential or raw Cloudflare ID", async () => {
+        const verified = await verifiedPreflight();
+        const apiToken = "x".repeat(32);
+        const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+            const url = String(input);
+            expect(init?.method).toBe("GET");
+            expect(init?.redirect).toBe("manual");
+            expect(init?.cache).toBe("no-store");
+            expect(init?.credentials).toBe("omit");
+            expect(init?.body).toBeUndefined();
+            expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer ${apiToken}`);
+            expect(new Headers(init?.headers).get("accept")).toBe("application/json");
+            expect(new Headers(init?.headers).get("accept-encoding")).toBe("identity");
+            if (url.endsWith(`/zones/${request().zone_id}`)) return jsonResponse(cloudflareZoneResponse());
+            expect(url).toBe(
+                `https://api.cloudflare.com/client/v4/zones/${request().zone_id}/dns_records?match=all&name.exact=probe.example.test&page=1&per_page=1000&proxied=true`
+            );
+            return jsonResponse(cloudflareDnsResponse(1));
+        });
+
+        const result = await readD1ProbeCloudflareRouteV1(
+            verified,
+            { api_token: apiToken },
+            { fetch: fetchMock as typeof globalThis.fetch }
+        );
+        expect(result).toMatchObject({
+            success: true,
+            inspection: {
+                authoritative: false,
+                deploy_performed: false,
+                eligible_for_deployment: false,
+                gate_promotion_allowed: false,
+                dns_record_count: 1,
+            },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(JSON.stringify(result)).not.toContain(apiToken);
+        expect(JSON.stringify(result)).not.toContain(request().account_id);
+        expect(JSON.stringify(result)).not.toContain(request().zone_id);
+        expect(JSON.stringify(result)).not.toContain(cloudflareDnsResponse(1).result[0]!.id);
+    });
+
+    it("reads every declared DNS page once and keeps the total bounded", async () => {
+        const verified = await verifiedPreflight();
+        const fetchMock = vi.fn(async (input: string | URL | Request) => {
+            const url = String(input);
+            if (url.endsWith(`/zones/${request().zone_id}`)) return jsonResponse(cloudflareZoneResponse());
+            const page = new URL(url).searchParams.get("page");
+            if (page === "1") return jsonResponse(cloudflareDnsResponse(1, 2));
+            if (page === "2") return jsonResponse(cloudflareDnsResponse(2, 2));
+            throw new Error("unexpected page");
+        });
+        const result = await readD1ProbeCloudflareRouteV1(
+            verified,
+            { api_token: "x".repeat(32) },
+            { fetch: fetchMock as typeof globalThis.fetch }
+        );
+        expect(result).toMatchObject({ success: true, inspection: { dns_record_count: 2 } });
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+    });
+
+    it("denies forged preflight state or credentials before a network request", async () => {
+        const fetchMock = vi.fn();
+        expect(
+            await readD1ProbeCloudflareRouteV1(
+                { schema_version: 1, kind: "verified_d1_probe_preflight" } as VerifiedD1ProbePreflightV1,
+                { api_token: "x".repeat(32) },
+                { fetch: fetchMock as typeof globalThis.fetch }
+            )
+        ).toEqual({ success: false, code: "invalid_verified_preflight" });
+
+        const verified = await verifiedPreflight();
+        for (const credential of [
+            {},
+            { api_token: "too-short" },
+            { api_token: "x".repeat(32), extra: true },
+            new Proxy(
+                {},
+                {
+                    ownKeys: () => {
+                        throw new Error("hostile credential");
+                    },
+                }
+            ),
+        ]) {
+            expect(
+                await readD1ProbeCloudflareRouteV1(verified, credential, {
+                    fetch: fetchMock as typeof globalThis.fetch,
+                })
+            ).toEqual({ success: false, code: "invalid_api_token" });
+        }
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("does not retry network failure and maps unsafe HTTP responses to fixed denials", async () => {
+        const verified = await verifiedPreflight();
+        const apiToken = { api_token: "x".repeat(32) };
+        const networkFailure = vi.fn(async () => {
+            throw new Error(`do not expose ${apiToken.api_token}`);
+        });
+        expect(
+            await readD1ProbeCloudflareRouteV1(verified, apiToken, {
+                fetch: networkFailure as typeof globalThis.fetch,
+            })
+        ).toEqual({ success: false, code: "cloudflare_request_failed" });
+        expect(networkFailure).toHaveBeenCalledTimes(1);
+
+        const responses: Array<[Response, string]> = [
+            [
+                new Response("", { status: 302, headers: { location: "https://attacker.example" } }),
+                "cloudflare_response_invalid",
+            ],
+            [
+                new Response("{}", { status: 200, headers: { "content-type": "text/plain" } }),
+                "cloudflare_response_invalid",
+            ],
+            [
+                new Response("{}", {
+                    status: 200,
+                    headers: { "content-type": "application/json", "content-encoding": "gzip" },
+                }),
+                "cloudflare_response_invalid",
+            ],
+            [
+                new Response("{}", {
+                    status: 200,
+                    headers: { "content-type": "application/json", "content-length": "262145" },
+                }),
+                "cloudflare_response_too_large",
+            ],
+            [
+                new Response(new Uint8Array([0xff]), { headers: { "content-type": "application/json" } }),
+                "cloudflare_response_invalid",
+            ],
+            [
+                jsonResponse({ success: false, errors: [{ code: 1000, message: "denied" }] }),
+                "cloudflare_response_invalid",
+            ],
+        ];
+        for (const [response, code] of responses) {
+            const fetchMock = vi.fn(async () => response);
+            expect(
+                await readD1ProbeCloudflareRouteV1(verified, apiToken, {
+                    fetch: fetchMock as typeof globalThis.fetch,
+                })
+            ).toEqual({ success: false, code });
+            expect(fetchMock).toHaveBeenCalledTimes(1);
+        }
+    });
+
+    it("uses one deadline for the full read and enforces an aggregate response cap", async () => {
+        const verified = await verifiedPreflight();
+        const apiToken = { api_token: "x".repeat(32) };
+        vi.useFakeTimers();
+        try {
+            const stalledFetch = vi.fn(
+                async (_input: string | URL | Request, init?: RequestInit): Promise<Response> =>
+                    await new Promise((_resolve, reject) => {
+                        init?.signal?.addEventListener(
+                            "abort",
+                            () => reject(new DOMException("timed out", "AbortError")),
+                            { once: true }
+                        );
+                    })
+            );
+            const pending = readD1ProbeCloudflareRouteV1(verified, apiToken, {
+                fetch: stalledFetch as typeof globalThis.fetch,
+            });
+            await vi.advanceTimersByTimeAsync(20_000);
+            expect(await pending).toEqual({ success: false, code: "cloudflare_request_failed" });
+            expect(stalledFetch).toHaveBeenCalledTimes(1);
+        } finally {
+            vi.useRealTimers();
+        }
+
+        const largeFetch = vi.fn(async (input: string | URL | Request) => {
+            const url = String(input);
+            if (url.endsWith(`/zones/${request().zone_id}`)) return jsonResponse(cloudflareZoneResponse());
+            const page = Number(new URL(url).searchParams.get("page"));
+            return jsonResponse({ ...cloudflareDnsResponse(page, 5), padding: "p".repeat(220_000) });
+        });
+        expect(
+            await readD1ProbeCloudflareRouteV1(verified, apiToken, {
+                fetch: largeFetch as typeof globalThis.fetch,
+            })
+        ).toEqual({ success: false, code: "cloudflare_response_too_large" });
+        expect(largeFetch).toHaveBeenCalledTimes(6);
+    });
+
+    it("binds API observations to the preflight and rejects inconsistent pagination or proxy state", async () => {
+        const verified = await verifiedPreflight();
+        const run = async (zone: unknown, dns: unknown) => {
+            const fetchMock = vi.fn(async (input: string | URL | Request) =>
+                String(input).includes("/dns_records?") ? jsonResponse(dns) : jsonResponse(zone)
+            );
+            return await readD1ProbeCloudflareRouteV1(
+                verified,
+                { api_token: "x".repeat(32) },
+                { fetch: fetchMock as typeof globalThis.fetch }
+            );
+        };
+        expect(
+            await run(
+                {
+                    ...cloudflareZoneResponse(),
+                    result: { ...cloudflareZoneResponse().result, account: { id: "d".repeat(32) } },
+                },
+                cloudflareDnsResponse(1)
+            )
+        ).toEqual({ success: false, code: "cloudflare_account_mismatch" });
+        expect(
+            await run(cloudflareZoneResponse(), {
+                ...cloudflareDnsResponse(1),
+                result_info: { ...cloudflareDnsResponse(1).result_info, page: 2 },
+            })
+        ).toEqual({ success: false, code: "cloudflare_response_invalid" });
+        expect(
+            await run(cloudflareZoneResponse(), {
+                ...cloudflareDnsResponse(1),
+                result: [{ ...cloudflareDnsResponse(1).result[0], proxied: false }],
+            })
+        ).toEqual({ success: false, code: "dns_record_not_proxied" });
     });
 });

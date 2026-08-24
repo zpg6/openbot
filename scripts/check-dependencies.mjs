@@ -139,8 +139,10 @@ function checkD1ProbeOperatorNetworkBoundary(file, content, imports) {
     const forbiddenImport = imports.find(specifier =>
         /^(?:node:)?(?:dgram|dns|http|http2|https|net|tls)$|^(?:undici|wrangler)$/u.test(specifier)
     );
-    if (forbiddenImport !== undefined || /\bfetch\s*\(/u.test(content)) {
-        errors.push(`${file}: D1 probe preflight and lifecycle code must remain network-free`);
+    const networkCall = /(?:\bfetch|\.fetch)\s*\(/u.test(content);
+    const isReviewedReader = file === "packages/d1-probe-operator/src/cloudflare-route-reader.ts";
+    if (forbiddenImport !== undefined || (networkCall && !isReviewedReader)) {
+        errors.push(`${file}: only the reviewed Cloudflare route reader may perform operator network I/O`);
     }
 }
 
@@ -286,6 +288,17 @@ if (errors.length !== beforeOperatorNetworkSelfTest + 1) {
     errors.push("D1 probe operator network-boundary self-test did not reject a network import");
 }
 errors.splice(beforeOperatorNetworkSelfTest, 1);
+
+const beforeOperatorFetchSelfTest = errors.length;
+checkD1ProbeOperatorNetworkBoundary(
+    "packages/d1-probe-operator/src/preflight.ts",
+    "await dependencies.fetch(request)",
+    []
+);
+if (errors.length !== beforeOperatorFetchSelfTest + 1) {
+    errors.push("D1 probe operator network-boundary self-test did not reject fetch outside the reviewed reader");
+}
+errors.splice(beforeOperatorFetchSelfTest, 1);
 
 const beforeRpcManifestSelfTest = errors.length;
 checkManifest(

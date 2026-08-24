@@ -125,8 +125,8 @@ check(
 );
 check(
     preflightVerification.route_readback_inspection_eligible_for_deployment === false &&
-        preflightVerification.credentialed_cloudflare_readback_adapter_implemented === false,
-    "caller-supplied Cloudflare readback cannot authorize D1 probe deployment"
+        preflightVerification.credentialed_cloudflare_readback_adapter_implemented === true,
+    "the credentialed Cloudflare reader must remain separate from deployment authority"
 );
 check(
     preflightVerification.verified_context_is_opaque_and_in_memory_only === true,
@@ -143,6 +143,36 @@ check(
 check(
     preflightVerification.performs_deployment === false && preflightVerification.authoritative === false,
     "D1 preflight verification must perform no deployment and grant no authority"
+);
+const routeReader = deployment.cloudflare_route_reader ?? {};
+check(
+    routeReader.api_origin === "https://api.cloudflare.com/client/v4" &&
+        JSON.stringify(routeReader.http_methods) === JSON.stringify(["GET"]) &&
+        routeReader.zone_details_and_dns_list_only === true,
+    "the D1 Cloudflare reader must use only the fixed read endpoints"
+);
+check(
+    routeReader.zone_read_and_dns_read_for_exact_zone_required === true &&
+        routeReader.authorization_scheme === "bearer_api_token" &&
+        routeReader.token_persisted_or_serialized === false,
+    "the D1 Cloudflare reader needs a narrow zone token and must not retain it"
+);
+check(
+    routeReader.redirects_followed === false &&
+        routeReader.automatic_retries === 0 &&
+        routeReader.response_limit_bytes === 262144 &&
+        routeReader.aggregate_response_limit_bytes === 1048576 &&
+        routeReader.total_timeout_ms === 20000 &&
+        routeReader.accept_encoding === "identity" &&
+        routeReader.dns_per_page === 1000 &&
+        routeReader.dns_page_limit === 64,
+    "the D1 Cloudflare reader transport limits changed"
+);
+check(
+    routeReader.operator_command_registered === false &&
+        routeReader.performs_mutation === false &&
+        routeReader.authoritative === false,
+    "the D1 Cloudflare reader must remain an unwired read-only library"
 );
 check(
     deployment.operational_identity?.account_id_hmac_commitment_required === true,
