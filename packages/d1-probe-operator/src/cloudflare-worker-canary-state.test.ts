@@ -13,6 +13,7 @@ import {
     createD1ProbeCloudflareWorkerCanaryStateV1,
     d1ProbeCloudflareWorkerCanaryStatePathV1,
     readD1ProbeCloudflareWorkerCanaryStateV1,
+    readD1ProbeCloudflareWorkerCanaryStateReadOnlyV1,
     transitionD1ProbeCloudflareWorkerCanaryStateV1,
 } from "./cloudflare-worker-canary-state.js";
 
@@ -256,5 +257,22 @@ describe("Cloudflare Worker canary durable state", () => {
         });
         await expect(lstat(revisionPath)).resolves.toMatchObject({ nlink: 1 });
         await expect(lstat(tempPath)).rejects.toMatchObject({ code: "ENOENT" });
+    });
+
+    it("keeps read-only inspection from reconciling a published hard-link residue", async () => {
+        const operation = await prepared();
+        expect((await createD1ProbeCloudflareWorkerCanaryStateV1(operation)).success).toBe(true);
+        const revisionPath = d1ProbeCloudflareWorkerCanaryStatePathV1(operation.plan.plan_digest);
+        if (revisionPath === null) throw new Error("state path unavailable");
+        const tempPath = revisionPath.replace(".0.operation.json", `.0.${crypto.randomUUID()}.operation.tmp`);
+        cleanupPaths.add(tempPath);
+        await link(revisionPath, tempPath);
+
+        await expect(readD1ProbeCloudflareWorkerCanaryStateReadOnlyV1(operation.plan.plan_digest)).resolves.toEqual({
+            success: false,
+            code: "unsafe_state_path",
+        });
+        await expect(lstat(revisionPath)).resolves.toMatchObject({ nlink: 2 });
+        await expect(lstat(tempPath)).resolves.toMatchObject({ nlink: 2 });
     });
 });

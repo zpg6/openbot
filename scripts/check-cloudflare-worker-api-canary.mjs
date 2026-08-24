@@ -23,7 +23,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
     check(fixture.purpose === "isolated_beta_to_classic_worker_api_interoperability_only", "scope changed");
     check(
         fixture.implementation?.credentialed_runner_implemented === true &&
-            fixture.implementation?.root_command_registered === true &&
+            fixture.implementation?.root_command_registered === false &&
+            fixture.implementation?.credentialed_cli_fail_closed === true &&
+            fixture.implementation?.shared_bounded_transport_implemented === true &&
+            fixture.implementation?.unregistered_runner_uses_shared_bounded_transport === true &&
             fixture.implementation?.canonical_plan_generator_implemented === true &&
             fixture.implementation?.root_plan_command_registered === true &&
             fixture.implementation?.durable_operation_state_implemented === true &&
@@ -33,6 +36,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.cleanup_cli_registered === false &&
             fixture.implementation?.manual_cleanup_authority_implemented === false &&
             fixture.implementation?.response_projection_contract_implemented === true &&
+            fixture.implementation?.read_only_recovery_inspector_implemented === true &&
+            fixture.implementation?.root_recovery_inspector_command_registered === true &&
             fixture.implementation?.secure_secret_fd_launcher_implemented === false &&
             fixture.implementation?.response_preimage_capture_implemented === false &&
             fixture.implementation?.reviewed_observation_fixture_transition_implemented === false &&
@@ -76,6 +81,9 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
         workflow.automatic_retries === 0 &&
             workflow.redirects_followed === false &&
             workflow.response_encoding_requested === "identity" &&
+            workflow.shared_aggregate_response_budget_bytes === 2 * 1024 * 1024 &&
+            same(workflow.forward_transport_methods, ["GET", "POST"]) &&
+            same(workflow.cleanup_transport_methods, ["GET", "DELETE"]) &&
             workflow.ambiguous_mutation_result === "manual_cleanup_required_no_retry" &&
             workflow.checkout_local_plan_reservation === true &&
             workflow.distributed_plan_reservation === false &&
@@ -89,6 +97,14 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.manual_cleanup_after_grace_implemented === false &&
             workflow.complete_pagination_metadata_required_for_absence === true &&
             workflow.optional_response_projection_contract_implemented === true &&
+            workflow.recovery_inspector?.command === "d1-probe:inspect-worker-api-canary-recovery" &&
+            workflow.recovery_inspector?.canonical_stdin_required === true &&
+            same(workflow.recovery_inspector?.credential_inputs, []) &&
+            workflow.recovery_inspector?.network_access === false &&
+            workflow.recovery_inspector?.filesystem_writes === false &&
+            workflow.recovery_inspector?.raw_identity_output === false &&
+            workflow.recovery_inspector?.mutation_executable === false &&
+            workflow.recovery_inspector?.authoritative === false &&
             workflow.uncertain_or_interrupted_exit_is_nonzero === true,
         "the canary mutation transport must not redirect or retry ambiguity"
     );
@@ -250,16 +266,28 @@ export const readAndCheckCloudflareWorkerApiCanaryFixture = async () => {
         readFile("packages/d1-probe-operator/package.json", "utf8").then(JSON.parse),
     ]);
     const errors = checkCloudflareWorkerApiCanaryFixture(fixture);
+    const forbiddenLiveCommandRegistered = [rootManifest.scripts ?? {}, operatorManifest.scripts ?? {}].some(scripts =>
+        Object.values(scripts).some(
+            command =>
+                typeof command === "string" &&
+                (command.includes("src/cloudflare-worker-canary-cli.ts") ||
+                    /(?:^|\s)canary-worker-api(?:\s|$)/u.test(command))
+        )
+    );
     if (
         rootManifest.scripts?.["d1-probe:plan-worker-api-canary"] !==
             "corepack pnpm --dir packages/d1-probe-operator plan-worker-api-canary" ||
         operatorManifest.scripts?.["plan-worker-api-canary"] !==
             "node --import tsx src/cloudflare-worker-canary-plan-cli.ts" ||
-        rootManifest.scripts?.["d1-probe:canary-worker-api"] !==
-            "corepack pnpm --dir packages/d1-probe-operator canary-worker-api" ||
-        operatorManifest.scripts?.["canary-worker-api"] !== "node --import tsx src/cloudflare-worker-canary-cli.ts"
+        rootManifest.scripts?.["d1-probe:inspect-worker-api-canary-recovery"] !==
+            "corepack pnpm --dir packages/d1-probe-operator inspect-worker-api-canary-recovery" ||
+        operatorManifest.scripts?.["inspect-worker-api-canary-recovery"] !==
+            "node --import tsx src/cloudflare-worker-canary-recovery-inspect-cli.ts" ||
+        rootManifest.scripts?.["d1-probe:canary-worker-api"] !== undefined ||
+        operatorManifest.scripts?.["canary-worker-api"] !== undefined ||
+        forbiddenLiveCommandRegistered
     ) {
-        errors.push("the Worker API canary root and package commands drifted");
+        errors.push("the Worker API canary may register only its plan and read-only recovery inspector commands");
     }
     return errors;
 };

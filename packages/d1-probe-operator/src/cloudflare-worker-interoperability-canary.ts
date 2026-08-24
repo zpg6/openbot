@@ -7,6 +7,11 @@ import {
 } from "@openbot/gate-attestation/internal";
 
 import { D1ProbeCommitmentKeyV1Schema } from "./contracts.js";
+import {
+    createD1ProbeCloudflareWorkerCanaryTransportV1,
+    type D1ProbeCloudflareWorkerCanaryTranscriptEntryV1,
+    type D1ProbeCloudflareWorkerCanaryJsonResponseV1,
+} from "./cloudflare-worker-canary-transport.js";
 
 const DigestV1Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const AccountIdV1Schema = z.string().regex(/^[0-9a-f]{32}$/u);
@@ -21,10 +26,7 @@ const FIXED_MODULE_SOURCE_V1 = "export default { fetch() { return new Response(n
 const FIXED_MODULE_NAME_V1 = "entry.js";
 const FIXED_COMPATIBILITY_DATE_V1 = "2026-08-22";
 const MAX_WINDOW_MS_V1 = 300_000;
-const MAX_RESPONSE_BYTES_V1 = 256 * 1024;
-const MAX_AGGREGATE_RESPONSE_BYTES_V1 = 2 * 1024 * 1024;
 const MAX_PAGES_V1 = 10;
-const API_ROOT_V1 = "https://api.cloudflare.com/client/v4";
 
 export const D1ProbeCloudflareWorkerApiCanaryPlanV1Schema = z
     .object({
@@ -197,22 +199,6 @@ const hmacIdentity = async (key: CryptoKey, domain: string, value: string): Prom
     return toHex(await globalThis.crypto.subtle.sign("HMAC", key, arrayBuffer(bytes)));
 };
 
-const canonicalRequest = (method: string, path: string, body?: CanonicalJsonValueV1) => ({
-    method,
-    path,
-    ...(body === undefined ? {} : { body: canonicalizeJsonV1(body) }),
-});
-
-type TranscriptEntryV1 = {
-    readonly sequence: number;
-    readonly method: string;
-    readonly path_digest: string;
-    readonly request_digest: string;
-    readonly response_digest: string | null;
-    readonly status: number | null;
-    readonly observed_at_ms: number;
-};
-
 export interface UntrustedD1ProbeCloudflareWorkerApiCanaryResultV1 {
     readonly schema_version: 1;
     readonly kind: "untrusted_d1_probe_cloudflare_worker_api_canary_result";
@@ -234,7 +220,7 @@ export interface UntrustedD1ProbeCloudflareWorkerApiCanaryResultV1 {
         readonly worker_delete: 0 | 1;
     };
     readonly cleanup_status: "not_needed" | "control_plane_absence_observed" | "manual_required";
-    readonly transcript: readonly TranscriptEntryV1[];
+    readonly transcript: readonly D1ProbeCloudflareWorkerCanaryTranscriptEntryV1[];
     readonly transcript_digest: string;
     readonly runtime_identity_verified: false;
     readonly caller_mutation_authority: false;
@@ -265,8 +251,6 @@ type MutableStateV1 = {
     versionId: string | null;
     deploymentId: string | null;
     mutationAttempts: { shell_create: 0 | 1; version_create: 0 | 1; deployment_create: 0 | 1; worker_delete: 0 | 1 };
-    transcript: TranscriptEntryV1[];
-    aggregateBytes: number;
 };
 
 const timestampInside = (value: string, plan: D1ProbeCloudflareWorkerApiCanaryPlanV1): boolean => {
@@ -397,8 +381,6 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
         versionId: null,
         deploymentId: null,
         mutationAttempts: { shell_create: 0, version_create: 0, deployment_create: 0, worker_delete: 0 },
-        transcript: [],
-        aggregateBytes: 0,
     };
     const attemptBytes = new Uint8Array(16);
     try {
@@ -416,124 +398,32 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
     );
     const fixedModuleBytes = new TextEncoder().encode(FIXED_MODULE_SOURCE_V1);
     const fixedModuleSha256 = await sha256(fixedModuleBytes);
-
-    const requestJson = async (
-        method: string,
-        path: string,
-        body?: CanonicalJsonValueV1,
-        acceptedStatuses: readonly number[] = [200]
-    ): Promise<{ ok: true; status: number; json: unknown } | { ok: false; status: number | null }> => {
-        const observedAt = dependencies.now();
-        if (!Number.isSafeInteger(observedAt) || observedAt < plan.not_before_ms || observedAt >= plan.expires_at_ms) {
-            return { ok: false, status: null };
-        }
-        const requestProjection = canonicalRequest(method, path, body);
-        const requestDigest = await digestCanonicalJsonV1(
-            "openbot.d1-probe.cloudflare-worker-api-canary-request.v1",
-            requestProjection as CanonicalJsonValueV1
-        );
-        if (requestDigest === null) return { ok: false, status: null };
-        const pathDigest = await sha256(new TextEncoder().encode(path));
-        const entry: TranscriptEntryV1 = {
-            sequence: state.transcript.length + 1,
-            method,
-            path_digest: pathDigest,
-            request_digest: requestDigest,
-            response_digest: null,
-            status: null,
-            observed_at_ms: observedAt,
-        };
-        state.transcript.push(entry);
-        try {
-            const remainingMs = plan.expires_at_ms - observedAt;
-            if (remainingMs <= 0) return { ok: false, status: null };
-            const response = await dependencies.fetch(`${API_ROOT_V1}${path}`, {
-                method,
-                redirect: "manual",
-                signal: AbortSignal.timeout(Math.max(1, Math.min(20_000, remainingMs))),
-                headers: {
-                    Accept: "application/json",
-                    "Accept-Encoding": "identity",
-                    Authorization: `Bearer ${credentials.data.api_token}`,
-                    ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-                },
-                ...(body === undefined ? {} : { body: canonicalizeJsonV1(body) }),
-            });
-            const encoding = response.headers.get("content-encoding");
-            const contentType = response.headers.get("content-type") ?? "";
-            if (response.type === "opaqueredirect" || (encoding !== null && encoding !== "identity"))
-                return { ok: false, status: response.status };
-            const declaredLength = response.headers.get("content-length");
-            if (
-                declaredLength !== null &&
-                (!/^\d+$/u.test(declaredLength) || Number(declaredLength) > MAX_RESPONSE_BYTES_V1)
-            ) {
-                return { ok: false, status: response.status };
-            }
-            const reader = response.body?.getReader();
-            if (reader === undefined) return { ok: false, status: response.status };
-            const chunks: Uint8Array[] = [];
-            let responseSize = 0;
-            for (;;) {
-                const chunk = await reader.read();
-                if (chunk.done) break;
-                responseSize += chunk.value.byteLength;
-                if (responseSize > MAX_RESPONSE_BYTES_V1) {
-                    await reader.cancel().catch(() => undefined);
-                    return { ok: false, status: response.status };
-                }
-                chunks.push(chunk.value);
-            }
-            const bytes = new Uint8Array(responseSize);
-            let offset = 0;
-            for (const chunk of chunks) {
-                bytes.set(chunk, offset);
-                offset += chunk.byteLength;
-            }
-            state.aggregateBytes += bytes.byteLength;
-            const responseObservedAt = dependencies.now();
-            state.transcript[state.transcript.length - 1] = {
-                ...entry,
-                response_digest: await sha256(bytes),
-                status: response.status,
-                observed_at_ms: responseObservedAt,
-            };
-            if (
-                !Number.isSafeInteger(responseObservedAt) ||
-                responseObservedAt < plan.not_before_ms ||
-                responseObservedAt >= plan.expires_at_ms ||
-                state.aggregateBytes > MAX_AGGREGATE_RESPONSE_BYTES_V1 ||
-                !acceptedStatuses.includes(response.status)
-            ) {
-                return { ok: false, status: response.status };
-            }
-            if (!contentType.toLowerCase().startsWith("application/json")) {
-                return { ok: false, status: response.status };
-            }
-            let json: unknown;
-            try {
-                json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
-            } catch {
-                return { ok: false, status: response.status };
-            }
-            return { ok: true, status: response.status, json };
-        } catch {
-            return { ok: false, status: null };
-        }
-    };
+    const transport = createD1ProbeCloudflareWorkerCanaryTransportV1({
+        api_token: credentials.data.api_token,
+        fetch: dependencies.fetch,
+        now: dependencies.now,
+        forward_window: { not_before_ms: plan.not_before_ms, expires_at_ms: plan.expires_at_ms },
+        cleanup_window: { not_before_ms: plan.not_before_ms, expires_at_ms: plan.expires_at_ms },
+    });
 
     const parseEnvelope = (input: unknown): z.infer<typeof EnvelopeV1Schema> | null => {
         const parsed = EnvelopeV1Schema.safeParse(input);
         return parsed.success ? parsed.data : null;
     };
 
-    const listWorkers = async (): Promise<z.infer<typeof WorkerV1Schema>[] | null> => {
+    type GetJsonV1 = (
+        path: string,
+        acceptedStatuses?: readonly number[]
+    ) => Promise<D1ProbeCloudflareWorkerCanaryJsonResponseV1>;
+
+    const listWorkers = async (
+        getJson: GetJsonV1 = transport.forward.get
+    ): Promise<z.infer<typeof WorkerV1Schema>[] | null> => {
         const all: z.infer<typeof WorkerV1Schema>[] = [];
         let expectedTotalCount: number | null = null;
         let expectedTotalPages: number | null = null;
         for (let page = 1; page <= MAX_PAGES_V1; page += 1) {
-            const response = await requestJson(
-                "GET",
+            const response = await getJson(
                 `/accounts/${plan.account_id}/workers/workers?page=${page}&per_page=100&order_by=name&order=asc`
             );
             if (!response.ok) return null;
@@ -574,8 +464,11 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
         return null;
     };
 
-    const getWorker = async (workerId: string): Promise<z.infer<typeof WorkerV1Schema> | null> => {
-        const response = await requestJson("GET", `/accounts/${plan.account_id}/workers/workers/${workerId}`);
+    const getWorker = async (
+        workerId: string,
+        getJson: GetJsonV1 = transport.forward.get
+    ): Promise<z.infer<typeof WorkerV1Schema> | null> => {
+        const response = await getJson(`/accounts/${plan.account_id}/workers/workers/${workerId}`);
         if (!response.ok) return null;
         const envelope = parseEnvelope(response.json);
         const parsed = WorkerV1Schema.safeParse(envelope?.result);
@@ -583,8 +476,7 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
     };
 
     const listVersions = async (workerId: string): Promise<z.infer<typeof VersionSummaryV1Schema>[] | null> => {
-        const response = await requestJson(
-            "GET",
+        const response = await transport.forward.get(
             `/accounts/${plan.account_id}/workers/workers/${workerId}/versions?page=1&per_page=100`
         );
         if (!response.ok) return null;
@@ -610,8 +502,7 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
     };
 
     const listDeployments = async (): Promise<z.infer<typeof DeploymentV1Schema>[] | null> => {
-        const response = await requestJson(
-            "GET",
+        const response = await transport.forward.get(
             `/accounts/${plan.account_id}/workers/scripts/${plan.script_name}/deployments`
         );
         if (!response.ok) return null;
@@ -659,7 +550,7 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
             fixed_module_sha256: fixedModuleSha256,
             mutation_attempts: state.mutationAttempts,
             cleanup_status: cleanupStatus,
-            transcript: state.transcript,
+            transcript: transport.transcript,
             runtime_identity_verified: false,
             caller_mutation_authority: false,
             authoritative: false,
@@ -683,23 +574,23 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
         if (state.workerId === null) return "manual_required";
         if (state.mutationAttempts.worker_delete === 1) return "manual_required";
         state.stage = "worker_cleanup_ownership_readback";
-        const ownedWorker = await getWorker(state.workerId);
+        const ownedWorker = await getWorker(state.workerId, transport.cleanup.get);
         if (ownedWorker === null || !ownedWorkerMatches(ownedWorker, plan, state.workerId, attemptTag)) {
             return "manual_required";
         }
         state.stage = "worker_delete";
         state.mutationAttempts.worker_delete = 1;
-        const deletion = await requestJson("DELETE", `/accounts/${plan.account_id}/workers/workers/${state.workerId}`);
+        const deletion = await transport.cleanup.delete(
+            `/accounts/${plan.account_id}/workers/workers/${state.workerId}`
+        );
         const deletionAcknowledged = deletion.ok && parseEnvelope(deletion.json) !== null;
         state.stage = "worker_absence_readback";
-        const exactAbsence = await requestJson(
-            "GET",
+        const exactAbsence = await transport.cleanup.get(
             `/accounts/${plan.account_id}/workers/workers/${state.workerId}`,
-            undefined,
             [404]
         );
         if (!exactAbsence.ok || exactAbsence.status !== 404) return "manual_required";
-        const workers = await listWorkers();
+        const workers = await listWorkers(transport.cleanup.get);
         if (workers === null) return "manual_required";
         return deletionAcknowledged &&
             !workers.some(worker => worker.id === state.workerId || worker.name === plan.script_name)
@@ -747,7 +638,7 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
             tags: [plan.markers.ownership_tag, attemptTag],
             tail_consumers: [],
         } satisfies CanonicalJsonValueV1;
-        const shellResponse = await requestJson("POST", `/accounts/${plan.account_id}/workers/workers`, shellBody);
+        const shellResponse = await transport.forward.post(`/accounts/${plan.account_id}/workers/workers`, shellBody);
         if (!shellResponse.ok) {
             if (shellResponse.status !== null && shellResponse.status >= 400 && shellResponse.status < 500) {
                 return { success: true, result: await result("inconclusive", "not_needed") };
@@ -761,8 +652,7 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
 
         state.stage = "shell_readback";
         const shellReadback = await getWorker(state.workerId);
-        const subdomain = await requestJson(
-            "GET",
+        const subdomain = await transport.forward.get(
             `/accounts/${plan.account_id}/workers/scripts/${plan.script_name}/subdomain`
         );
         const subdomainEnvelope = subdomain.ok ? parseEnvelope(subdomain.json) : null;
@@ -802,8 +692,7 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
                 },
             ],
         } satisfies CanonicalJsonValueV1;
-        const versionResponse = await requestJson(
-            "POST",
+        const versionResponse = await transport.forward.post(
             `/accounts/${plan.account_id}/workers/workers/${state.workerId}/versions?deploy=false`,
             versionBody
         );
@@ -831,15 +720,13 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
         ) {
             return await operationalFailure();
         }
-        const betaVersion = await requestJson(
-            "GET",
+        const betaVersion = await transport.forward.get(
             `/accounts/${plan.account_id}/workers/workers/${state.workerId}/versions/${state.versionId}?include=modules`
         );
         const betaDetail = VersionDetailV1Schema.safeParse(
             parseEnvelope(betaVersion.ok ? betaVersion.json : null)?.result
         );
-        const classicVersion = await requestJson(
-            "GET",
+        const classicVersion = await transport.forward.get(
             `/accounts/${plan.account_id}/workers/scripts/${plan.script_name}/versions/${state.versionId}`
         );
         const classicDetail = ClassicVersionV1Schema.safeParse(
@@ -865,8 +752,7 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
             annotations: { "workers/message": plan.markers.deployment_message },
             versions: [{ version_id: state.versionId, percentage: 100 }],
         } satisfies CanonicalJsonValueV1;
-        const deploymentResponse = await requestJson(
-            "POST",
+        const deploymentResponse = await transport.forward.post(
             `/accounts/${plan.account_id}/workers/scripts/${plan.script_name}/deployments?force=false`,
             deploymentBody
         );
@@ -884,16 +770,14 @@ export const runD1ProbeCloudflareWorkerApiCanaryV1 = async (
 
         state.stage = "deployment_readback";
         const deployments = await listDeployments();
-        const deploymentReadback = await requestJson(
-            "GET",
+        const deploymentReadback = await transport.forward.get(
             `/accounts/${plan.account_id}/workers/scripts/${plan.script_name}/deployments/${state.deploymentId}`
         );
         const deploymentDetail = DeploymentV1Schema.safeParse(
             parseEnvelope(deploymentReadback.ok ? deploymentReadback.json : null)?.result
         );
         const deployedWorker = await getWorker(state.workerId);
-        const finalSubdomain = await requestJson(
-            "GET",
+        const finalSubdomain = await transport.forward.get(
             `/accounts/${plan.account_id}/workers/scripts/${plan.script_name}/subdomain`
         );
         const finalSubdomainResult = z

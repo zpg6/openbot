@@ -214,7 +214,11 @@ const happyResponses = (): Response[] => [
     workersPage([]),
 ];
 
-const run = async (responses: readonly QueuedResponse[], observedNow = now, shouldTerminate?: () => boolean) => {
+const run = async (
+    responses: readonly QueuedResponse[],
+    observedNow: number | (() => number) = now,
+    shouldTerminate?: () => boolean
+) => {
     const transport = sequenceFetch(responses);
     const result = await runD1ProbeCloudflareWorkerApiCanaryV1(
         await plan(),
@@ -222,7 +226,7 @@ const run = async (responses: readonly QueuedResponse[], observedNow = now, shou
         { hmac_key_base64url: key },
         {
             fetch: transport.fetch,
-            now: () => observedNow,
+            now: typeof observedNow === "function" ? observedNow : () => observedNow,
             randomBytes: bytes => {
                 bytes.fill(12);
                 return bytes;
@@ -285,6 +289,25 @@ describe("Cloudflare Worker beta/classic interoperability canary", () => {
                 ["GET", paths.worker],
                 ["GET", paths.listWorkers],
             ].map(([method, path]) => [method, `${apiRoot}${path}`])
+        );
+        expect(execution.result.result.transcript.map(entry => entry.method)).toEqual(
+            execution.calls.map(call => call.method)
+        );
+        expect(execution.result.result.transcript).toHaveLength(execution.calls.length);
+        expect(
+            execution.result.result.transcript.every(
+                entry =>
+                    /^[0-9a-f]{64}$/u.test(entry.path_digest) &&
+                    /^[0-9a-f]{64}$/u.test(entry.request_digest) &&
+                    /^[0-9a-f]{64}$/u.test(entry.response_digest ?? "")
+            )
+        ).toBe(true);
+        const { transcript_digest: transcriptDigest, ...transcriptProjection } = execution.result.result;
+        expect(transcriptDigest).toBe(
+            await digestCanonicalJsonV1(
+                "openbot.d1-probe.cloudflare-worker-api-canary-transcript.v1",
+                transcriptProjection as unknown as CanonicalJsonValueV1
+            )
         );
 
         const versionRequest = JSON.parse(execution.calls[6]?.body ?? "null") as Record<string, unknown>;
@@ -594,6 +617,31 @@ describe("Cloudflare Worker beta/classic interoperability canary", () => {
         });
         expect(execution.calls).toHaveLength(2);
         expect(execution.calls.filter(call => call.method === "DELETE")).toHaveLength(0);
+    });
+
+    it("does not treat a shell rejection as definite when its response clock cannot be recorded", async () => {
+        let clockReads = 0;
+        const execution = await run(
+            [
+                workersPage([]),
+                jsonResponse({ success: false, errors: [{ code: 10090 }], messages: [], result: null }, 409),
+            ],
+            () => {
+                clockReads += 1;
+                if (clockReads >= 5) throw new Error("clock unavailable after shell response");
+                return now;
+            }
+        );
+        expect(execution.result).toMatchObject({
+            success: true,
+            result: { status: "manual_required", cleanup_status: "manual_required" },
+        });
+        expect(execution.calls).toHaveLength(2);
+        expect(execution.result.success && execution.result.result.transcript.at(-1)).toMatchObject({
+            method: "POST",
+            response_digest: null,
+            status: null,
+        });
     });
 
     it("returns manual_required when immutable-ID absence is observed but the exact name remains", async () => {

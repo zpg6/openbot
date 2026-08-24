@@ -40,7 +40,7 @@ export type D1ProbeCloudflareWorkerCanaryStateResultV1 =
 type StateRootResultV1 =
     | {
           readonly success: false;
-          readonly code: "unsafe_state_path" | "unsafe_state_permissions" | "state_io_unavailable";
+          readonly code: "state_not_found" | "unsafe_state_path" | "unsafe_state_permissions" | "state_io_unavailable";
       }
     | { readonly success: true; readonly root: string };
 
@@ -63,7 +63,7 @@ const isContainedPath = (parent: string, child: string): boolean => {
     return pathFromParent !== ".." && !pathFromParent.startsWith(`..${sep}`);
 };
 
-const ensureStateRoot = async (): Promise<StateRootResultV1> => {
+const ensureStateRoot = async (createIfMissing = true): Promise<StateRootResultV1> => {
     try {
         const repositoryStat = await lstat(repositoryRoot);
         if (!repositoryStat.isDirectory() || repositoryStat.isSymbolicLink()) {
@@ -72,6 +72,7 @@ const ensureStateRoot = async (): Promise<StateRootResultV1> => {
         const realRepositoryRoot = await realpath(repositoryRoot);
         let buildStat = await lstatOrNull(buildRoot);
         if (buildStat === null) {
+            if (!createIfMissing) return { success: false, code: "state_not_found" };
             await mkdir(buildRoot, { mode: 0o700 });
             buildStat = await lstat(buildRoot);
         }
@@ -80,6 +81,7 @@ const ensureStateRoot = async (): Promise<StateRootResultV1> => {
         }
         let stateRootStat = await lstatOrNull(D1_PROBE_CLOUDFLARE_WORKER_CANARY_STATE_ROOT_V1);
         if (stateRootStat === null) {
+            if (!createIfMissing) return { success: false, code: "state_not_found" };
             await mkdir(D1_PROBE_CLOUDFLARE_WORKER_CANARY_STATE_ROOT_V1, { mode: 0o700 });
             stateRootStat = await lstat(D1_PROBE_CLOUDFLARE_WORKER_CANARY_STATE_ROOT_V1);
         }
@@ -155,13 +157,18 @@ const reconcilePublishedRevision = async (
 const readRevision = async (
     root: string,
     planDigest: string,
-    revision: number
+    revision: number,
+    reconcilePublishedLink = true
 ): Promise<D1ProbeCloudflareWorkerCanaryStateResultV1> => {
     const path = revisionPathFor(root, planDigest, revision);
     try {
         let pathStat = await lstatOrNull(path);
         if (pathStat === null) return { success: false, code: "state_not_found" };
-        if (pathStat.nlink === 2 && (await reconcilePublishedRevision(root, planDigest, revision, pathStat))) {
+        if (
+            reconcilePublishedLink &&
+            pathStat.nlink === 2 &&
+            (await reconcilePublishedRevision(root, planDigest, revision, pathStat))
+        ) {
             pathStat = await lstat(path);
         }
         if (pathStat.isSymbolicLink() || !pathStat.isFile() || pathStat.nlink !== 1) {
@@ -201,8 +208,12 @@ const readRevision = async (
     }
 };
 
-const readLatest = async (root: string, planDigest: string): Promise<D1ProbeCloudflareWorkerCanaryStateResultV1> => {
-    let latest = await readRevision(root, planDigest, 0);
+const readLatest = async (
+    root: string,
+    planDigest: string,
+    reconcilePublishedLinks = true
+): Promise<D1ProbeCloudflareWorkerCanaryStateResultV1> => {
+    let latest = await readRevision(root, planDigest, 0, reconcilePublishedLinks);
     if (!latest.success) {
         if (latest.code !== "state_not_found") return latest;
         return (await finalRevisions(root, planDigest)).length === 0
@@ -210,7 +221,7 @@ const readLatest = async (root: string, planDigest: string): Promise<D1ProbeClou
             : { success: false, code: "state_corrupt" };
     }
     for (let revision = 1; revision <= MAX_REVISIONS_V1; revision += 1) {
-        const candidate = await readRevision(root, planDigest, revision);
+        const candidate = await readRevision(root, planDigest, revision, reconcilePublishedLinks);
         if (!candidate.success) {
             if (candidate.code !== "state_not_found") return candidate;
             const unexpectedLaterRevision = (await finalRevisions(root, planDigest)).some(value => value > revision);
@@ -288,6 +299,19 @@ export const readD1ProbeCloudflareWorkerCanaryStateV1 = async (
         const stateRoot = await ensureStateRoot();
         if (!stateRoot.success) return stateRoot;
         return await readLatest(stateRoot.root, planDigest);
+    } catch {
+        return { success: false, code: "state_io_unavailable" };
+    }
+};
+
+export const readD1ProbeCloudflareWorkerCanaryStateReadOnlyV1 = async (
+    planDigest: string
+): Promise<D1ProbeCloudflareWorkerCanaryStateResultV1> => {
+    if (!DigestV1.test(planDigest)) return { success: false, code: "invalid_plan_digest" };
+    try {
+        const stateRoot = await ensureStateRoot(false);
+        if (!stateRoot.success) return stateRoot;
+        return await readLatest(stateRoot.root, planDigest, false);
     } catch {
         return { success: false, code: "state_io_unavailable" };
     }
