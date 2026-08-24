@@ -6,6 +6,7 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 
 ### Added
 
+- Role-specific D1 probe Worker HTTP entrypoints with direct Access checks, strict runtime-version observations, first-primary sink readback, and a lifecycle contract that separates Version upload from 100% Deployment. Remote upload remains blocked until preview-safety and opaque evidence consumers exist.
 - A private pure compiler for upload-ineligible D1 probe Worker artifact candidates. It binds exact module and canonical direct-API multipart metadata digests for the sink and both writers, while granting no upload, deployment, lifecycle, or gate authority.
 - Initial implementation plan for the self-hosted read-only Bot runtime.
 - TypeScript repository foundation, core contracts, and public project documentation.

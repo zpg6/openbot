@@ -377,9 +377,12 @@ describe("Cloudflare D1 database bootstrap", () => {
     it("turns an ambiguous first dispatch into exact target-bound manual cleanup without retry", async () => {
         const provisioned = await prepareCreatedDatabase();
         const forgedManual = markD1ProbeLifecycleAmbiguousV1(provisioned.plan, provisioned.journal, {
-            failed_step: "sink_deployed",
+            failed_step: "sink_version_uploaded",
             reason: "unexpected_platform_result",
             observation_digest: "f".repeat(64),
+            worker_dispatch_phase: "pre_dispatch",
+            retry_allowed: false,
+            manual_cleanup_required: true,
         });
         if (!forgedManual.success) throw new Error(forgedManual.code);
         const forgedDeleteFetch = vi.fn();
@@ -409,7 +412,13 @@ describe("Cloudflare D1 database bootstrap", () => {
         expect(result.cleanup_target).toBe(provisioned.created);
         expect(result.journal).toMatchObject({
             completed_steps: ["database_created"],
-            manual_required: { failed_step: "sink_deployed", reason: "unexpected_platform_result" },
+            manual_required: {
+                failed_step: "sink_version_uploaded",
+                reason: "unexpected_platform_result",
+                worker_dispatch_phase: "pre_dispatch",
+                retry_allowed: false,
+                manual_cleanup_required: true,
+            },
             state: "manual_required",
         });
         expect(fetch).toHaveBeenCalledTimes(1);

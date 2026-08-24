@@ -7,6 +7,6 @@
         "tsBuildInfoFile": "../../node_modules/.cache/d1-probe-writer.tsbuildinfo",
         "types": ["@cloudflare/workers-types"]
     },
-    "include": ["entry.ts", "src/**/*.ts"],
+    "include": ["entry*.ts", "src/**/*.ts"],
     "references": [{ "path": "../../packages/d1-probe-rpc" }]
 }

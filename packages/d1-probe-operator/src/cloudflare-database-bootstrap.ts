@@ -438,9 +438,12 @@ const markManual = async (
             phase,
         })) ?? fallbackObservationDigest;
     const marked = markD1ProbeLifecycleAmbiguousV1(plan, journal, {
-        failed_step: "sink_deployed",
+        failed_step: "sink_version_uploaded",
         reason: "unexpected_platform_result",
         observation_digest: observationDigest,
+        worker_dispatch_phase: "pre_dispatch",
+        retry_allowed: false,
+        manual_cleanup_required: true,
     });
     const nextJournal = marked.success ? marked.journal : journal;
     if (marked.success) {
@@ -464,7 +467,7 @@ export const isD1ProbeDatabaseBootstrapCleanupAuthorizedV1 = (
         journal.state !== "manual_required" ||
         journal.completed_steps.length !== 1 ||
         journal.completed_steps[0] !== "database_created" ||
-        journal.manual_required?.failed_step !== "sink_deployed" ||
+        journal.manual_required?.failed_step !== "sink_version_uploaded" ||
         journal.manual_required.reason !== "unexpected_platform_result"
     ) {
         return false;
@@ -503,7 +506,7 @@ export const initializeD1ProbeDatabaseV1 = async (
         journal === null ||
         journal.plan_digest !== preflightContext.plan.plan_digest ||
         !isD1ProbeLifecycleJournalBoundV1(preflightContext.plan, journal) ||
-        !isD1ProbeLifecycleJournalReadyForStepV1(preflightContext.plan, journal, "sink_deployed")
+        !isD1ProbeLifecycleJournalReadyForStepV1(preflightContext.plan, journal, "sink_version_uploaded")
     ) {
         return { success: false, code: "invalid_lifecycle_journal" };
     }

@@ -1,9 +1,11 @@
 import {
+    D1_PROBE_RUNTIME_VERSION_HEADER_V1,
     canonicalD1ProbeGatewayTrialHttpBodyV1,
     canonicalD1ProbeGatewayTrialHttpResponseV1,
     computeD1ProbeGatewayReservationRequestDigestV1,
     computeD1ProbeGatewayTrialRequestDigestV1,
     d1ProbeHttpErrorV1,
+    d1ProbeRuntimeVersionHeaderV1,
     gatewayTrialResponseV1,
     type D1ProbeGatewayReservationRequestV1,
     type D1ProbeGatewayTrialRequestV1,
@@ -19,6 +21,16 @@ const exactUrl = "https://probe.example.test/openbot-d1-probe/writer-a/run-00000
 const clientId = `${"b".repeat(32)}.access`;
 const clientSecret = "c".repeat(64);
 const hex = (character: string): string => character.repeat(64);
+const writerARuntimeVersion = {
+    id: "writer_a_version_001",
+    tag: "probe-writer-a",
+    timestamp: "2026-08-24T12:34:56.000Z",
+} as const;
+const writerBRuntimeVersion = {
+    id: "writer_b_version_001",
+    tag: "probe-writer-b",
+    timestamp: "2026-08-24T12:35:56.000Z",
+} as const;
 
 const trialRequest = async (writerRole: D1ProbeWriterRoleV1 = "writer_a") => {
     const unsignedGateway: UnsignedD1ProbeGatewayReservationRequestV1 = {
@@ -75,7 +87,12 @@ const writerResult = (trial: D1ProbeGatewayTrialRequestV1) =>
         gateway_response: null,
     });
 
-const responseFrom = (body: string, status: number, headers: Record<string, string> = {}): Response =>
+const responseFrom = (
+    body: string,
+    status: number,
+    headers: Record<string, string> = {},
+    runtimeVersion: typeof writerARuntimeVersion | typeof writerBRuntimeVersion | null = writerARuntimeVersion
+): Response =>
     new Response(body, {
         status,
         headers: {
@@ -84,18 +101,25 @@ const responseFrom = (body: string, status: number, headers: Record<string, stri
             "content-type": "application/json; charset=utf-8",
             "referrer-policy": "no-referrer",
             "x-content-type-options": "nosniff",
+            ...(runtimeVersion === null
+                ? {}
+                : { [D1_PROBE_RUNTIME_VERSION_HEADER_V1]: d1ProbeRuntimeVersionHeaderV1(runtimeVersion) }),
             ...headers,
         },
     });
 
-const transport = (fetch = vi.fn<typeof globalThis.fetch>()) => ({
+const transport = (
+    fetch = vi.fn<typeof globalThis.fetch>(),
+    writerRole: D1ProbeWriterRoleV1 = "writer_a",
+    triggerUrl = exactUrl
+) => ({
     fetch,
     send: createD1ProbeGatewayTrialTransportV1(
         {
             schema_version: 1,
-            exact_trigger_url: exactUrl,
+            exact_trigger_url: triggerUrl,
             access_service_token_client_id: clientId,
-            writer_role: "writer_a",
+            writer_role: writerRole,
             request_timeout_ms: 5_000,
         },
         { client_secret: clientSecret },
@@ -117,6 +141,7 @@ describe("D1 probe driver transport", () => {
             request_digest: trial.request_digest,
             writer_role: "writer_a",
             http_status: 503,
+            runtime_version: writerARuntimeVersion,
             response: { status: "outcome_unknown", error_code: "gateway_execution_unknown" },
         });
         expect(JSON.stringify(result)).not.toContain(clientSecret);
@@ -141,15 +166,87 @@ describe("D1 probe driver transport", () => {
     it("returns a strict server rejection without retrying", async () => {
         const trial = await trialRequest();
         const body = canonicalD1ProbeGatewayTrialHttpResponseV1(d1ProbeHttpErrorV1("access_required"));
-        const fetch = vi.fn<typeof globalThis.fetch>(async () => responseFrom(body, 403));
+        const fetch = vi.fn<typeof globalThis.fetch>(async () => responseFrom(body, 403, {}, null));
         const result = await transport(fetch).send(trial);
         expect(result).toMatchObject({
             status: "server_rejected",
             request_digest: trial.request_digest,
             http_status: 403,
+            runtime_version: null,
             response: { code: "access_required" },
         });
         expect(fetch).toHaveBeenCalledOnce();
+    });
+
+    it("keeps Writer A and Writer B runtime observations distinct while rejecting body-role substitution", async () => {
+        const writerBUrl = "https://probe.example.test/openbot-d1-probe/writer-b/run-000000000001";
+        const writerA = await trialRequest("writer_a");
+        const writerB = await trialRequest("writer_b");
+        const writerAFetch = vi.fn<typeof globalThis.fetch>(async () =>
+            responseFrom(canonicalD1ProbeGatewayTrialHttpResponseV1(writerResult(writerA)), 503)
+        );
+        const writerBFetch = vi.fn<typeof globalThis.fetch>(async () =>
+            responseFrom(
+                canonicalD1ProbeGatewayTrialHttpResponseV1(writerResult(writerB)),
+                503,
+                {},
+                writerBRuntimeVersion
+            )
+        );
+        await expect(transport(writerAFetch).send(writerA)).resolves.toMatchObject({
+            status: "delivered",
+            writer_role: "writer_a",
+            runtime_version: writerARuntimeVersion,
+        });
+        await expect(transport(writerBFetch, "writer_b", writerBUrl).send(writerB)).resolves.toMatchObject({
+            status: "delivered",
+            writer_role: "writer_b",
+            runtime_version: writerBRuntimeVersion,
+        });
+
+        const substitutedFetch = vi.fn<typeof globalThis.fetch>(async () =>
+            responseFrom(
+                canonicalD1ProbeGatewayTrialHttpResponseV1(writerResult(writerA)),
+                503,
+                {},
+                writerARuntimeVersion
+            )
+        );
+        await expect(transport(substitutedFetch, "writer_b", writerBUrl).send(writerB)).resolves.toMatchObject({
+            status: "outcome_unknown",
+            error_code: "response_invalid",
+        });
+    });
+
+    it("rejects missing, malformed, padded, and noncanonical runtime-version headers", async () => {
+        const trial = await trialRequest();
+        const body = canonicalD1ProbeGatewayTrialHttpResponseV1(writerResult(trial));
+        const whitespaceJson = JSON.stringify(writerARuntimeVersion).replace("{", "{ ");
+        const noncanonical = btoa(whitespaceJson).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+        const canonical = d1ProbeRuntimeVersionHeaderV1(writerARuntimeVersion);
+        const responses = [
+            responseFrom(body, 503, {}, null),
+            responseFrom(body, 503, { [D1_PROBE_RUNTIME_VERSION_HEADER_V1]: "not+base64url" }, null),
+            responseFrom(body, 503, { [D1_PROBE_RUNTIME_VERSION_HEADER_V1]: `${canonical}=` }, null),
+            responseFrom(body, 503, { [D1_PROBE_RUNTIME_VERSION_HEADER_V1]: noncanonical }, null),
+        ];
+        for (const response of responses) {
+            const fetch = vi.fn<typeof globalThis.fetch>(async () => response);
+            await expect(transport(fetch).send(trial)).resolves.toMatchObject({
+                status: "outcome_unknown",
+                error_code: "response_invalid",
+            });
+        }
+    });
+
+    it("rejects runtime metadata leaked on a pre-Access server denial", async () => {
+        const trial = await trialRequest();
+        const body = canonicalD1ProbeGatewayTrialHttpResponseV1(d1ProbeHttpErrorV1("access_required"));
+        const fetch = vi.fn<typeof globalThis.fetch>(async () => responseFrom(body, 403));
+        await expect(transport(fetch).send(trial)).resolves.toMatchObject({
+            status: "outcome_unknown",
+            error_code: "response_invalid",
+        });
     });
 
     it("rejects invalid requests and role substitution before the network", async () => {

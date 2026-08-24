@@ -1,11 +1,14 @@
 import {
     D1_PROBE_GATEWAY_TRIAL_HTTP_BODY_LIMIT_BYTES_V1,
     D1_PROBE_RPC_VERSION_V1,
+    D1_PROBE_RUNTIME_VERSION_HEADER_V1,
+    D1ProbeRuntimeVersionMetadataV1Schema,
     D1ProbeWriterHttpConfigV1Schema,
     canonicalD1ProbeGatewayTrialHttpBodyV1,
     canonicalD1ProbeGatewayTrialHttpResponseV1,
     d1ProbeGatewayTrialHttpStatusV1,
     d1ProbeHttpErrorV1,
+    d1ProbeRuntimeVersionHeaderV1,
     gatewayTrialResponseV1,
     parseAndVerifyD1ProbeGatewayTrialRequestV1,
     type D1ProbeGatewayTrialRequestV1,
@@ -61,7 +64,7 @@ const accessMatches = async (
         return (
             identity !== null &&
             identity["service_token_status"] === true &&
-            identity["service_token_id"] === config.access_service_token_client_id
+            identity["service_token_id"] === config.access_service_client_id
         );
     } catch {
         return false;
@@ -123,7 +126,8 @@ const unknownExecution = (
 
 export const createD1ProbeWriterHttpHandlerV1 = (
     configInput: unknown,
-    execution: D1ProbeWriterHttpExecutionV1
+    execution: D1ProbeWriterHttpExecutionV1,
+    runtimeVersionInput: unknown
 ): ((request: Request, access?: D1ProbeAccessContextV1) => Promise<Response>) => {
     let config: ReturnType<typeof D1ProbeWriterHttpConfigV1Schema.safeParse>;
     try {
@@ -132,27 +136,37 @@ export const createD1ProbeWriterHttpHandlerV1 = (
         throw new TypeError("Invalid D1 probe Writer HTTP configuration");
     }
     if (!config.success) throw new TypeError("Invalid D1 probe Writer HTTP configuration");
+    let runtimeVersion: ReturnType<typeof D1ProbeRuntimeVersionMetadataV1Schema.safeParse>;
+    try {
+        runtimeVersion = D1ProbeRuntimeVersionMetadataV1Schema.safeParse(runtimeVersionInput);
+    } catch {
+        throw new TypeError("Invalid D1 probe Writer runtime version metadata");
+    }
+    if (!runtimeVersion.success) throw new TypeError("Invalid D1 probe Writer runtime version metadata");
+    const runtimeHeaders = {
+        [D1_PROBE_RUNTIME_VERSION_HEADER_V1]: d1ProbeRuntimeVersionHeaderV1(runtimeVersion.data),
+    } satisfies Readonly<Record<string, string>>;
 
     return async (request, access) => {
         if (request.url !== config.data.exact_trigger_url) return errorResponse("not_found", 404);
         if (!(await accessMatches(access, config.data))) return errorResponse("access_required", 403);
         if (request.method !== "POST") {
-            return errorResponse("method_not_allowed", 405, { allow: "POST" });
+            return errorResponse("method_not_allowed", 405, { ...runtimeHeaders, allow: "POST" });
         }
         if (request.headers.get("content-type") !== "application/json") {
-            return errorResponse("content_type_required", 415);
+            return errorResponse("content_type_required", 415, runtimeHeaders);
         }
         if (request.headers.has("content-encoding") || request.headers.has("transfer-encoding")) {
-            return errorResponse("content_encoding_forbidden", 415);
+            return errorResponse("content_encoding_forbidden", 415, runtimeHeaders);
         }
         const contentLength = contentLengthFrom(request);
-        if (contentLength === null) return errorResponse("content_length_required", 411);
+        if (contentLength === null) return errorResponse("content_length_required", 411, runtimeHeaders);
         if (contentLength > D1_PROBE_GATEWAY_TRIAL_HTTP_BODY_LIMIT_BYTES_V1) {
-            return errorResponse("body_too_large", 413);
+            return errorResponse("body_too_large", 413, runtimeHeaders);
         }
         const body = await readExactBody(request, contentLength);
-        if (body === "too_large") return errorResponse("body_too_large", 413);
-        if (body === null) return errorResponse("invalid_body", 400);
+        if (body === "too_large") return errorResponse("body_too_large", 413, runtimeHeaders);
+        if (body === null) return errorResponse("invalid_body", 400, runtimeHeaders);
 
         let text: string;
         let parsedBody: unknown;
@@ -162,12 +176,12 @@ export const createD1ProbeWriterHttpHandlerV1 = (
             parsedBody = JSON.parse(text) as unknown;
             trial = await parseAndVerifyD1ProbeGatewayTrialRequestV1(parsedBody);
             if (text !== (await canonicalD1ProbeGatewayTrialHttpBodyV1(trial))) {
-                return errorResponse("invalid_body", 400);
+                return errorResponse("invalid_body", 400, runtimeHeaders);
             }
         } catch {
-            return errorResponse("invalid_body", 400);
+            return errorResponse("invalid_body", 400, runtimeHeaders);
         }
-        if (trial.writer_role !== config.data.writer_role) return errorResponse("invalid_body", 400);
+        if (trial.writer_role !== config.data.writer_role) return errorResponse("invalid_body", 400, runtimeHeaders);
 
         let result: D1ProbeGatewayTrialResponseV1;
         try {
@@ -181,7 +195,8 @@ export const createD1ProbeWriterHttpHandlerV1 = (
         }
         return jsonResponse(
             canonicalD1ProbeGatewayTrialHttpResponseV1(result),
-            d1ProbeGatewayTrialHttpStatusV1(result)
+            d1ProbeGatewayTrialHttpStatusV1(result),
+            runtimeHeaders
         );
     };
 };

@@ -105,8 +105,11 @@ export const D1ProbeCommitmentKeyV1Schema = z
 
 export const D1_PROBE_CREATE_STEPS_V1 = Object.freeze([
     "database_created",
+    "sink_version_uploaded",
     "sink_deployed",
+    "writer_a_version_uploaded",
     "writer_a_deployed",
+    "writer_b_version_uploaded",
     "writer_b_deployed",
     "access_application_created",
     "access_policy_created",
@@ -116,6 +119,65 @@ export const D1_PROBE_CREATE_STEPS_V1 = Object.freeze([
     "readback_route_created",
     "probe_ready",
 ] as const);
+
+export const D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1 = Object.freeze([
+    "sink_version_uploaded",
+    "writer_a_version_uploaded",
+    "writer_b_version_uploaded",
+] as const);
+
+export const D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1 = Object.freeze([
+    "sink_deployed",
+    "writer_a_deployed",
+    "writer_b_deployed",
+] as const);
+
+export const D1_PROBE_WORKER_MUTATION_STEPS_V1 = Object.freeze([
+    "sink_version_uploaded",
+    "sink_deployed",
+    "writer_a_version_uploaded",
+    "writer_a_deployed",
+    "writer_b_version_uploaded",
+    "writer_b_deployed",
+] as const);
+
+export const D1_PROBE_WORKER_MUTATION_CONTRACT_V1 = Object.freeze({
+    schema_version: 1 as const,
+    kind: "d1_probe_worker_mutation_contract" as const,
+    authoritative: false as const,
+    mutation_allowed: false as const,
+    lifecycle_advance_allowed: false as const,
+    gate_promotion_allowed: false as const,
+    database_precondition: "opaque_initialized_database_required_after_database_created" as const,
+    upload_safety_blocker: "script_shell_and_subdomain_settings_protocol_missing" as const,
+    first_version_preview_safety_resolved: false as const,
+    roles: Object.freeze(
+        [
+            ["sink", "sink_version_uploaded", "sink_deployed"],
+            ["writer_a", "writer_a_version_uploaded", "writer_a_deployed"],
+            ["writer_b", "writer_b_version_uploaded", "writer_b_deployed"],
+        ].map(([role, uploadStep, deploymentStep]) =>
+            Object.freeze({
+                role,
+                upload: Object.freeze({
+                    step: uploadStep,
+                    state: "blocked_pending_script_shell_settings_protocol" as const,
+                    adapter_implemented: false as const,
+                    lost_response: "manual_cleanup_required_no_retry" as const,
+                }),
+                deployment: Object.freeze({
+                    step: deploymentStep,
+                    state: "blocked_pending_opaque_version_evidence" as const,
+                    adapter_implemented: false as const,
+                    version_count: 1 as const,
+                    traffic_percentage: 100 as const,
+                    force: false as const,
+                    lost_response: "manual_cleanup_required_no_retry" as const,
+                }),
+            })
+        )
+    ),
+});
 
 export const D1_PROBE_CLEANUP_STEPS_V1 = Object.freeze([
     "run_fenced",
@@ -275,6 +337,157 @@ export const D1ProbePreflightPlanV1Schema = z
     });
 export type D1ProbePreflightPlanV1 = z.infer<typeof D1ProbePreflightPlanV1Schema>;
 
+export const D1ProbeLifecycleObservationV1Schema = z
+    .object({
+        step: D1ProbeLifecycleStepV1Schema,
+        observation_digest: DigestSchema,
+        resource_kind: D1ProbeResourceKindV1Schema.nullable(),
+        resource_name_commitment: DigestSchema.nullable(),
+        resource_id_commitment: DigestSchema.nullable(),
+        worker_version_id_commitment: DigestSchema.optional(),
+        worker_artifact_digest: DigestSchema.optional(),
+        worker_binding_configuration_digest: DigestSchema.optional(),
+        worker_deployment_id_commitment: DigestSchema.optional(),
+        worker_deployment_percentage: z.literal(100).optional(),
+        worker_deployment_force: z.literal(false).optional(),
+    })
+    .strict()
+    .superRefine((observation, context) => {
+        const isUpload = D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1.includes(observation.step as never);
+        const isDeployment = D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1.includes(observation.step as never);
+        const hasVersion = observation.worker_version_id_commitment !== undefined;
+        const hasArtifact = observation.worker_artifact_digest !== undefined;
+        const hasBindingConfiguration = observation.worker_binding_configuration_digest !== undefined;
+        const hasDeployment = observation.worker_deployment_id_commitment !== undefined;
+        const hasPercentage = observation.worker_deployment_percentage !== undefined;
+        const hasForce = observation.worker_deployment_force !== undefined;
+        if (
+            (isUpload &&
+                (!hasVersion ||
+                    !hasArtifact ||
+                    !hasBindingConfiguration ||
+                    hasDeployment ||
+                    hasPercentage ||
+                    hasForce)) ||
+            (isDeployment &&
+                (!hasVersion ||
+                    !hasArtifact ||
+                    !hasBindingConfiguration ||
+                    !hasDeployment ||
+                    observation.worker_deployment_percentage !== 100 ||
+                    observation.worker_deployment_force !== false)) ||
+            (!isUpload &&
+                !isDeployment &&
+                (hasVersion || hasArtifact || hasBindingConfiguration || hasDeployment || hasPercentage || hasForce))
+        ) {
+            context.addIssue({
+                code: "custom",
+                message: "Worker upload and deployment observations must carry their exact artifact and remote state",
+            });
+        }
+    });
+export type D1ProbeLifecycleObservationV1 = z.infer<typeof D1ProbeLifecycleObservationV1Schema>;
+
+export const D1ProbeWorkerUploadDeploymentEvidenceV1Schema = z
+    .object({
+        upload: D1ProbeLifecycleObservationV1Schema,
+        deployment: D1ProbeLifecycleObservationV1Schema,
+    })
+    .strict()
+    .superRefine((evidence, context) => {
+        const expectedDeploymentStep =
+            evidence.upload.step === "sink_version_uploaded"
+                ? "sink_deployed"
+                : evidence.upload.step === "writer_a_version_uploaded"
+                  ? "writer_a_deployed"
+                  : evidence.upload.step === "writer_b_version_uploaded"
+                    ? "writer_b_deployed"
+                    : null;
+        if (
+            expectedDeploymentStep === null ||
+            evidence.deployment.step !== expectedDeploymentStep ||
+            evidence.upload.worker_version_id_commitment !== evidence.deployment.worker_version_id_commitment ||
+            evidence.upload.worker_artifact_digest !== evidence.deployment.worker_artifact_digest ||
+            evidence.upload.worker_binding_configuration_digest !==
+                evidence.deployment.worker_binding_configuration_digest ||
+            evidence.upload.resource_kind !== evidence.deployment.resource_kind ||
+            evidence.upload.resource_id_commitment !== evidence.deployment.resource_id_commitment ||
+            evidence.upload.resource_name_commitment !== evidence.deployment.resource_name_commitment
+        ) {
+            context.addIssue({
+                code: "custom",
+                message:
+                    "Deployment evidence must bind the exact uploaded artifact, configuration, version, and script",
+            });
+        }
+    });
+
+export const D1ProbeLifecycleManualRequiredV1Schema = z
+    .object({
+        failed_step: D1ProbeLifecycleStepV1Schema,
+        reason: z.enum([
+            "ambiguous_create",
+            "ambiguous_version_upload",
+            "ambiguous_deployment",
+            "ambiguous_delete",
+            "id_mismatch",
+            "name_mismatch",
+            "inflight_state_unknown",
+            "absence_unverified",
+            "unexpected_platform_result",
+        ]),
+        observation_digest: DigestSchema,
+        worker_dispatch_phase: z.enum(["pre_dispatch", "post_dispatch"]).optional(),
+        mutation_outcome: z.literal("unknown").optional(),
+        retry_allowed: z.literal(false).optional(),
+        manual_cleanup_required: z.literal(true).optional(),
+    })
+    .strict()
+    .superRefine((failure, context) => {
+        const failedUpload = D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1.includes(failure.failed_step as never);
+        const failedDeployment = D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1.includes(failure.failed_step as never);
+        const isWorkerStep = failedUpload || failedDeployment;
+        const isBootstrapPreDispatchFailure =
+            failure.failed_step === "sink_version_uploaded" &&
+            failure.reason === "unexpected_platform_result" &&
+            failure.worker_dispatch_phase === "pre_dispatch" &&
+            failure.mutation_outcome === undefined &&
+            failure.retry_allowed === false &&
+            failure.manual_cleanup_required === true;
+        const isPostDispatchUploadFailure =
+            failedUpload &&
+            failure.reason === "ambiguous_version_upload" &&
+            failure.worker_dispatch_phase === "post_dispatch" &&
+            failure.mutation_outcome === "unknown" &&
+            failure.retry_allowed === false &&
+            failure.manual_cleanup_required === true;
+        const isPostDispatchDeploymentFailure =
+            failedDeployment &&
+            failure.reason === "ambiguous_deployment" &&
+            failure.worker_dispatch_phase === "post_dispatch" &&
+            failure.mutation_outcome === "unknown" &&
+            failure.retry_allowed === false &&
+            failure.manual_cleanup_required === true;
+        const hasWorkerFailureFields =
+            failure.worker_dispatch_phase !== undefined ||
+            failure.mutation_outcome !== undefined ||
+            failure.retry_allowed !== undefined ||
+            failure.manual_cleanup_required !== undefined;
+        if (
+            (isWorkerStep &&
+                !isBootstrapPreDispatchFailure &&
+                !isPostDispatchUploadFailure &&
+                !isPostDispatchDeploymentFailure) ||
+            (!isWorkerStep && hasWorkerFailureFields)
+        ) {
+            context.addIssue({
+                code: "custom",
+                message: "Worker failure reason, dispatch phase, retry, and cleanup semantics must match",
+            });
+        }
+    });
+export type D1ProbeLifecycleManualRequiredV1 = z.infer<typeof D1ProbeLifecycleManualRequiredV1Schema>;
+
 export const D1ProbeLifecycleJournalV1Schema = z
     .object({
         schema_version: z.literal(1),
@@ -302,35 +515,8 @@ export const D1ProbeLifecycleJournalV1Schema = z
             }),
         state: z.enum(["planned", "provisioning", "ready", "cleaning_up", "cleanup_confirmed", "manual_required"]),
         completed_steps: z.array(D1ProbeLifecycleStepV1Schema).max(D1_PROBE_LIFECYCLE_STEPS_V1.length),
-        observations: z
-            .array(
-                z
-                    .object({
-                        step: D1ProbeLifecycleStepV1Schema,
-                        observation_digest: DigestSchema,
-                        resource_kind: D1ProbeResourceKindV1Schema.nullable(),
-                        resource_name_commitment: DigestSchema.nullable(),
-                        resource_id_commitment: DigestSchema.nullable(),
-                    })
-                    .strict()
-            )
-            .max(D1_PROBE_LIFECYCLE_STEPS_V1.length),
-        manual_required: z
-            .object({
-                failed_step: D1ProbeLifecycleStepV1Schema,
-                reason: z.enum([
-                    "ambiguous_create",
-                    "ambiguous_delete",
-                    "id_mismatch",
-                    "name_mismatch",
-                    "inflight_state_unknown",
-                    "absence_unverified",
-                    "unexpected_platform_result",
-                ]),
-                observation_digest: DigestSchema,
-            })
-            .strict()
-            .nullable(),
+        observations: z.array(D1ProbeLifecycleObservationV1Schema).max(D1_PROBE_LIFECYCLE_STEPS_V1.length),
+        manual_required: D1ProbeLifecycleManualRequiredV1Schema.nullable(),
     })
     .strict()
     .superRefine((journal, context) => {
@@ -353,6 +539,13 @@ export const D1ProbeLifecycleJournalV1Schema = z
             });
         }
         const completedLength = journal.completed_steps.length;
+        if (journal.completed_steps.some(step => D1_PROBE_WORKER_MUTATION_STEPS_V1.includes(step as never))) {
+            context.addIssue({
+                code: "custom",
+                path: ["completed_steps"],
+                message: "Worker mutations require a private opaque evidence consumer",
+            });
+        }
         if (
             journal.state === "cleanup_confirmed" ||
             journal.completed_steps.includes("all_resource_absence_confirmed")
@@ -388,6 +581,52 @@ export const D1ProbeLifecycleJournalV1Schema = z
                 code: "custom",
                 path: ["manual_required", "failed_step"],
                 message: "Manual review must identify the exact next lifecycle step",
+            });
+        }
+        for (const [index, observation] of journal.observations.entries()) {
+            const isDeployment = D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1.includes(observation.step as never);
+            if (isDeployment) {
+                const uploadStep =
+                    observation.step === "sink_deployed"
+                        ? "sink_version_uploaded"
+                        : observation.step === "writer_a_deployed"
+                          ? "writer_a_version_uploaded"
+                          : "writer_b_version_uploaded";
+                const upload = journal.observations.find(candidate => candidate.step === uploadStep);
+                if (
+                    upload === undefined ||
+                    upload.worker_version_id_commitment !== observation.worker_version_id_commitment ||
+                    upload.worker_artifact_digest !== observation.worker_artifact_digest ||
+                    upload.worker_binding_configuration_digest !== observation.worker_binding_configuration_digest ||
+                    upload.resource_id_commitment !== observation.resource_id_commitment ||
+                    upload.resource_name_commitment !== observation.resource_name_commitment
+                ) {
+                    context.addIssue({
+                        code: "custom",
+                        path: ["observations", index],
+                        message: "Worker deployment must bind the exact uploaded version and script",
+                    });
+                }
+            }
+        }
+        const uploadedVersionIds = journal.observations
+            .filter(observation => D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1.includes(observation.step as never))
+            .map(observation => observation.worker_version_id_commitment);
+        const deploymentIds = journal.observations
+            .filter(observation => D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1.includes(observation.step as never))
+            .map(observation => observation.worker_deployment_id_commitment);
+        if (new Set(uploadedVersionIds).size !== uploadedVersionIds.length) {
+            context.addIssue({
+                code: "custom",
+                path: ["observations"],
+                message: "Worker uploaded version commitments must be pairwise distinct",
+            });
+        }
+        if (new Set(deploymentIds).size !== deploymentIds.length) {
+            context.addIssue({
+                code: "custom",
+                path: ["observations"],
+                message: "Worker deployment commitments must be pairwise distinct",
             });
         }
     });

@@ -164,7 +164,7 @@ describe("deployed D1 probe private RPC boundary", () => {
         });
     });
 
-    it("keeps every checked-in config local-only, private, unlogged, and bound to one D1 database", async () => {
+    it("keeps every checked-in config local-only, unrouted, unlogged, and bound to one D1 database", async () => {
         const configUrls = [
             new URL("../../apps/d1-probe-sink/wrangler.local.jsonc", import.meta.url),
             new URL("../../apps/d1-probe-writer/wrangler.a.local.jsonc", import.meta.url),
@@ -184,6 +184,7 @@ describe("deployed D1 probe private RPC boundary", () => {
         expect(configs[2]).toMatch(/"entrypoint": "D1ProbeSinkService"/u);
         const parsed = configs.map(config => JSON.parse(config.replace(/,\s*([}\]])/gu, "$1"))) as Array<{
             name: string;
+            main: string;
             d1_databases: Array<{ database_id: string }>;
             services?: Array<{ service: string; entrypoint: string }>;
         }>;
@@ -195,15 +196,24 @@ describe("deployed D1 probe private RPC boundary", () => {
             entrypoint: "D1ProbeSinkService",
         });
         expect(parsed[2]?.services?.[0]).toEqual(parsed[1]?.services?.[0]);
+        expect(parsed.map(config => config.main)).toEqual(["entry.ts", "entry.a.ts", "entry.b.ts"]);
 
-        const [sinkEntry, writerEntry, sinkRecord, writerForward] = await Promise.all([
-            readFile(new URL("../../apps/d1-probe-sink/entry.ts", import.meta.url), "utf8"),
-            readFile(new URL("../../apps/d1-probe-writer/entry.ts", import.meta.url), "utf8"),
-            readFile(new URL("../../apps/d1-probe-sink/src/record.ts", import.meta.url), "utf8"),
-            readFile(new URL("../../apps/d1-probe-writer/src/forward.ts", import.meta.url), "utf8"),
-        ]);
-        expect(sinkEntry).toMatch(/fetch\(\): Response[\s\S]*new Response\("Not found", \{ status: 404/iu);
-        expect(writerEntry).toMatch(/fetch\(\): Response[\s\S]*new Response\("Not found", \{ status: 404/iu);
+        const [sinkEntry, writerAEntry, writerBEntry, sinkRecord, sinkReadback, writerForward, writerHttp] =
+            await Promise.all([
+                readFile(new URL("../../apps/d1-probe-sink/entry.ts", import.meta.url), "utf8"),
+                readFile(new URL("../../apps/d1-probe-writer/entry.a.ts", import.meta.url), "utf8"),
+                readFile(new URL("../../apps/d1-probe-writer/entry.b.ts", import.meta.url), "utf8"),
+                readFile(new URL("../../apps/d1-probe-sink/src/record.ts", import.meta.url), "utf8"),
+                readFile(new URL("../../apps/d1-probe-sink/src/readback.ts", import.meta.url), "utf8"),
+                readFile(new URL("../../apps/d1-probe-writer/src/forward.ts", import.meta.url), "utf8"),
+                readFile(new URL("../../apps/d1-probe-writer/src/http.ts", import.meta.url), "utf8"),
+            ]);
+        expect(sinkEntry).toMatch(/fetch\(request: Request[\s\S]*context\.access/iu);
+        expect(writerAEntry).toMatch(/export class D1ProbeWriterAService[\s\S]*context\.access/iu);
+        expect(writerAEntry).not.toMatch(/D1ProbeWriterBService/u);
+        expect(writerBEntry).toMatch(/export class D1ProbeWriterBService[\s\S]*context\.access/iu);
+        expect(writerBEntry).not.toMatch(/D1ProbeWriterAService/u);
         expect(`${sinkRecord}\n${writerForward}`).not.toMatch(/\bfetch\s*\(/u);
+        expect(`${sinkReadback}\n${writerHttp}`).not.toMatch(/CF-Access|authorization|cookie/iu);
     });
 });

@@ -1,7 +1,9 @@
 import {
+    D1_PROBE_RUNTIME_VERSION_HEADER_V1,
     D1ProbeHttpErrorV1Schema,
     D1ProbeAccessServiceTokenClientIdV1Schema,
     D1ProbeGatewayTrialResponseV1Schema,
+    D1ProbeRuntimeVersionMetadataV1Schema,
     D1ProbeWriterTriggerUrlV1Schema,
     canonicalD1ProbeGatewayTrialHttpBodyV1,
     canonicalD1ProbeGatewayTrialHttpResponseV1,
@@ -9,8 +11,10 @@ import {
     d1ProbeHttpErrorStatusV1,
     parseAndVerifyD1ProbeGatewayTrialRequestV1,
     parseD1ProbeGatewayTrialHttpResponseV1,
+    parseD1ProbeRuntimeVersionHeaderV1,
     type D1ProbeGatewayTrialHttpResponseV1,
     type D1ProbeGatewayTrialRequestV1,
+    type D1ProbeRuntimeVersionMetadataV1,
 } from "@openbot/d1-probe-rpc";
 import { z } from "zod";
 
@@ -47,6 +51,7 @@ export const D1ProbeDriverTransportResultV1Schema = z
                 writer_role: WriterRoleSchema,
                 http_status: z.number().int().min(100).max(599),
                 response_byte_count: z.number().int().positive().max(D1_PROBE_DRIVER_RESPONSE_LIMIT_BYTES_V1),
+                runtime_version: D1ProbeRuntimeVersionMetadataV1Schema,
                 response: D1ProbeGatewayTrialResponseV1Schema,
             })
             .strict(),
@@ -57,6 +62,7 @@ export const D1ProbeDriverTransportResultV1Schema = z
                 writer_role: WriterRoleSchema,
                 http_status: z.number().int().min(100).max(599),
                 response_byte_count: z.number().int().positive().max(D1_PROBE_DRIVER_RESPONSE_LIMIT_BYTES_V1),
+                runtime_version: D1ProbeRuntimeVersionMetadataV1Schema.nullable(),
                 response: D1ProbeHttpErrorV1Schema,
             })
             .strict(),
@@ -103,6 +109,20 @@ export const D1ProbeDriverTransportResultV1Schema = z
                 path: ["http_status"],
                 message: "Rejected Writer status must match its response",
             });
+        }
+        if (result.status === "server_rejected") {
+            const rejectedBeforeAccess =
+                result.response.code === "access_required" || result.response.code === "not_found";
+            if (
+                (rejectedBeforeAccess && result.runtime_version !== null) ||
+                (!rejectedBeforeAccess && result.runtime_version === null)
+            ) {
+                context.addIssue({
+                    code: "custom",
+                    path: ["runtime_version"],
+                    message: "Writer runtime metadata must appear only after Access authentication",
+                });
+            }
         }
     });
 export type D1ProbeDriverTransportResultV1 = z.infer<typeof D1ProbeDriverTransportResultV1Schema>;
@@ -246,7 +266,10 @@ export const createD1ProbeGatewayTrialTransportV1 = (
 
             let text: string;
             let parsed: D1ProbeGatewayTrialHttpResponseV1;
+            let runtimeVersion: D1ProbeRuntimeVersionMetadataV1 | null = null;
             try {
+                const runtimeHeader = response.headers.get(D1_PROBE_RUNTIME_VERSION_HEADER_V1);
+                runtimeVersion = runtimeHeader === null ? null : parseD1ProbeRuntimeVersionHeaderV1(runtimeHeader);
                 text = new TextDecoder("utf-8", { fatal: true }).decode(body);
                 parsed = parseD1ProbeGatewayTrialHttpResponseV1(JSON.parse(text) as unknown);
                 if (text !== canonicalD1ProbeGatewayTrialHttpResponseV1(parsed)) {
@@ -257,18 +280,23 @@ export const createD1ProbeGatewayTrialTransportV1 = (
             }
 
             if ("kind" in parsed) {
-                return response.status === d1ProbeHttpErrorStatusV1(parsed)
+                const rejectedBeforeAccess = parsed.code === "access_required" || parsed.code === "not_found";
+                return response.status === d1ProbeHttpErrorStatusV1(parsed) &&
+                    ((rejectedBeforeAccess && runtimeVersion === null) ||
+                        (!rejectedBeforeAccess && runtimeVersion !== null))
                     ? {
                           status: "server_rejected",
                           request_digest: request.request_digest,
                           writer_role: request.writer_role,
                           http_status: response.status,
                           response_byte_count: body.byteLength,
+                          runtime_version: runtimeVersion,
                           response: parsed,
                       }
                     : unknown(request, "response_invalid");
             }
             if (
+                runtimeVersion === null ||
                 response.status !== d1ProbeGatewayTrialHttpStatusV1(parsed) ||
                 parsed.request_digest !== request.request_digest ||
                 parsed.writer_role !== request.writer_role
@@ -281,6 +309,7 @@ export const createD1ProbeGatewayTrialTransportV1 = (
                 writer_role: request.writer_role,
                 http_status: response.status,
                 response_byte_count: body.byteLength,
+                runtime_version: runtimeVersion,
                 response: parsed,
             };
         } catch {

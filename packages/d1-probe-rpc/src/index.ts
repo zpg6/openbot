@@ -27,6 +27,7 @@ export {
     UnsignedD1ProbeGatewayReservationRequestV1Schema,
     computeD1ProbeGatewayReservationRequestDigestV1,
     gatewayReservationResponseV1,
+    normalizeD1ProbeD1MetadataV1,
     parseAndVerifyD1ProbeGatewayReservationRequestV1,
 } from "./gateway.js";
 
@@ -71,19 +72,29 @@ export {
     D1ProbeGatewayTrialHttpResponseV1Schema,
     D1ProbeHttpErrorCodeV1Schema,
     D1ProbeHttpErrorV1Schema,
+    D1ProbeRuntimeVersionMetadataV1Schema,
+    D1ProbeSinkReadbackHttpConfigV1Schema,
+    D1ProbeSinkReadbackV1Schema,
     D1ProbeWriterHttpConfigV1Schema,
     D1ProbeWriterTriggerUrlV1Schema,
+    D1_PROBE_RUNTIME_VERSION_HEADER_V1,
+    canonicalD1ProbeSinkReadbackV1,
     canonicalD1ProbeGatewayTrialHttpBodyV1,
     canonicalD1ProbeGatewayTrialHttpResponseV1,
     d1ProbeGatewayTrialHttpStatusV1,
     d1ProbeHttpErrorV1,
     d1ProbeHttpErrorStatusV1,
+    d1ProbeRuntimeVersionHeaderV1,
     parseD1ProbeGatewayTrialHttpResponseV1,
+    parseD1ProbeRuntimeVersionHeaderV1,
 } from "./http.js";
 
 export type {
     D1ProbeGatewayTrialHttpResponseV1,
     D1ProbeHttpErrorCodeV1,
     D1ProbeHttpErrorV1,
+    D1ProbeRuntimeVersionMetadataV1,
+    D1ProbeSinkReadbackHttpConfigV1,
+    D1ProbeSinkReadbackV1,
     D1ProbeWriterHttpConfigV1,
 } from "./http.js";

@@ -66,6 +66,81 @@ export const D1ProbeD1MetadataV1Schema = z
     .strict();
 export type D1ProbeD1MetadataV1 = z.infer<typeof D1ProbeD1MetadataV1Schema>;
 
+const exactOwnDataRecord = (value: unknown, expectedKeys: readonly string[], name: string) => {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${name} is invalid`);
+    const descriptors = Object.getOwnPropertyDescriptors(value);
+    for (const descriptor of Object.values(descriptors)) {
+        if (!("value" in descriptor)) throw new TypeError(`${name} is invalid`);
+    }
+    const keys = Object.keys(descriptors).sort();
+    const sortedExpectedKeys = [...expectedKeys].sort();
+    if (keys.length !== sortedExpectedKeys.length || keys.some((key, index) => key !== sortedExpectedKeys[index])) {
+        throw new TypeError(`${name} is invalid`);
+    }
+    return Object.fromEntries(Object.entries(descriptors).map(([key, descriptor]) => [key, descriptor.value]));
+};
+
+const finiteNumber = (value: unknown, name: string): number => {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new TypeError(`${name} is invalid`);
+    return value;
+};
+
+const safeInteger = (value: unknown, name: string): number => {
+    if (!Number.isSafeInteger(value) || (value as number) < 0) throw new TypeError(`${name} is invalid`);
+    return value as number;
+};
+
+const nonemptyString = (value: unknown, name: string, maximum: number): string => {
+    if (typeof value !== "string" || value.length === 0 || value.length > maximum) {
+        throw new TypeError(`${name} is invalid`);
+    }
+    return value;
+};
+
+const d1MetadataKeys = [
+    "changed_db",
+    "changes",
+    "duration",
+    "last_row_id",
+    "rows_read",
+    "rows_written",
+    "served_by",
+    "served_by_primary",
+    "served_by_region",
+    "size_after",
+    "timings",
+    "total_attempts",
+] as const;
+
+export const normalizeD1ProbeD1MetadataV1 = (value: unknown, expectWrite: boolean): D1ProbeD1MetadataV1 => {
+    const meta = exactOwnDataRecord(value, d1MetadataKeys, "D1 metadata");
+    const timings = exactOwnDataRecord(meta["timings"], ["sql_duration_ms"], "D1 timings");
+    const metadata = {
+        changes: safeInteger(meta["changes"], "changes"),
+        rows_read: safeInteger(meta["rows_read"], "rows_read"),
+        rows_written: safeInteger(meta["rows_written"], "rows_written"),
+        changed_db: meta["changed_db"],
+        served_by_primary: meta["served_by_primary"],
+        served_by: nonemptyString(meta["served_by"], "served_by", 128),
+        served_by_region: nonemptyString(meta["served_by_region"], "served_by_region", 64),
+        duration: finiteNumber(meta["duration"], "duration"),
+        sql_duration_ms: finiteNumber(timings["sql_duration_ms"], "sql_duration_ms"),
+        total_attempts: safeInteger(meta["total_attempts"], "total_attempts"),
+        last_row_id: meta["last_row_id"] === null ? null : safeInteger(meta["last_row_id"], "last_row_id"),
+        size_after: safeInteger(meta["size_after"], "size_after"),
+    };
+    if (metadata.served_by_primary !== true || metadata.total_attempts < 1) {
+        throw new TypeError("D1 primary metadata is missing");
+    }
+    if (metadata.changed_db !== expectWrite) throw new TypeError("D1 mutation metadata is inconsistent");
+    if (!expectWrite && (metadata.changes !== 0 || metadata.rows_written !== 0)) {
+        throw new TypeError("D1 read metadata is inconsistent");
+    }
+    const parsed = D1ProbeD1MetadataV1Schema.safeParse(metadata);
+    if (!parsed.success) throw new TypeError("D1 metadata is invalid");
+    return parsed.data;
+};
+
 export const D1ProbeGatewayCommittedBatchV1Schema = z
     .object({
         insert_reservation: z

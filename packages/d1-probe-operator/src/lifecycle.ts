@@ -1,6 +1,9 @@
 import {
     D1_PROBE_CREATE_STEPS_V1,
     D1_PROBE_LIFECYCLE_STEPS_V1,
+    D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1,
+    D1_PROBE_WORKER_MUTATION_STEPS_V1,
+    D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1,
     D1ProbeLifecycleJournalV1Schema,
     D1ProbeLifecycleStepV1Schema,
     D1ProbePreflightPlanV1Schema,
@@ -15,8 +18,11 @@ const DigestPattern = /^[0-9a-f]{64}$/u;
 
 const resourceByStep = Object.freeze({
     database_created: "database",
+    sink_version_uploaded: "sink_script",
     sink_deployed: "sink_script",
+    writer_a_version_uploaded: "writer_a_script",
     writer_a_deployed: "writer_a_script",
+    writer_b_version_uploaded: "writer_b_script",
     writer_b_deployed: "writer_b_script",
     access_application_created: "access_application",
     access_policy_created: "access_policy",
@@ -138,6 +144,7 @@ export const advanceD1ProbeLifecycleJournalV1 = (
               | "manual_review_required"
               | "unexpected_lifecycle_step"
               | "evidence_required"
+              | "opaque_evidence_required"
               | "resource_binding_mismatch"
               | "production_database_denied";
       } => {
@@ -186,6 +193,9 @@ export const advanceD1ProbeLifecycleJournalV1 = (
     }
     const expectedStep = D1_PROBE_LIFECYCLE_STEPS_V1[journal.completed_steps.length];
     if (step.data !== expectedStep) return { success: false, code: "unexpected_lifecycle_step" };
+    if (D1_PROBE_WORKER_MUTATION_STEPS_V1.includes(step.data as never)) {
+        return { success: false, code: "opaque_evidence_required" };
+    }
     if (step.data === "all_resource_absence_confirmed") {
         return { success: false, code: "evidence_required" };
     }
@@ -263,6 +273,44 @@ export const markD1ProbeLifecycleAmbiguousV1 = (
         return { success: false, code: "invalid_lifecycle_failure" };
     }
     if (!failure.success) return { success: false, code: "invalid_lifecycle_failure" };
+    const failedUpload = D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1.includes(failure.data.failed_step as never);
+    const failedDeployment = D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1.includes(failure.data.failed_step as never);
+    const isWorkerStep = failedUpload || failedDeployment;
+    const isBootstrapPreDispatchFailure =
+        failure.data.failed_step === "sink_version_uploaded" &&
+        failure.data.reason === "unexpected_platform_result" &&
+        failure.data.worker_dispatch_phase === "pre_dispatch" &&
+        failure.data.mutation_outcome === undefined &&
+        failure.data.retry_allowed === false &&
+        failure.data.manual_cleanup_required === true;
+    const isPostDispatchUploadFailure =
+        failedUpload &&
+        failure.data.reason === "ambiguous_version_upload" &&
+        failure.data.worker_dispatch_phase === "post_dispatch" &&
+        failure.data.mutation_outcome === "unknown" &&
+        failure.data.retry_allowed === false &&
+        failure.data.manual_cleanup_required === true;
+    const isPostDispatchDeploymentFailure =
+        failedDeployment &&
+        failure.data.reason === "ambiguous_deployment" &&
+        failure.data.worker_dispatch_phase === "post_dispatch" &&
+        failure.data.mutation_outcome === "unknown" &&
+        failure.data.retry_allowed === false &&
+        failure.data.manual_cleanup_required === true;
+    const hasWorkerFields =
+        failure.data.worker_dispatch_phase !== undefined ||
+        failure.data.mutation_outcome !== undefined ||
+        failure.data.retry_allowed !== undefined ||
+        failure.data.manual_cleanup_required !== undefined;
+    if (
+        (isWorkerStep &&
+            !isBootstrapPreDispatchFailure &&
+            !isPostDispatchUploadFailure &&
+            !isPostDispatchDeploymentFailure) ||
+        (!isWorkerStep && hasWorkerFields)
+    ) {
+        return { success: false, code: "invalid_lifecycle_failure" };
+    }
     const next = D1ProbeLifecycleJournalV1Schema.safeParse({
         ...journal,
         state: "manual_required",

@@ -3,6 +3,7 @@ import { exports } from "cloudflare:workers";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
+    D1_PROBE_RUNTIME_VERSION_HEADER_V1,
     computeD1ProbeGatewayReservationRequestDigestV1,
     computeD1ProbeGatewayTrialRequestDigestV1,
     type D1ProbeGatewayReservationRequestV1,
@@ -18,9 +19,15 @@ interface GatewayTrialService {
 
 const workerExports = exports as unknown as {
     D1ProbeWriterAService: GatewayTrialService;
-    D1ProbeWriterBService: GatewayTrialService;
+    D1ProbeWriterBService?: GatewayTrialService;
+    default: Fetcher;
 };
-const probeEnv = env as unknown as { PROBE_DB: D1Database };
+const probeEnv = env as unknown as {
+    PROBE_DB: D1Database;
+    WRITER_B: GatewayTrialService;
+    WRITER_B_FETCH: Fetcher;
+    WRITER_B_HAS_WRITER_A_EXPORT: boolean;
+};
 const hex = (character: string): string => character.repeat(64);
 
 const ddl = [
@@ -120,6 +127,31 @@ beforeAll(async () => {
 });
 
 describe("local Workerd D1 gateway trial", () => {
+    it("keeps the role-specific module exports disjoint", async () => {
+        expect(workerExports.D1ProbeWriterAService).toBeDefined();
+        expect(workerExports.D1ProbeWriterBService).toBeUndefined();
+        expect(probeEnv.WRITER_B_HAS_WRITER_A_EXPORT).toBe(false);
+        await expect(probeEnv.WRITER_B.runGatewayTrial({})).resolves.toMatchObject({ writer_role: "writer_b" });
+    });
+
+    it("denies unauthenticated default fetches without exposing runtime metadata", async () => {
+        for (const [fetcher, url] of [
+            [workerExports.default, "https://probe.example.test/_openbot-d1-probe/writer-a/run-000000000001"],
+            [probeEnv.WRITER_B_FETCH, "https://probe.example.test/_openbot-d1-probe/writer-b/run-000000000001"],
+        ] as const) {
+            const response = await fetcher.fetch(
+                new Request(url, {
+                    method: "POST",
+                    headers: { "content-length": "2", "content-type": "application/json" },
+                    body: "{}",
+                })
+            );
+            expect(response.status).toBe(403);
+            expect(response.headers.get(D1_PROBE_RUNTIME_VERSION_HEADER_V1)).toBeNull();
+            expect(await response.json()).toMatchObject({ code: "access_required" });
+        }
+    });
+
     it("records two role-pinned readiness rows but stops on missing deployed-primary metadata", async () => {
         const requestA = await trialRequest("writer_a", 1);
         const requestB = await trialRequest("writer_b", 2);
@@ -145,7 +177,7 @@ describe("local Workerd D1 gateway trial", () => {
         ]);
         const responses = await Promise.all([
             workerExports.D1ProbeWriterAService.runGatewayTrial(requestA),
-            workerExports.D1ProbeWriterBService.runGatewayTrial(requestB),
+            probeEnv.WRITER_B.runGatewayTrial(requestB),
         ]);
         expect(responses).toMatchObject([
             { status: "outcome_unknown", error_code: "readiness_d1_unknown" },

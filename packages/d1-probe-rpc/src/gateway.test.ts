@@ -5,6 +5,7 @@ import {
     D1ProbeRpcError,
     computeD1ProbeGatewayReservationRequestDigestV1,
     gatewayReservationResponseV1,
+    normalizeD1ProbeD1MetadataV1,
     parseAndVerifyD1ProbeGatewayReservationRequestV1,
     type UnsignedD1ProbeGatewayReservationRequestV1,
 } from "./index.js";
@@ -29,6 +30,42 @@ const unsigned = (): UnsignedD1ProbeGatewayReservationRequestV1 => ({
 });
 
 describe("deployed D1 gateway reservation protocol", () => {
+    it("normalizes the exact deployed D1 metadata shape and rejects additions", () => {
+        const raw = {
+            changes: 0,
+            rows_read: 3,
+            rows_written: 0,
+            changed_db: false,
+            served_by_primary: true,
+            served_by: "d1-primary",
+            served_by_region: "WNAM",
+            duration: 1.2,
+            timings: { sql_duration_ms: 0.8 },
+            total_attempts: 1,
+            last_row_id: null,
+            size_after: 4096,
+        } as const;
+        expect(normalizeD1ProbeD1MetadataV1(raw, false)).toEqual({
+            changes: 0,
+            rows_read: 3,
+            rows_written: 0,
+            changed_db: false,
+            served_by_primary: true,
+            served_by: "d1-primary",
+            served_by_region: "WNAM",
+            duration: 1.2,
+            sql_duration_ms: 0.8,
+            total_attempts: 1,
+            last_row_id: null,
+            size_after: 4096,
+        });
+        expect(() => normalizeD1ProbeD1MetadataV1({ ...raw, unknown_field: true }, false)).toThrow(TypeError);
+        expect(() =>
+            normalizeD1ProbeD1MetadataV1({ ...raw, timings: { sql_duration_ms: 0.8, extra: 1 } }, false)
+        ).toThrow(TypeError);
+        expect(() => normalizeD1ProbeD1MetadataV1({ ...raw, served_by_primary: false }, false)).toThrow(TypeError);
+    });
+
     it("binds every request field into one deterministic digest", async () => {
         const request = unsigned();
         const digest = await computeD1ProbeGatewayReservationRequestDigestV1(request);

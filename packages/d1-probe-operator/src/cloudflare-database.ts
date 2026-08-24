@@ -646,7 +646,7 @@ const isEmergencyBootstrapCleanup = (journal: D1ProbeLifecycleJournalV1): boolea
     journal.state === "manual_required" &&
     journal.completed_steps.length === 1 &&
     journal.completed_steps[0] === "database_created" &&
-    journal.manual_required?.failed_step === "sink_deployed" &&
+    journal.manual_required?.failed_step === "sink_version_uploaded" &&
     journal.manual_required.reason === "unexpected_platform_result";
 
 export const deleteD1ProbeDatabaseV1 = async (

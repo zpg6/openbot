@@ -6,6 +6,9 @@
     "workers_dev": false,
     "preview_urls": false,
     "observability": { "enabled": false },
+    "define": {
+        "__OPENBOT_D1_PROBE_SINK_HTTP_CONFIG_V1__": "{\"schema_version\":1,\"exact_readback_url\":\"https://probe.example.test/_openbot-d1-probe/readback/run-000000000001\",\"access_audience\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"access_service_client_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.access\",\"probe_run_id\":\"probe_run_0000001\"}",
+    },
     "version_metadata": { "binding": "VERSION_METADATA" },
     "d1_databases": [
         {

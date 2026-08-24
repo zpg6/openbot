@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
 
 import {
+    D1_PROBE_RUNTIME_VERSION_HEADER_V1,
     canonicalD1ProbeGatewayTrialHttpResponseV1,
     computeD1ProbeGatewayReservationRequestDigestV1,
     computeD1ProbeGatewayTrialRequestDigestV1,
     gatewayTrialResponseV1,
+    d1ProbeRuntimeVersionHeaderV1,
     type D1ProbeGatewayReservationRequestV1,
     type D1ProbeGatewayTrialRequestV1,
     type UnsignedD1ProbeGatewayReservationRequestV1,
@@ -27,6 +29,11 @@ const exactUrl = "https://probe.example.test/openbot-d1-probe/writer-a/run-00000
 const clientId = `${"b".repeat(32)}.access`;
 const clientSecret = "c".repeat(64);
 const hex = (character: string): string => character.repeat(64);
+const runtimeVersion = {
+    id: "writer_a_version_001",
+    tag: "probe-writer-a",
+    timestamp: "2026-08-24T12:34:56.000Z",
+} as const;
 
 const trialRequest = async () => {
     const unsignedGateway: UnsignedD1ProbeGatewayReservationRequestV1 = {
@@ -114,6 +121,7 @@ const responseFrom = (body: string): Response =>
             "content-type": "application/json; charset=utf-8",
             "referrer-policy": "no-referrer",
             "x-content-type-options": "nosniff",
+            [D1_PROBE_RUNTIME_VERSION_HEADER_V1]: d1ProbeRuntimeVersionHeaderV1(runtimeVersion),
         },
     });
 

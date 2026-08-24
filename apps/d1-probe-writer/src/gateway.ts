@@ -6,6 +6,7 @@ import {
     D1ProbeRpcError,
     computeD1ProbeReceiptRequestDigestV1,
     gatewayReservationResponseV1,
+    normalizeD1ProbeD1MetadataV1,
     parseAndVerifyD1ProbeGatewayReservationRequestV1,
     type D1ProbeD1MetadataV1,
     type D1ProbeGatewayCommittedBatchV1,
@@ -51,57 +52,7 @@ const ownDataRecord = (value: unknown, name: string): Readonly<Record<string, un
     return Object.fromEntries(Object.entries(descriptors).map(([key, descriptor]) => [key, descriptor.value]));
 };
 
-const finiteNumber = (value: unknown, name: string): number => {
-    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new TypeError(`${name} is invalid`);
-    return value;
-};
-
-const safeInteger = (value: unknown, name: string): number => {
-    if (!Number.isSafeInteger(value) || (value as number) < 0) throw new TypeError(`${name} is invalid`);
-    return value as number;
-};
-
-const nonemptyString = (value: unknown, name: string, maximum: number): string => {
-    if (typeof value !== "string" || value.length === 0 || value.length > maximum) {
-        throw new TypeError(`${name} is invalid`);
-    }
-    return value;
-};
-
-const metadataFrom = (value: unknown, expectWrite: boolean): D1ProbeD1MetadataV1 => {
-    const meta = ownDataRecord(value, "D1 metadata");
-    const timings = ownDataRecord(meta["timings"], "D1 timings");
-    const metadata = {
-        changes: safeInteger(meta["changes"], "changes"),
-        rows_read: safeInteger(meta["rows_read"], "rows_read"),
-        rows_written: safeInteger(meta["rows_written"], "rows_written"),
-        changed_db: meta["changed_db"],
-        served_by_primary: meta["served_by_primary"],
-        served_by: nonemptyString(meta["served_by"], "served_by", 128),
-        served_by_region: nonemptyString(meta["served_by_region"], "served_by_region", 64),
-        duration: finiteNumber(meta["duration"], "duration"),
-        sql_duration_ms: finiteNumber(timings["sql_duration_ms"], "sql_duration_ms"),
-        total_attempts: safeInteger(meta["total_attempts"], "total_attempts"),
-        last_row_id: meta["last_row_id"] === null ? null : safeInteger(meta["last_row_id"], "last_row_id"),
-        size_after: safeInteger(meta["size_after"], "size_after"),
-    };
-    if (metadata.served_by_primary !== true || metadata.total_attempts < 1) {
-        throw new TypeError("D1 primary metadata is missing");
-    }
-    if (metadata.changed_db !== expectWrite) throw new TypeError("D1 mutation metadata is inconsistent");
-    if (!expectWrite && (metadata.changes !== 0 || metadata.rows_written !== 0)) {
-        throw new TypeError("D1 read metadata is inconsistent");
-    }
-    return metadataFromSchema(metadata);
-};
-
-export { metadataFrom as d1ProbeMetadataFromV1 };
-
-const metadataFromSchema = (value: unknown): D1ProbeD1MetadataV1 => {
-    const result = D1ProbeGatewayReadbackV1Schema.shape.metadata.safeParse(value);
-    if (!result.success) throw new TypeError("D1 metadata is invalid");
-    return result.data;
-};
+export { normalizeD1ProbeD1MetadataV1 as d1ProbeMetadataFromV1 };
 
 const exactRow = <T extends Readonly<Record<string, string | number>>>(
     result: D1Result<Record<string, unknown>>,
@@ -119,7 +70,7 @@ const exactRow = <T extends Readonly<Record<string, string | number>>>(
     ) {
         throw new TypeError(`${name} RETURNING row is invalid`);
     }
-    return { row: expected, metadata: metadataFrom(result.meta, true) };
+    return { row: expected, metadata: normalizeD1ProbeD1MetadataV1(result.meta, true) };
 };
 
 const committedBatchFrom = (
@@ -238,7 +189,7 @@ const readbackAfterConstraint = async (
     const row = result.results[0];
     const parsed = D1ProbeGatewayReadbackV1Schema.safeParse({
         ...row,
-        metadata: metadataFrom(result.meta, false),
+        metadata: normalizeD1ProbeD1MetadataV1(result.meta, false),
     });
     if (!parsed.success) throw new TypeError("D1 readback is invalid");
     return parsed.data;

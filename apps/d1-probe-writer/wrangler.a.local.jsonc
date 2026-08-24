@@ -1,11 +1,14 @@
 {
     "$schema": "../../node_modules/wrangler/config-schema.json",
     "name": "openbot-d1-probe-writer-a-local-only",
-    "main": "entry.ts",
+    "main": "entry.a.ts",
     "compatibility_date": "2026-08-22",
     "workers_dev": false,
     "preview_urls": false,
     "observability": { "enabled": false },
+    "define": {
+        "__OPENBOT_D1_PROBE_WRITER_HTTP_CONFIG_V1__": "{\"schema_version\":1,\"exact_trigger_url\":\"https://probe.example.test/_openbot-d1-probe/writer-a/run-000000000001\",\"access_audience\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"access_service_client_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.access\",\"writer_role\":\"writer_a\"}",
+    },
     "version_metadata": { "binding": "VERSION_METADATA" },
     "d1_databases": [
         {

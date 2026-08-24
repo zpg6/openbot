@@ -1,4 +1,5 @@
 import {
+    D1_PROBE_RUNTIME_VERSION_HEADER_V1,
     canonicalD1ProbeGatewayTrialHttpBodyV1,
     computeD1ProbeGatewayReservationRequestDigestV1,
     computeD1ProbeGatewayTrialRequestDigestV1,
@@ -16,6 +17,11 @@ import { createD1ProbeWriterHttpHandlerV1, type D1ProbeAccessContextV1 } from ".
 const exactUrl = "https://probe.example.test/openbot-d1-probe/writer-a/run-000000000001";
 const audience = "a".repeat(64);
 const serviceTokenClientId = `${"b".repeat(32)}.access`;
+const runtimeVersion = {
+    id: "writer_version_0001",
+    tag: "probe-writer-a",
+    timestamp: "2026-08-24T12:34:56.000Z",
+} as const;
 const hex = (character: string): string => character.repeat(64);
 
 const trialRequest = async (writerRole: D1ProbeWriterRoleV1 = "writer_a") => {
@@ -101,10 +107,11 @@ const handler = (runGatewayTrial = vi.fn(async (trial: D1ProbeGatewayTrialReques
             schema_version: 1,
             exact_trigger_url: exactUrl,
             access_audience: audience,
-            access_service_token_client_id: serviceTokenClientId,
+            access_service_client_id: serviceTokenClientId,
             writer_role: "writer_a",
         },
-        { runGatewayTrial }
+        { runGatewayTrial },
+        runtimeVersion
     ),
 });
 
@@ -119,6 +126,7 @@ describe("D1 probe Writer HTTP boundary", () => {
         expect(response.status).toBe(503);
         expect(response.headers.get("cache-control")).toBe("no-store");
         expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+        expect(response.headers.get(D1_PROBE_RUNTIME_VERSION_HEADER_V1)).not.toBeNull();
         expect(await responseBody(response)).toMatchObject({
             status: "outcome_unknown",
             request_digest: trial.request_digest,
@@ -152,6 +160,7 @@ describe("D1 probe Writer HTTP boundary", () => {
             kind: "d1_probe_http_error",
             code: "access_required",
         });
+        expect(response.headers.get(D1_PROBE_RUNTIME_VERSION_HEADER_V1)).toBeNull();
         expect(runGatewayTrial).not.toHaveBeenCalled();
     });
 
@@ -174,6 +183,8 @@ describe("D1 probe Writer HTTP boundary", () => {
         ];
         const responses = await Promise.all(cases.map(candidate => handle(candidate, access())));
         expect(responses.map(response => response.status)).toEqual([404, 404, 405, 415, 415]);
+        expect(responses[0]?.headers.get(D1_PROBE_RUNTIME_VERSION_HEADER_V1)).toBeNull();
+        expect(responses[1]?.headers.get(D1_PROBE_RUNTIME_VERSION_HEADER_V1)).toBeNull();
         expect(runGatewayTrial).not.toHaveBeenCalled();
     });
 
@@ -247,10 +258,11 @@ describe("D1 probe Writer HTTP boundary", () => {
                     schema_version: 1,
                     exact_trigger_url: "http://probe.example.test/path",
                     access_audience: audience,
-                    access_service_token_client_id: serviceTokenClientId,
+                    access_service_client_id: serviceTokenClientId,
                     writer_role: "writer_a",
                 },
-                { runGatewayTrial: async trial => unknownResult(trial) }
+                { runGatewayTrial: async trial => unknownResult(trial) },
+                runtimeVersion
             )
         ).toThrow(TypeError);
         expect(() =>
@@ -263,7 +275,21 @@ describe("D1 probe Writer HTTP boundary", () => {
                         },
                     }
                 ),
-                { runGatewayTrial: async trial => unknownResult(trial) }
+                { runGatewayTrial: async trial => unknownResult(trial) },
+                runtimeVersion
+            )
+        ).toThrow(TypeError);
+        expect(() =>
+            createD1ProbeWriterHttpHandlerV1(
+                {
+                    schema_version: 1,
+                    exact_trigger_url: exactUrl,
+                    access_audience: audience,
+                    access_service_client_id: serviceTokenClientId,
+                    writer_role: "writer_a",
+                },
+                { runGatewayTrial: async trial => unknownResult(trial) },
+                { ...runtimeVersion, timestamp: "not-a-timestamp" }
             )
         ).toThrow(TypeError);
         const hostileIdentity = new Proxy(

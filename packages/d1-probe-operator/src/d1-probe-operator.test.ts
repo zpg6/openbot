@@ -4,11 +4,13 @@ import { canonicalizeJsonV1, type CanonicalJsonValueV1 } from "@openbot/gate-att
 import { describe, expect, it, vi } from "vitest";
 
 import {
-    D1_PROBE_CREATE_STEPS_V1,
-    D1_PROBE_LIFECYCLE_STEPS_V1,
     D1_PROBE_RESOURCE_KINDS_V1,
+    D1_PROBE_WORKER_MUTATION_CONTRACT_V1,
+    D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1,
     D1ProbeLifecycleJournalV1Schema,
-    type D1ProbeLifecycleJournalV1,
+    D1ProbeLifecycleManualRequiredV1Schema,
+    D1ProbeLifecycleObservationV1Schema,
+    D1ProbeWorkerUploadDeploymentEvidenceV1Schema,
     D1ProbePreflightPlanV1Schema,
     type D1ProbeLifecycleStepV1,
     type D1ProbePreflightPlanV1,
@@ -372,7 +374,7 @@ describe("D1 probe operator preflight", () => {
         expect(output).not.toContain(request().zone_id);
         expect(output).not.toContain(request().operator_database_deny_list[0]);
         expect(output).not.toContain(key);
-        expect(first.plan_digest).toBe("fb89f02dba47f7116f3658e24ff5aff1d20ecd3686f0a3385653c1eaf5dddd7d");
+        expect(first.plan_digest).toBe("54e027909071cf0129dfa88e3f4c2890068950c8505e9282e2522d3912694b35");
     });
 
     it("rejects duplicate names, unsafe identifiers, noncanonical keys, and hostile input", async () => {
@@ -446,52 +448,26 @@ describe("D1 probe operator preflight", () => {
 });
 
 describe("D1 probe resource lifecycle", () => {
-    it("accepts the exact lifecycle prefix and protects final cleanup behind evidence", async () => {
+    it("stops the plain journal at the first Worker mutation", async () => {
         const compiledPlan = await plan();
         const created = createD1ProbeLifecycleJournalV1(compiledPlan);
-        expect(created.success).toBe(true);
-        if (!created.success) return;
-        let journal = created.journal;
-        for (const [index, step] of D1_PROBE_LIFECYCLE_STEPS_V1.slice(0, -1).entries()) {
-            const result = advanceD1ProbeLifecycleJournalV1(
-                compiledPlan,
-                journal,
-                eventForStep(compiledPlan, step, index)
-            );
-            expect(result.success).toBe(true);
-            if (!result.success) return;
-            journal = result.journal;
-            if (index + 1 === D1_PROBE_CREATE_STEPS_V1.length) expect(journal.state).toBe("ready");
-        }
-        expect(journal.state).toBe("cleaning_up");
-        expect(journal.completed_steps).toEqual(D1_PROBE_LIFECYCLE_STEPS_V1.slice(0, -1));
+        if (!created.success) throw new Error(created.code);
+        const databaseAdvanced = advanceD1ProbeLifecycleJournalV1(
+            compiledPlan,
+            created.journal,
+            eventForStep(compiledPlan, "database_created", 0)
+        );
+        if (!databaseAdvanced.success) throw new Error(databaseAdvanced.code);
         expect(
             advanceD1ProbeLifecycleJournalV1(
                 compiledPlan,
-                journal,
-                eventForStep(compiledPlan, "all_resource_absence_confirmed", D1_PROBE_LIFECYCLE_STEPS_V1.length - 1)
+                databaseAdvanced.journal,
+                eventForStep(compiledPlan, "sink_version_uploaded", 1)
             )
-        ).toEqual({ success: false, code: "evidence_required" });
-        expect(
-            D1ProbeLifecycleJournalV1Schema.safeParse({
-                ...journal,
-                state: "cleanup_confirmed",
-                completed_steps: D1_PROBE_LIFECYCLE_STEPS_V1,
-                observations: [
-                    ...journal.observations,
-                    {
-                        step: "all_resource_absence_confirmed",
-                        observation_digest: hex("f"),
-                        resource_kind: null,
-                        resource_name_commitment: null,
-                        resource_id_commitment: null,
-                    },
-                ],
-            }).success
-        ).toBe(false);
+        ).toEqual({ success: false, code: "opaque_evidence_required" });
     });
 
-    it("denies skipped steps, repeated steps, and deletion under a substituted resource ID", async () => {
+    it("denies skipped and repeated steps before Worker provisioning", async () => {
         const compiledPlan = await plan();
         const created = createD1ProbeLifecycleJournalV1(compiledPlan);
         if (!created.success) throw new Error(created.code);
@@ -505,32 +481,217 @@ describe("D1 probe resource lifecycle", () => {
             success: false,
             code: "unexpected_lifecycle_step",
         });
-
-        let journal = created.journal;
-        for (const [index, step] of D1_PROBE_LIFECYCLE_STEPS_V1.slice(0, -1).entries()) {
-            if (step === "database_deleted") {
-                expect(
-                    advanceD1ProbeLifecycleJournalV1(
-                        compiledPlan,
-                        journal,
-                        eventForStep(compiledPlan, step, index, hex("f"))
-                    )
-                ).toEqual({
-                    success: false,
-                    code: "resource_binding_mismatch",
-                });
-            }
-            const result = advanceD1ProbeLifecycleJournalV1(
+        const advanced = advanceD1ProbeLifecycleJournalV1(
+            compiledPlan,
+            created.journal,
+            eventForStep(compiledPlan, "database_created", 0)
+        );
+        if (!advanced.success) throw new Error(advanced.code);
+        expect(
+            advanceD1ProbeLifecycleJournalV1(
                 compiledPlan,
-                journal,
-                eventForStep(compiledPlan, step, index)
-            );
-            if (!result.success) throw new Error(result.code);
-            journal = result.journal;
-            expect(
-                advanceD1ProbeLifecycleJournalV1(compiledPlan, journal, eventForStep(compiledPlan, step, index))
-            ).toMatchObject({ success: false });
+                advanced.journal,
+                eventForStep(compiledPlan, "database_created", 0)
+            )
+        ).toEqual({ success: false, code: "unexpected_lifecycle_step" });
+    });
+
+    it("keeps first Version uploads blocked until script-shell preview safety is designed", async () => {
+        expect(D1_PROBE_WORKER_MUTATION_CONTRACT_V1).toMatchObject({
+            authoritative: false,
+            mutation_allowed: false,
+            lifecycle_advance_allowed: false,
+            database_precondition: "opaque_initialized_database_required_after_database_created",
+            upload_safety_blocker: "script_shell_and_subdomain_settings_protocol_missing",
+            first_version_preview_safety_resolved: false,
+            gate_promotion_allowed: false,
+        });
+        expect(D1_PROBE_WORKER_MUTATION_CONTRACT_V1.roles).toEqual([
+            {
+                role: "sink",
+                upload: {
+                    step: "sink_version_uploaded",
+                    state: "blocked_pending_script_shell_settings_protocol",
+                    adapter_implemented: false,
+                    lost_response: "manual_cleanup_required_no_retry",
+                },
+                deployment: {
+                    step: "sink_deployed",
+                    state: "blocked_pending_opaque_version_evidence",
+                    adapter_implemented: false,
+                    version_count: 1,
+                    traffic_percentage: 100,
+                    force: false,
+                    lost_response: "manual_cleanup_required_no_retry",
+                },
+            },
+            {
+                role: "writer_a",
+                upload: {
+                    step: "writer_a_version_uploaded",
+                    state: "blocked_pending_script_shell_settings_protocol",
+                    adapter_implemented: false,
+                    lost_response: "manual_cleanup_required_no_retry",
+                },
+                deployment: {
+                    step: "writer_a_deployed",
+                    state: "blocked_pending_opaque_version_evidence",
+                    adapter_implemented: false,
+                    version_count: 1,
+                    traffic_percentage: 100,
+                    force: false,
+                    lost_response: "manual_cleanup_required_no_retry",
+                },
+            },
+            {
+                role: "writer_b",
+                upload: {
+                    step: "writer_b_version_uploaded",
+                    state: "blocked_pending_script_shell_settings_protocol",
+                    adapter_implemented: false,
+                    lost_response: "manual_cleanup_required_no_retry",
+                },
+                deployment: {
+                    step: "writer_b_deployed",
+                    state: "blocked_pending_opaque_version_evidence",
+                    adapter_implemented: false,
+                    version_count: 1,
+                    traffic_percentage: 100,
+                    force: false,
+                    lost_response: "manual_cleanup_required_no_retry",
+                },
+            },
+        ]);
+        expect(Object.isFrozen(D1_PROBE_WORKER_MUTATION_CONTRACT_V1.roles)).toBe(true);
+        expect(Object.isFrozen(D1_PROBE_WORKER_MUTATION_CONTRACT_V1.roles[0]?.upload)).toBe(true);
+    });
+
+    it("requires exact Worker mutation evidence while rejecting every forged journal prefix", async () => {
+        const compiledPlan = await plan();
+        const created = createD1ProbeLifecycleJournalV1(compiledPlan);
+        if (!created.success) throw new Error(created.code);
+        const databaseAdvanced = advanceD1ProbeLifecycleJournalV1(
+            compiledPlan,
+            created.journal,
+            eventForStep(compiledPlan, "database_created", 0)
+        );
+        if (!databaseAdvanced.success) throw new Error(databaseAdvanced.code);
+        const scriptResource = compiledPlan.resources.find(resource => resource.resource_kind === "sink_script");
+        if (scriptResource === undefined) throw new Error("missing sink resource");
+        const upload = {
+            step: "sink_version_uploaded",
+            observation_digest: hex("1"),
+            resource_kind: "sink_script",
+            resource_name_commitment: scriptResource.generated_name_commitment,
+            resource_id_commitment: hex("2"),
+            worker_version_id_commitment: hex("3"),
+            worker_artifact_digest: hex("4"),
+            worker_binding_configuration_digest: hex("5"),
+        } as const;
+        const deployment = {
+            step: "sink_deployed",
+            observation_digest: hex("6"),
+            resource_kind: "sink_script",
+            resource_name_commitment: scriptResource.generated_name_commitment,
+            resource_id_commitment: hex("2"),
+            worker_version_id_commitment: hex("3"),
+            worker_artifact_digest: hex("4"),
+            worker_binding_configuration_digest: hex("5"),
+            worker_deployment_id_commitment: hex("7"),
+            worker_deployment_percentage: 100,
+            worker_deployment_force: false,
+        } as const;
+        expect(D1ProbeLifecycleObservationV1Schema.safeParse(upload).success).toBe(true);
+        expect(D1ProbeLifecycleObservationV1Schema.safeParse(deployment).success).toBe(true);
+        expect(D1ProbeWorkerUploadDeploymentEvidenceV1Schema.safeParse({ upload, deployment }).success).toBe(true);
+        for (const mutation of [
+            { ...deployment, worker_version_id_commitment: undefined },
+            { ...deployment, worker_artifact_digest: undefined },
+            { ...deployment, worker_binding_configuration_digest: undefined },
+            { ...deployment, worker_deployment_force: undefined },
+            { ...deployment, worker_deployment_percentage: undefined },
+        ]) {
+            expect(D1ProbeLifecycleObservationV1Schema.safeParse(mutation).success).toBe(false);
         }
+        for (const mutation of [
+            { ...deployment, worker_version_id_commitment: hex("8") },
+            { ...deployment, worker_artifact_digest: hex("8") },
+            { ...deployment, worker_binding_configuration_digest: hex("8") },
+            { ...deployment, resource_id_commitment: hex("8") },
+        ]) {
+            expect(
+                D1ProbeWorkerUploadDeploymentEvidenceV1Schema.safeParse({ upload, deployment: mutation }).success
+            ).toBe(false);
+        }
+        const forgedUploadPrefix = {
+            ...databaseAdvanced.journal,
+            state: "provisioning",
+            completed_steps: [...databaseAdvanced.journal.completed_steps, "sink_version_uploaded"],
+            observations: [...databaseAdvanced.journal.observations, upload],
+        };
+        expect(D1ProbeLifecycleJournalV1Schema.safeParse(forgedUploadPrefix).success).toBe(false);
+        expect(
+            D1ProbeLifecycleJournalV1Schema.safeParse({
+                ...forgedUploadPrefix,
+                completed_steps: [...forgedUploadPrefix.completed_steps, "sink_deployed"],
+                observations: [...forgedUploadPrefix.observations, deployment],
+            }).success
+        ).toBe(false);
+        for (const valid of [
+            {
+                failed_step: "sink_version_uploaded",
+                reason: "unexpected_platform_result",
+                observation_digest: hex("a"),
+                worker_dispatch_phase: "pre_dispatch",
+                retry_allowed: false,
+                manual_cleanup_required: true,
+            },
+            {
+                failed_step: "sink_version_uploaded",
+                reason: "ambiguous_version_upload",
+                observation_digest: hex("a"),
+                worker_dispatch_phase: "post_dispatch",
+                mutation_outcome: "unknown",
+                retry_allowed: false,
+                manual_cleanup_required: true,
+            },
+            {
+                failed_step: "sink_deployed",
+                reason: "ambiguous_deployment",
+                observation_digest: hex("a"),
+                worker_dispatch_phase: "post_dispatch",
+                mutation_outcome: "unknown",
+                retry_allowed: false,
+                manual_cleanup_required: true,
+            },
+        ]) {
+            expect(D1ProbeLifecycleManualRequiredV1Schema.safeParse(valid).success).toBe(true);
+        }
+        for (const invalid of [
+            {
+                failed_step: "sink_version_uploaded",
+                reason: "ambiguous_create",
+                observation_digest: hex("a"),
+            },
+            {
+                failed_step: "sink_deployed",
+                reason: "ambiguous_deployment",
+                observation_digest: hex("a"),
+                worker_dispatch_phase: "pre_dispatch",
+                mutation_outcome: "unknown",
+                retry_allowed: false,
+                manual_cleanup_required: true,
+            },
+            {
+                failed_step: "database_created",
+                reason: "ambiguous_create",
+                observation_digest: hex("a"),
+                worker_dispatch_phase: "post_dispatch",
+            },
+        ]) {
+            expect(D1ProbeLifecycleManualRequiredV1Schema.safeParse(invalid).success).toBe(false);
+        }
+        expect(D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1).toHaveLength(3);
     });
 
     it("makes ambiguity terminal and binds it to the exact next step", async () => {
@@ -538,11 +699,11 @@ describe("D1 probe resource lifecycle", () => {
         const created = createD1ProbeLifecycleJournalV1(compiledPlan);
         if (!created.success) throw new Error(created.code);
         const wrongStep = markD1ProbeLifecycleAmbiguousV1(compiledPlan, created.journal, {
-            failed_step: "sink_deployed",
+            failed_step: "sink_version_uploaded",
             reason: "ambiguous_create",
             observation_digest: hex("a"),
         });
-        expect(wrongStep).toEqual({ success: false, code: "invalid_lifecycle_journal" });
+        expect(wrongStep).toEqual({ success: false, code: "invalid_lifecycle_failure" });
 
         const ambiguous = markD1ProbeLifecycleAmbiguousV1(compiledPlan, created.journal, {
             failed_step: "database_created",
@@ -1155,37 +1316,22 @@ describe("D1 probe Cloudflare database creation", () => {
         const observed = await observedRoute();
         const { compiledPlan, journal } = await plannedJournal();
         const created = await createD1ProbeDatabaseV1(observed, journal, { hmac_key_base64url: key }, "w".repeat(32), {
-            fetch: (async () => jsonResponse(cloudflareDatabaseCreateResponse())) as typeof globalThis.fetch,
+            fetch: (async () =>
+                jsonResponse(
+                    cloudflareDatabaseCreateResponse({ name: "openbot-d1-probe-emergency-cleanup" })
+                )) as typeof globalThis.fetch,
         });
-        if (!created.success) throw new Error(created.code);
-        return { compiledPlan, created: created.created, journal: created.journal };
-    };
-
-    const journalBeforeDatabaseDelete = (
-        compiledPlan: D1ProbePreflightPlanV1,
-        createdJournal: D1ProbeLifecycleJournalV1
-    ) => {
-        let journal = createdJournal;
-        for (let index = 1; index < D1_PROBE_LIFECYCLE_STEPS_V1.length; index += 1) {
-            const step = D1_PROBE_LIFECYCLE_STEPS_V1[index] as D1ProbeLifecycleStepV1;
-            if (step === "database_deleted") break;
-            const advanced = advanceD1ProbeLifecycleJournalV1(
-                compiledPlan,
-                journal,
-                eventForStep(compiledPlan, step, index)
-            );
-            if (!advanced.success) throw new Error(advanced.code);
-            journal = advanced.journal;
+        if (created.success || !("cleanup_target" in created) || created.cleanup_target === null) {
+            throw new Error("expected emergency database cleanup target");
         }
-        return journal;
+        return { compiledPlan, created: created.cleanup_target, journal: created.journal };
     };
 
     const acknowledgedDeletion = async () => {
         const provisioned = await provisionedDatabase();
-        const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
         const deleted = await deleteD1ProbeDatabaseV1(
             provisioned.created,
-            journal,
+            provisioned.journal,
             { hmac_key_base64url: key },
             "d".repeat(32),
             {
@@ -1480,7 +1626,7 @@ describe("D1 probe Cloudflare database creation", () => {
 
     it("requests exact database deletion once and records acknowledgement without claiming absence", async () => {
         const provisioned = await provisionedDatabase();
-        const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+        const journal = provisioned.journal;
         const rawDatabase = resolveCreatedD1ProbeDatabaseV1(provisioned.created);
         if (rawDatabase === null) throw new Error("missing created database context");
         const apiToken = "d".repeat(32);
@@ -1506,7 +1652,7 @@ describe("D1 probe Cloudflare database creation", () => {
         );
         expect(result).toMatchObject({
             success: true,
-            journal: { state: "cleaning_up", completed_steps: expect.arrayContaining(["database_deleted"]) },
+            journal: { state: "manual_required", completed_steps: [] },
             observation: {
                 status: "sdk_acknowledged",
                 authoritative: false,
@@ -1550,7 +1696,7 @@ describe("D1 probe Cloudflare database creation", () => {
             ),
         ]) {
             const provisioned = await provisionedDatabase();
-            const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+            const journal = provisioned.journal;
             const result = await deleteD1ProbeDatabaseV1(
                 provisioned.created,
                 journal,
@@ -1563,7 +1709,7 @@ describe("D1 probe Cloudflare database creation", () => {
                 code: "database_delete_outcome_unknown",
                 journal: {
                     state: "manual_required",
-                    manual_required: { failed_step: "database_deleted", reason: "ambiguous_delete" },
+                    manual_required: { failed_step: "database_created", reason: "name_mismatch" },
                 },
             });
             expect(
@@ -1640,7 +1786,7 @@ describe("D1 probe Cloudflare database creation", () => {
 
     it("rejects target, journal, key, and credential substitution before deletion", async () => {
         const provisioned = await provisionedDatabase();
-        const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+        const journal = provisioned.journal;
         const fetchMock = vi.fn();
         const dependencies = { fetch: fetchMock as typeof globalThis.fetch };
         expect(
@@ -1654,11 +1800,7 @@ describe("D1 probe Cloudflare database creation", () => {
         ).toEqual({ success: false, code: "invalid_created_database" });
         const substitutedJournal = {
             ...journal,
-            observations: journal.observations.map(observation =>
-                observation.step === "database_created"
-                    ? { ...observation, resource_id_commitment: hex("f") }
-                    : observation
-            ),
+            manual_required: { ...journal.manual_required, observation_digest: hex("f") },
         };
         expect(
             await deleteD1ProbeDatabaseV1(
@@ -1718,7 +1860,7 @@ describe("D1 probe Cloudflare database creation", () => {
         expect(result).toMatchObject({
             success: true,
             journal: {
-                state: "cleaning_up",
+                state: "manual_required",
                 completed_steps: expect.not.arrayContaining(["all_resource_absence_confirmed"]),
             },
             observation: {
@@ -1815,9 +1957,7 @@ describe("D1 probe Cloudflare database creation", () => {
         ).toBe(false);
         const substitutedJournal = {
             ...deleted.journal,
-            observations: deleted.journal.observations.map(observation =>
-                observation.step === "database_deleted" ? { ...observation, observation_digest: hex("f") } : observation
-            ),
+            manual_required: { ...deleted.journal.manual_required, observation_digest: hex("f") },
         };
         expect(
             await observedD1ProbeDatabaseAbsenceMatchesV1(
@@ -1846,14 +1986,14 @@ describe("D1 probe Cloudflare database creation", () => {
     });
 
     it("denies a database that remains visible by exact ID or exact name", async () => {
-        for (const candidate of [
-            cloudflareDatabaseCreateResponse().result,
-            {
-                uuid: "44444444-4444-4444-8444-444444444444",
-                name: cloudflareDatabaseCreateResponse().result.name,
-            },
-        ]) {
+        for (const matchBy of ["id", "name"] as const) {
             const deleted = await acknowledgedDeletion();
+            const rawDatabase = resolveCreatedD1ProbeDatabaseV1(deleted.created);
+            if (rawDatabase === null) throw new Error("missing created database context");
+            const candidate = {
+                uuid: matchBy === "id" ? rawDatabase.database_id : "44444444-4444-4444-8444-444444444444",
+                name: matchBy === "name" ? rawDatabase.database_name : "openbot-d1-probe-unrelated",
+            };
             const fetchMock = vi.fn(async () => jsonResponse(cloudflareDatabaseListResponse(1, [candidate])));
             expect(
                 await observeD1ProbeDatabaseAbsenceV1(
@@ -1949,7 +2089,7 @@ describe("D1 probe Cloudflare database creation", () => {
 
     it("uses absence readback to inspect an ambiguous delete without clearing manual review", async () => {
         const provisioned = await provisionedDatabase();
-        const journal = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
+        const journal = provisioned.journal;
         const deletion = await deleteD1ProbeDatabaseV1(
             provisioned.created,
             journal,
@@ -1973,7 +2113,7 @@ describe("D1 probe Cloudflare database creation", () => {
         );
         expect(result).toMatchObject({
             success: true,
-            journal: { state: "manual_required", manual_required: { failed_step: "database_deleted" } },
+            journal: { state: "manual_required", manual_required: { failed_step: "database_created" } },
             observation: {
                 deletion_outcome: "outcome_unknown",
                 absence_observed: true,
@@ -1984,31 +2124,13 @@ describe("D1 probe Cloudflare database creation", () => {
 
     it("rejects unrequested, substituted, and uncredentialed absence reads before network", async () => {
         const provisioned = await provisionedDatabase();
-        const beforeDelete = journalBeforeDatabaseDelete(provisioned.compiledPlan, provisioned.journal);
-        const createdObservation = beforeDelete.observations.find(
-            observation => observation.step === "database_created"
-        );
-        if (
-            createdObservation?.resource_id_commitment === null ||
-            createdObservation?.resource_name_commitment === null ||
-            createdObservation === undefined
-        ) {
-            throw new Error("missing database creation commitments");
-        }
-        const advancedWithoutDelete = advanceD1ProbeLifecycleJournalV1(provisioned.compiledPlan, beforeDelete, {
-            step: "database_deleted",
-            observation_digest: hex("e"),
-            resource_kind: "database",
-            resource_name_commitment: createdObservation.resource_name_commitment,
-            resource_id_commitment: createdObservation.resource_id_commitment,
-        });
-        if (!advancedWithoutDelete.success) throw new Error(advancedWithoutDelete.code);
+        const beforeDelete = provisioned.journal;
         const fetchMock = vi.fn();
         const dependencies = { fetch: fetchMock as typeof globalThis.fetch };
         expect(
             await observeD1ProbeDatabaseAbsenceV1(
                 provisioned.created,
-                advancedWithoutDelete.journal,
+                beforeDelete,
                 { hmac_key_base64url: key },
                 "q".repeat(32),
                 dependencies
@@ -2018,11 +2140,7 @@ describe("D1 probe Cloudflare database creation", () => {
         const deleted = await acknowledgedDeletion();
         const substitutedJournal = {
             ...deleted.journal,
-            observations: deleted.journal.observations.map(observation =>
-                observation.step === "database_created"
-                    ? { ...observation, resource_id_commitment: hex("f") }
-                    : observation
-            ),
+            manual_required: { ...deleted.journal.manual_required, observation_digest: hex("f") },
         };
         expect(
             await observeD1ProbeDatabaseAbsenceV1(
