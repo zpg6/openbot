@@ -49,7 +49,7 @@ const request = () => ({
     configuration_digest: "3".repeat(64),
     probe_definition_digest: "4".repeat(64),
     collector_build_digest: "5".repeat(64),
-    commitment_key_id_digest: "6".repeat(64),
+    commitment_key_id_digest: "45a7064c002c4b269eb5932fd42622c7b2ed330deef98203ea1bd342d56d238c",
     operator_database_deny_list: ["11111111-1111-1111-1111-111111111111"],
     resource_suffixes: { ...suffixes },
 });

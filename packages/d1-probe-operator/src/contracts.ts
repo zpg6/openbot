@@ -161,9 +161,9 @@ export const D1_PROBE_WORKER_MUTATION_CONTRACT_V1 = Object.freeze({
     lifecycle_advance_allowed: false as const,
     gate_promotion_allowed: false as const,
     database_precondition: "opaque_initialized_database_required_after_database_created" as const,
-    upload_safety_blocker: "beta_worker_api_interoperability_canary_missing" as const,
+    upload_safety_blocker: "beta_classic_canary_preview_safety_and_opaque_evidence_missing" as const,
     private_shell_protocol_contract_implemented: true as const,
-    beta_worker_api_interoperability_canary_passed: false as const,
+    beta_classic_api_canary_passed: false as const,
     first_version_preview_safety_resolved: false as const,
     roles: Object.freeze(
         [
@@ -175,7 +175,7 @@ export const D1_PROBE_WORKER_MUTATION_CONTRACT_V1 = Object.freeze({
                 role,
                 private_shell: Object.freeze({
                     step: shellStep,
-                    state: "blocked_pending_beta_interoperability_canary_and_opaque_evidence" as const,
+                    state: "blocked_pending_beta_classic_canary_preview_safety_and_opaque_evidence" as const,
                     adapter_implemented: false as const,
                     lost_response: "manual_cleanup_required_no_retry" as const,
                 }),
@@ -364,9 +364,12 @@ export const D1ProbeLifecycleObservationV1Schema = z
         resource_kind: D1ProbeResourceKindV1Schema.nullable(),
         resource_name_commitment: DigestSchema.nullable(),
         resource_id_commitment: DigestSchema.nullable(),
+        worker_version_contract: z.literal("beta_worker_json_version_v1").optional(),
         worker_version_id_commitment: DigestSchema.optional(),
+        worker_version_request_digest: DigestSchema.optional(),
         worker_artifact_digest: DigestSchema.optional(),
         worker_binding_configuration_digest: DigestSchema.optional(),
+        worker_deployment_request_digest: DigestSchema.optional(),
         worker_deployment_id_commitment: DigestSchema.optional(),
         worker_deployment_percentage: z.literal(100).optional(),
         worker_deployment_force: z.literal(false).optional(),
@@ -375,30 +378,47 @@ export const D1ProbeLifecycleObservationV1Schema = z
     .superRefine((observation, context) => {
         const isUpload = D1_PROBE_WORKER_VERSION_UPLOAD_STEPS_V1.includes(observation.step as never);
         const isDeployment = D1_PROBE_WORKER_DEPLOYMENT_STEPS_V1.includes(observation.step as never);
+        const hasVersionContract = observation.worker_version_contract !== undefined;
         const hasVersion = observation.worker_version_id_commitment !== undefined;
+        const hasVersionRequest = observation.worker_version_request_digest !== undefined;
         const hasArtifact = observation.worker_artifact_digest !== undefined;
         const hasBindingConfiguration = observation.worker_binding_configuration_digest !== undefined;
+        const hasDeploymentRequest = observation.worker_deployment_request_digest !== undefined;
         const hasDeployment = observation.worker_deployment_id_commitment !== undefined;
         const hasPercentage = observation.worker_deployment_percentage !== undefined;
         const hasForce = observation.worker_deployment_force !== undefined;
         if (
             (isUpload &&
-                (!hasVersion ||
+                (!hasVersionContract ||
+                    !hasVersion ||
+                    !hasVersionRequest ||
                     !hasArtifact ||
                     !hasBindingConfiguration ||
+                    hasDeploymentRequest ||
                     hasDeployment ||
                     hasPercentage ||
                     hasForce)) ||
             (isDeployment &&
-                (!hasVersion ||
+                (!hasVersionContract ||
+                    !hasVersion ||
+                    !hasVersionRequest ||
                     !hasArtifact ||
                     !hasBindingConfiguration ||
+                    !hasDeploymentRequest ||
                     !hasDeployment ||
                     observation.worker_deployment_percentage !== 100 ||
                     observation.worker_deployment_force !== false)) ||
             (!isUpload &&
                 !isDeployment &&
-                (hasVersion || hasArtifact || hasBindingConfiguration || hasDeployment || hasPercentage || hasForce))
+                (hasVersionContract ||
+                    hasVersion ||
+                    hasVersionRequest ||
+                    hasArtifact ||
+                    hasBindingConfiguration ||
+                    hasDeploymentRequest ||
+                    hasDeployment ||
+                    hasPercentage ||
+                    hasForce))
         ) {
             context.addIssue({
                 code: "custom",
@@ -423,10 +443,23 @@ export const D1ProbeWorkerUploadDeploymentEvidenceV1Schema = z
                   : evidence.upload.step === "writer_b_version_uploaded"
                     ? "writer_b_deployed"
                     : null;
+        const expectedResourceKind =
+            evidence.upload.step === "sink_version_uploaded"
+                ? "sink_script"
+                : evidence.upload.step === "writer_a_version_uploaded"
+                  ? "writer_a_script"
+                  : evidence.upload.step === "writer_b_version_uploaded"
+                    ? "writer_b_script"
+                    : null;
         if (
             expectedDeploymentStep === null ||
+            expectedResourceKind === null ||
             evidence.deployment.step !== expectedDeploymentStep ||
+            evidence.upload.resource_kind !== expectedResourceKind ||
+            evidence.deployment.resource_kind !== expectedResourceKind ||
+            evidence.upload.worker_version_contract !== evidence.deployment.worker_version_contract ||
             evidence.upload.worker_version_id_commitment !== evidence.deployment.worker_version_id_commitment ||
+            evidence.upload.worker_version_request_digest !== evidence.deployment.worker_version_request_digest ||
             evidence.upload.worker_artifact_digest !== evidence.deployment.worker_artifact_digest ||
             evidence.upload.worker_binding_configuration_digest !==
                 evidence.deployment.worker_binding_configuration_digest ||
@@ -624,7 +657,9 @@ export const D1ProbeLifecycleJournalV1Schema = z
                 const upload = journal.observations.find(candidate => candidate.step === uploadStep);
                 if (
                     upload === undefined ||
+                    upload.worker_version_contract !== observation.worker_version_contract ||
                     upload.worker_version_id_commitment !== observation.worker_version_id_commitment ||
+                    upload.worker_version_request_digest !== observation.worker_version_request_digest ||
                     upload.worker_artifact_digest !== observation.worker_artifact_digest ||
                     upload.worker_binding_configuration_digest !== observation.worker_binding_configuration_digest ||
                     upload.resource_id_commitment !== observation.resource_id_commitment ||

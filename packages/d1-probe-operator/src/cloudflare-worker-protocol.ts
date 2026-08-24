@@ -7,7 +7,11 @@ import {
 } from "@openbot/gate-attestation/internal";
 
 import { D1_PROBE_COMPATIBILITY_DATE_V1, D1ProbeCommitmentKeyV1Schema } from "./contracts.js";
-import { D1_PROBE_WORKER_MAIN_MODULE_V1, D1_PROBE_WORKER_MODULE_LIMIT_BYTES_V1 } from "./worker-artifact.js";
+import {
+    compileD1ProbeWorkerJsonVersionContractV1,
+    D1_PROBE_WORKER_MAIN_MODULE_V1,
+    D1_PROBE_WORKER_MODULE_LIMIT_BYTES_V1,
+} from "./worker-version-contract.js";
 
 const AccountIdV1Schema = z.string().regex(/^[0-9a-f]{32}$/u);
 const OperationIdV1Schema = z.string().regex(/^[0-9a-f]{32}$/u);
@@ -29,6 +33,7 @@ const TimestampV1Schema = z.string().datetime({ offset: true });
 const DigestV1Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const WorkerRoleV1Schema = z.enum(["sink", "writer_a", "writer_b"]);
 const AnnotationValueV1Schema = z.string().min(1).max(100);
+const COMMITMENT_KEY_ID_DOMAIN_V1 = "openbot.d1-probe.commitment-key-id.v1";
 
 const WorkerSubdomainV1Schema = z
     .object({
@@ -221,6 +226,7 @@ type InputV1 = z.infer<typeof InputV1Schema>;
 export type D1ProbeCloudflareWorkerProtocolDenialV1 =
     | "invalid_input"
     | "invalid_commitment_key"
+    | "commitment_key_id_mismatch"
     | "invalid_operation_window"
     | "worker_identity_mismatch"
     | "worker_ownership_mismatch"
@@ -314,7 +320,9 @@ export interface UntrustedD1ProbeCloudflareWorkerProtocolV1 {
         id_commitment: string;
         created_on: string;
         version_tag_commitment: string;
+        artifact_contract: "beta_worker_json_version_v1";
         module_sha256: string;
+        artifact_digest: string;
         binding_configuration_digest: string;
         beta_list_path: "/accounts/{account_id}/workers/workers/{worker_id}/versions";
         beta_get_path: "/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}";
@@ -405,22 +413,31 @@ const decodeBase64Url = (value: string): Uint8Array | null => {
     }
 };
 
-const importCommitmentKey = async (input: unknown): Promise<CryptoKey | null> => {
+const importCommitmentKey = async (
+    input: unknown
+): Promise<Readonly<{ key: CryptoKey; key_id_digest: string }> | null> => {
     const parsed = safeParse(D1ProbeCommitmentKeyV1Schema, input);
     if (parsed === null) return null;
     const raw = decodeBase64Url(parsed.hmac_key_base64url);
     if (raw === null || raw.byteLength < 32 || raw.byteLength > 64) return null;
+    let keyIdInput: Uint8Array | null = null;
     try {
-        return await globalThis.crypto.subtle.importKey(
+        keyIdInput = new Uint8Array(encoder.encode(`${COMMITMENT_KEY_ID_DOMAIN_V1}\u0000`).byteLength + raw.byteLength);
+        keyIdInput.set(encoder.encode(`${COMMITMENT_KEY_ID_DOMAIN_V1}\u0000`));
+        keyIdInput.set(raw, keyIdInput.byteLength - raw.byteLength);
+        const keyIdDigest = toHex(await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer(keyIdInput)));
+        const key = await globalThis.crypto.subtle.importKey(
             "raw",
             arrayBuffer(raw),
             { name: "HMAC", hash: "SHA-256" },
             false,
             ["sign"]
         );
+        return Object.freeze({ key, key_id_digest: keyIdDigest });
     } catch {
         return null;
     } finally {
+        keyIdInput?.fill(0);
         raw.fill(0);
     }
 };
@@ -437,14 +454,6 @@ const hmacValue = async (key: CryptoKey, domain: string, value: CanonicalJsonVal
 const sha256 = async (value: string): Promise<string | null> => {
     try {
         return `sha256:${toHex(await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer(encoder.encode(value))))}`;
-    } catch {
-        return null;
-    }
-};
-
-const bytesSha256 = async (value: Uint8Array): Promise<string | null> => {
-    try {
-        return `sha256:${toHex(await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer(value)))}`;
     } catch {
         return null;
     }
@@ -539,8 +548,12 @@ export const compileUntrustedD1ProbeCloudflareWorkerProtocolV1 = async (
     const parsed = safeParse(InputV1Schema, input);
     if (parsed === null) return { success: false, code: "invalid_input" };
     if (!operationWindowValid(parsed)) return { success: false, code: "invalid_operation_window" };
-    const commitmentKey = await importCommitmentKey(commitmentKeyInput);
-    if (commitmentKey === null) return { success: false, code: "invalid_commitment_key" };
+    const commitmentKeyRecord = await importCommitmentKey(commitmentKeyInput);
+    if (commitmentKeyRecord === null) return { success: false, code: "invalid_commitment_key" };
+    if (commitmentKeyRecord.key_id_digest !== parsed.commitment_key_id_digest) {
+        return { success: false, code: "commitment_key_id_mismatch" };
+    }
+    const commitmentKey = commitmentKeyRecord.key;
     const scriptName = parsed.topology[parsed.role];
     if (parsed.beta_worker_readback.name !== scriptName) {
         return { success: false, code: "worker_identity_mismatch" };
@@ -646,22 +659,29 @@ export const compileUntrustedD1ProbeCloudflareWorkerProtocolV1 = async (
         return { success: false, code: "runtime_version_metadata_mismatch" };
     }
 
-    const module = deepFreeze({
-        name: D1_PROBE_WORKER_MAIN_MODULE_V1 as typeof D1_PROBE_WORKER_MAIN_MODULE_V1,
-        content_type: "application/javascript+module" as const,
-        content_base64: contentBase64,
-    });
-    const versionCreateBody = deepFreeze({
-        main_module: D1_PROBE_WORKER_MAIN_MODULE_V1,
-        compatibility_date: D1_PROBE_COMPATIBILITY_DATE_V1,
-        compatibility_flags: [] as const,
-        annotations: expectedAnnotations,
-        bindings: expectedBindings,
-        modules: [module] as const,
-    });
     const deploymentCreateBody = deepFreeze(expectedDeployment);
-    const moduleSha256 = await bytesSha256(parsed.module_bytes);
-    if (moduleSha256 === null) return { success: false, code: "digest_unavailable" };
+    const scriptNameCommitment = await hmacValue(
+        commitmentKey,
+        `openbot.d1-probe.generated-resource-name.${parsed.role === "sink" ? "sink_script" : `${parsed.role}_script`}.v1`,
+        scriptName
+    );
+    if (scriptNameCommitment === null) return { success: false, code: "commitment_unavailable" };
+    const versionContract = await compileD1ProbeWorkerJsonVersionContractV1({
+        role: parsed.role,
+        operation_id: parsed.operation_id,
+        generated_script_name_commitment: scriptNameCommitment,
+        database_id: parsed.database_id,
+        sink_script_name: parsed.topology.sink,
+        module_bytes: parsed.module_bytes,
+    });
+    if (
+        versionContract === null ||
+        !exactJson(versionContract.body.annotations, expectedAnnotations) ||
+        !exactJson(versionContract.body.bindings, expectedBindings) ||
+        versionContract.body.modules[0].content_base64 !== contentBase64
+    ) {
+        return { success: false, code: "digest_unavailable" };
+    }
     const [
         accountIdCommitment,
         databaseIdCommitment,
@@ -669,8 +689,6 @@ export const compileUntrustedD1ProbeCloudflareWorkerProtocolV1 = async (
         versionIdCommitment,
         deploymentIdCommitment,
         versionTagCommitment,
-        bindingConfigurationDigest,
-        versionRequestDigest,
         deploymentRequestDigest,
     ] = await Promise.all([
         hmacValue(commitmentKey, identityCommitmentDomains.account_id, parsed.account_id),
@@ -679,23 +697,12 @@ export const compileUntrustedD1ProbeCloudflareWorkerProtocolV1 = async (
         hmacValue(commitmentKey, identityCommitmentDomains.worker_version_id, version.id),
         hmacValue(commitmentKey, identityCommitmentDomains.worker_deployment_id, deployment.id),
         sha256(`openbot.d1-probe.cloudflare-version-tag.v1\u0000${markers.version}`),
-        sha256(`openbot.d1-probe.cloudflare-worker-bindings.v1\u0000${JSON.stringify(expectedBindings)}`),
-        sha256(
-            `openbot.d1-probe.cloudflare-version-request.v1\u0000${JSON.stringify({
-                method: "POST",
-                path: "/accounts/{account_id}/workers/workers/{worker_id}/versions",
-                query: { deploy: false },
-                body: versionCreateBody,
-            })}`
-        ),
-        sha256(
-            `openbot.d1-probe.cloudflare-deployment-request.v1\u0000${JSON.stringify({
-                method: "POST",
-                path: "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
-                query: { force: false },
-                body: deploymentCreateBody,
-            })}`
-        ),
+        digestCanonicalJsonV1("openbot.d1-probe.cloudflare-deployment-request.v1", {
+            method: "POST",
+            path: "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
+            query: { force: false },
+            body: deploymentCreateBody,
+        } as unknown as CanonicalJsonValueV1),
     ]);
     if (
         accountIdCommitment === null ||
@@ -706,12 +713,7 @@ export const compileUntrustedD1ProbeCloudflareWorkerProtocolV1 = async (
     ) {
         return { success: false, code: "commitment_unavailable" };
     }
-    if (
-        versionTagCommitment === null ||
-        bindingConfigurationDigest === null ||
-        versionRequestDigest === null ||
-        deploymentRequestDigest === null
-    ) {
+    if (versionTagCommitment === null || deploymentRequestDigest === null) {
         return { success: false, code: "digest_unavailable" };
     }
     const unsignedProtocol: Omit<UntrustedD1ProbeCloudflareWorkerProtocolV1, "protocol_digest"> = {
@@ -772,13 +774,15 @@ export const compileUntrustedD1ProbeCloudflareWorkerProtocolV1 = async (
                 method: "POST",
                 path: "/accounts/{account_id}/workers/workers/{worker_id}/versions",
                 query: { deploy: false },
-                request_digest: versionRequestDigest,
+                request_digest: versionContract.version_request_digest,
             },
             id_commitment: versionIdCommitment,
             created_on: version.created_on,
             version_tag_commitment: versionTagCommitment,
-            module_sha256: moduleSha256,
-            binding_configuration_digest: bindingConfigurationDigest,
+            artifact_contract: "beta_worker_json_version_v1",
+            module_sha256: versionContract.module_sha256,
+            artifact_digest: versionContract.artifact_digest,
+            binding_configuration_digest: versionContract.binding_configuration_digest,
             beta_list_path: "/accounts/{account_id}/workers/workers/{worker_id}/versions",
             beta_get_path: "/accounts/{account_id}/workers/workers/{worker_id}/versions/{version_id}",
             beta_get_query: { include: "modules" },

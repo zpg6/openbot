@@ -437,9 +437,10 @@ check(
 );
 check(
     workerArtifact.exact_module_bytes_hashed === true &&
-        workerArtifact.canonical_versions_upload_metadata_hashed === true &&
-        JSON.stringify(workerArtifact.ordered_multipart_part_manifest) === JSON.stringify(["metadata", "entry.js"]),
-    "Worker candidates must bind exact module and canonical ordered multipart metadata"
+        workerArtifact.worker_version_contract === "beta_worker_json_version_v1" &&
+        workerArtifact.canonical_beta_worker_json_version_body_hashed === true &&
+        workerArtifact.version_request_digest_required === true,
+    "Worker candidates must bind the exact module and canonical beta Worker JSON Version request"
 );
 check(
     workerArtifact.d1_binding_field === "database_id" &&
@@ -503,7 +504,7 @@ check(
 );
 check(
     workerMutationLifecycle.upload_safety_blocker ===
-        "production_artifact_protocol_lifecycle_digest_compatibility_and_opaque_evidence_missing" &&
+        "beta_classic_canary_preview_safety_and_opaque_evidence_missing" &&
         workerMutationLifecycle.private_shell_protocol_contract_implemented === true &&
         workerMutationLifecycle.isolated_worker_api_canary_fixture ===
             "docs/fixtures/cloudflare-worker-api-canary.json" &&
@@ -511,15 +512,15 @@ check(
         workerMutationLifecycle.access_protected_runtime_identity_canary_passed === false &&
         workerMutationLifecycle.isolated_canary_uses_fixed_inert_no_binding_module === true &&
         workerMutationLifecycle.isolated_canary_may_advance_lifecycle_or_gates === false &&
-        workerMutationLifecycle.production_artifact_protocol_lifecycle_digest_compatible === false &&
-        workerMutationLifecycle.isolated_canary_may_resolve_production_digest_blocker === false &&
+        workerMutationLifecycle.production_artifact_protocol_lifecycle_digest_compatible === true &&
+        workerMutationLifecycle.isolated_canary_required_for_digest_compatibility === false &&
         workerMutationLifecycle.first_version_preview_safety_resolved === false &&
         workerMutationLifecycle.private_shell_state ===
-            "blocked_pending_beta_classic_canary_digest_compatibility_and_opaque_evidence" &&
+            "blocked_pending_beta_classic_canary_preview_safety_and_opaque_evidence" &&
         workerMutationLifecycle.private_shell_adapter_implemented === false &&
         workerMutationLifecycle.upload_state === "blocked_pending_opaque_private_shell_evidence" &&
         workerMutationLifecycle.deployment_state === "blocked_pending_opaque_version_evidence",
-    "production Worker upload remains blocked after the isolated API canary until digest compatibility and opaque evidence exist"
+    "production Worker upload remains blocked on the API canary, preview safety, and opaque evidence"
 );
 check(
     JSON.stringify(workerMutationLifecycle.roles_in_order) === JSON.stringify(["sink", "writer_a", "writer_b"]) &&
@@ -535,6 +536,8 @@ check(
         workerMutationLifecycle.deployment_force === false &&
         workerMutationLifecycle.deployment_observation_force_false_required === true &&
         workerMutationLifecycle.artifact_and_binding_configuration_digests_required === true &&
+        workerMutationLifecycle.version_request_digest_required === true &&
+        workerMutationLifecycle.deployment_request_digest_required === true &&
         workerMutationLifecycle.upload_deployment_artifact_and_binding_consistency_required === true,
     "each Worker must upload one exact Version before a one-Version 100 percent Deployment"
 );

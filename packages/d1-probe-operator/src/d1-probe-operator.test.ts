@@ -62,7 +62,7 @@ const request = () => ({
     configuration_digest: hex("3"),
     probe_definition_digest: hex("4"),
     collector_build_digest: hex("5"),
-    commitment_key_id_digest: hex("6"),
+    commitment_key_id_digest: "45a7064c002c4b269eb5932fd42622c7b2ed330deef98203ea1bd342d56d238c",
     operator_database_deny_list: ["11111111-1111-1111-1111-111111111111", "2".repeat(32)],
     resource_suffixes: { ...suffixes },
 });
@@ -416,7 +416,7 @@ describe("D1 probe operator preflight", () => {
         expect(output).not.toContain(request().zone_id);
         expect(output).not.toContain(request().operator_database_deny_list[0]);
         expect(output).not.toContain(key);
-        expect(first.plan_digest).toBe("637d801ebf013665237926189e9fd4976b1df40e8d5d3985364a990590cf407a");
+        expect(first.plan_digest).toBe("46c677858c1f284036f0fdcfed7b292b8071f32c439f2579699ce97a42bfefc2");
     });
 
     it("rejects duplicate names, unsafe identifiers, noncanonical keys, and hostile input", async () => {
@@ -451,6 +451,12 @@ describe("D1 probe operator preflight", () => {
             success: false,
             code: "invalid_commitment_key",
         });
+        expect(
+            await compileD1ProbePreflightPlanV1(
+                { ...request(), commitment_key_id_digest: hex("6") },
+                { hmac_key_base64url: key }
+            )
+        ).toEqual({ success: false, code: "commitment_key_id_mismatch" });
 
         const hostile = new Proxy(
             {},
@@ -544,9 +550,9 @@ describe("D1 probe resource lifecycle", () => {
             mutation_allowed: false,
             lifecycle_advance_allowed: false,
             database_precondition: "opaque_initialized_database_required_after_database_created",
-            upload_safety_blocker: "beta_worker_api_interoperability_canary_missing",
+            upload_safety_blocker: "beta_classic_canary_preview_safety_and_opaque_evidence_missing",
             private_shell_protocol_contract_implemented: true,
-            beta_worker_api_interoperability_canary_passed: false,
+            beta_classic_api_canary_passed: false,
             first_version_preview_safety_resolved: false,
             gate_promotion_allowed: false,
         });
@@ -555,7 +561,7 @@ describe("D1 probe resource lifecycle", () => {
                 role: "sink",
                 private_shell: {
                     step: "sink_private_shell_created",
-                    state: "blocked_pending_beta_interoperability_canary_and_opaque_evidence",
+                    state: "blocked_pending_beta_classic_canary_preview_safety_and_opaque_evidence",
                     adapter_implemented: false,
                     lost_response: "manual_cleanup_required_no_retry",
                 },
@@ -579,7 +585,7 @@ describe("D1 probe resource lifecycle", () => {
                 role: "writer_a",
                 private_shell: {
                     step: "writer_a_private_shell_created",
-                    state: "blocked_pending_beta_interoperability_canary_and_opaque_evidence",
+                    state: "blocked_pending_beta_classic_canary_preview_safety_and_opaque_evidence",
                     adapter_implemented: false,
                     lost_response: "manual_cleanup_required_no_retry",
                 },
@@ -603,7 +609,7 @@ describe("D1 probe resource lifecycle", () => {
                 role: "writer_b",
                 private_shell: {
                     step: "writer_b_private_shell_created",
-                    state: "blocked_pending_beta_interoperability_canary_and_opaque_evidence",
+                    state: "blocked_pending_beta_classic_canary_preview_safety_and_opaque_evidence",
                     adapter_implemented: false,
                     lost_response: "manual_cleanup_required_no_retry",
                 },
@@ -654,7 +660,9 @@ describe("D1 probe resource lifecycle", () => {
             resource_kind: "sink_script",
             resource_name_commitment: scriptResource.generated_name_commitment,
             resource_id_commitment: hex("2"),
+            worker_version_contract: "beta_worker_json_version_v1",
             worker_version_id_commitment: hex("3"),
+            worker_version_request_digest: hex("8"),
             worker_artifact_digest: hex("4"),
             worker_binding_configuration_digest: hex("5"),
         } as const;
@@ -664,9 +672,12 @@ describe("D1 probe resource lifecycle", () => {
             resource_kind: "sink_script",
             resource_name_commitment: scriptResource.generated_name_commitment,
             resource_id_commitment: hex("2"),
+            worker_version_contract: "beta_worker_json_version_v1",
             worker_version_id_commitment: hex("3"),
+            worker_version_request_digest: hex("8"),
             worker_artifact_digest: hex("4"),
             worker_binding_configuration_digest: hex("5"),
+            worker_deployment_request_digest: hex("9"),
             worker_deployment_id_commitment: hex("7"),
             worker_deployment_percentage: 100,
             worker_deployment_force: false,
@@ -675,16 +686,21 @@ describe("D1 probe resource lifecycle", () => {
         expect(D1ProbeLifecycleObservationV1Schema.safeParse(deployment).success).toBe(true);
         expect(D1ProbeWorkerUploadDeploymentEvidenceV1Schema.safeParse({ upload, deployment }).success).toBe(true);
         for (const mutation of [
+            { ...deployment, worker_version_contract: undefined },
             { ...deployment, worker_version_id_commitment: undefined },
+            { ...deployment, worker_version_request_digest: undefined },
             { ...deployment, worker_artifact_digest: undefined },
             { ...deployment, worker_binding_configuration_digest: undefined },
+            { ...deployment, worker_deployment_request_digest: undefined },
             { ...deployment, worker_deployment_force: undefined },
             { ...deployment, worker_deployment_percentage: undefined },
         ]) {
             expect(D1ProbeLifecycleObservationV1Schema.safeParse(mutation).success).toBe(false);
         }
         for (const mutation of [
+            { ...deployment, worker_version_contract: undefined },
             { ...deployment, worker_version_id_commitment: hex("8") },
+            { ...deployment, worker_version_request_digest: hex("a") },
             { ...deployment, worker_artifact_digest: hex("8") },
             { ...deployment, worker_binding_configuration_digest: hex("8") },
             { ...deployment, resource_id_commitment: hex("8") },
@@ -693,6 +709,12 @@ describe("D1 probe resource lifecycle", () => {
                 D1ProbeWorkerUploadDeploymentEvidenceV1Schema.safeParse({ upload, deployment: mutation }).success
             ).toBe(false);
         }
+        expect(
+            D1ProbeWorkerUploadDeploymentEvidenceV1Schema.safeParse({
+                upload: { ...upload, resource_kind: "writer_a_script" },
+                deployment: { ...deployment, resource_kind: "writer_a_script" },
+            }).success
+        ).toBe(false);
         expect(D1ProbeLifecycleObservationV1Schema.safeParse(privateShell).success).toBe(true);
         const forgedPrivateShellPrefix = {
             ...databaseAdvanced.journal,
@@ -722,6 +744,7 @@ describe("D1 probe resource lifecycle", () => {
             const versionId = hex(role === "writer_a" ? "8" : "9");
             const artifactDigest = hex(role === "writer_a" ? "a" : "b");
             const bindingDigest = hex(role === "writer_a" ? "c" : "d");
+            const versionRequestDigest = hex(role === "writer_a" ? "1" : "2");
             return [
                 {
                     step: `${role}_private_shell_created`,
@@ -736,7 +759,9 @@ describe("D1 probe resource lifecycle", () => {
                     resource_kind: resourceKind,
                     resource_name_commitment: resource.generated_name_commitment,
                     resource_id_commitment: resourceId,
+                    worker_version_contract: "beta_worker_json_version_v1",
                     worker_version_id_commitment: versionId,
+                    worker_version_request_digest: versionRequestDigest,
                     worker_artifact_digest: artifactDigest,
                     worker_binding_configuration_digest: bindingDigest,
                 },
@@ -746,9 +771,12 @@ describe("D1 probe resource lifecycle", () => {
                     resource_kind: resourceKind,
                     resource_name_commitment: resource.generated_name_commitment,
                     resource_id_commitment: resourceId,
+                    worker_version_contract: "beta_worker_json_version_v1",
                     worker_version_id_commitment: versionId,
+                    worker_version_request_digest: versionRequestDigest,
                     worker_artifact_digest: artifactDigest,
                     worker_binding_configuration_digest: bindingDigest,
+                    worker_deployment_request_digest: hex(role === "writer_a" ? "3" : "4"),
                     worker_deployment_id_commitment: hex(role === "writer_a" ? "e" : "f"),
                     worker_deployment_percentage: 100,
                     worker_deployment_force: false,
@@ -1031,7 +1059,7 @@ describe("D1 probe verified preflight", () => {
             await verifyD1ProbePreflightV1(request(), compiledPlan, {
                 hmac_key_base64url: "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
             })
-        ).toEqual({ success: false, code: "preflight_plan_mismatch" });
+        ).toEqual({ success: false, code: "preflight_recompilation_failed" });
         expect(
             resolveVerifiedD1ProbePreflightV1({
                 schema_version: 1,

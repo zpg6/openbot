@@ -169,6 +169,22 @@ function checkD1ProbeWorkerArtifactCandidateBoundary(file, content, imports) {
     }
 }
 
+function checkD1ProbeWorkerVersionContractImportBoundary(file, specifier) {
+    if (!specifier.startsWith(".")) return;
+    const resolvedImport = path.resolve(path.dirname(file), specifier).replace(/\.(?:js|ts)$/u, "");
+    const contractModule = path.resolve("packages/d1-probe-operator/src/worker-version-contract");
+    if (resolvedImport !== contractModule) return;
+    const reviewedConsumers = new Set([
+        "packages/d1-probe-operator/src/cloudflare-worker-protocol.test.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-protocol.ts",
+        "packages/d1-probe-operator/src/worker-artifact.ts",
+        "packages/d1-probe-operator/src/worker-version-contract.test.ts",
+    ]);
+    if (!reviewedConsumers.has(file)) {
+        errors.push(`${file}: raw beta Worker Version bodies may enter only reviewed digest compilers and tests`);
+    }
+}
+
 function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
     const reviewedCanaryImports = new Map([
         ["packages/d1-probe-operator/src/cloudflare-worker-interoperability-canary.ts", new Set(["./contracts.js"])],
@@ -199,6 +215,22 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
             new Set(["./cloudflare-worker-canary-reservation.js"]),
         ],
         ["packages/d1-probe-operator/src/contracts.ts", new Set()],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-plan.ts",
+            new Set(["./cloudflare-worker-interoperability-canary.js", "./contracts.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-plan.test.ts",
+            new Set(["./cloudflare-worker-canary-command.js", "./cloudflare-worker-canary-plan.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-review.ts",
+            new Set(["./cloudflare-worker-interoperability-canary.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-review.test.ts",
+            new Set(["./cloudflare-worker-canary-review.js"]),
+        ],
     ]);
     const allowedRelativeImports = reviewedCanaryImports.get(file);
     if (allowedRelativeImports === undefined) return;
@@ -224,6 +256,50 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
         errors.push(
             `${file}: the isolated Worker API canary cannot claim runtime, attestation, lifecycle, or gate authority`
         );
+    }
+}
+
+function checkD1ProbePureTransformBoundary(file, content, imports) {
+    const pureTransforms = new Map([
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-plan.ts",
+            new Set(["./cloudflare-worker-interoperability-canary.js", "./contracts.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-review.ts",
+            new Set(["./cloudflare-worker-interoperability-canary.js"]),
+        ],
+        ["packages/d1-probe-operator/src/worker-version-contract.ts", new Set(["./contracts.js"])],
+    ]);
+    const allowedRelativeImports = pureTransforms.get(file);
+    if (allowedRelativeImports === undefined) return;
+    const unexpectedRelativeImport = imports.find(
+        specifier => specifier.startsWith(".") && !allowedRelativeImports.has(specifier)
+    );
+    if (unexpectedRelativeImport !== undefined) {
+        errors.push(`${file}: offline D1 probe transforms may import only their reviewed local closure`);
+    }
+    const nodeCapabilityImport = imports.find(specifier =>
+        /^(?:node:)?(?:assert|async_hooks|buffer|child_process|cluster|console|crypto|dgram|diagnostics_channel|dns|events|fs(?:\/promises)?|http|http2|https|module|net|os|path|perf_hooks|process|readline|repl|stream|timers|tls|tty|url|util|v8|vm|wasi|worker_threads|zlib)$/u.test(
+            specifier
+        )
+    );
+    if (nodeCapabilityImport !== undefined) {
+        errors.push(`${file}: offline D1 probe transforms must not import Node capabilities`);
+    }
+    if (
+        /\b(?:fetch|FormData|WebSocket|EventSource|XMLHttpRequest|process|spawn|readFile|writeFile|openSync|writeSync|execFile|createReadStream|createWriteStream)\b/u.test(
+            content
+        )
+    ) {
+        errors.push(`${file}: offline D1 probe transforms must remain pure`);
+    }
+    if (
+        /eligible_for_upload:\s*true|mutation_allowed:\s*true|lifecycle_advance_allowed:\s*true|eligible_for_attestation:\s*true|gate_promotion_allowed:\s*true/u.test(
+            content
+        )
+    ) {
+        errors.push(`${file}: offline D1 probe transforms cannot mint mutation or authority`);
     }
 }
 
@@ -432,6 +508,38 @@ if (errors.length !== beforeWorkerApiCanaryClosureSelfTest + 1) {
 }
 errors.splice(beforeWorkerApiCanaryClosureSelfTest, 1);
 
+const beforeWorkerVersionContractSelfTest = errors.length;
+checkD1ProbePureTransformBoundary(
+    "packages/d1-probe-operator/src/worker-version-contract.ts",
+    "export const mutation_allowed: true = true",
+    []
+);
+if (errors.length !== beforeWorkerVersionContractSelfTest + 1) {
+    errors.push("Worker Version contract boundary self-test did not reject mutation authority");
+}
+errors.splice(beforeWorkerVersionContractSelfTest, 1);
+
+const beforePureTransformCapabilitySelfTest = errors.length;
+checkD1ProbePureTransformBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-review.ts",
+    'import fs from "fs"; fs.openSync("result.json", "r")',
+    ["fs"]
+);
+if (errors.length !== beforePureTransformCapabilitySelfTest + 2) {
+    errors.push("offline D1 probe transform boundary self-test did not reject bare Node and filesystem capabilities");
+}
+errors.splice(beforePureTransformCapabilitySelfTest, 2);
+
+const beforeWorkerVersionConsumerSelfTest = errors.length;
+checkD1ProbeWorkerVersionContractImportBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-review.ts",
+    "./worker-version-contract.js"
+);
+if (errors.length !== beforeWorkerVersionConsumerSelfTest + 1) {
+    errors.push("Worker Version contract boundary self-test did not reject an unreviewed raw-body consumer");
+}
+errors.splice(beforeWorkerVersionConsumerSelfTest, 1);
+
 const beforeRpcManifestSelfTest = errors.length;
 checkManifest(
     "apps/<self-test>/package.json",
@@ -545,6 +653,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
         checkD1ProbeImportBoundary(file, specifier);
         checkGateSignerImportBoundary(file, specifier);
         checkD1ProbeOperatorImportBoundary(file, specifier);
+        checkD1ProbeWorkerVersionContractImportBoundary(file, specifier);
         checkD1ProbeRpcImportBoundary(file, specifier);
         checkD1ProbeDriverImportBoundary(file, specifier);
         checkD1ProbeWorkerImportBoundary(file, specifier);
@@ -564,6 +673,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
     }
     checkD1ProbeWorkerArtifactCandidateBoundary(file, content, imports);
     checkD1ProbeWorkerApiCanaryBoundary(file, content, imports);
+    checkD1ProbePureTransformBoundary(file, content, imports);
     checkD1ProbeOperatorNetworkBoundary(file, content, imports);
 
     if (

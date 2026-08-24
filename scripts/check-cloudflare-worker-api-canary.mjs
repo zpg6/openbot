@@ -193,16 +193,21 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
         "the canary must explicitly exclude runtime, production artifact, lifecycle, and gate claims"
     );
     check(
-        blocker.status === "unresolved" &&
-            blocker.artifact_upload_interface === "classic_multipart_metadata_and_module_parts" &&
-            blocker.protocol_upload_interface === "beta_json_modules" &&
-            blocker.artifact_binding_digest === "bare_canonical_role_and_caller_bound_sha256" &&
-            blocker.protocol_binding_digest === "sha256_prefixed_beta_binding_only_sha256" &&
+        blocker.status === "local_digest_identity_resolved_remote_safety_unresolved" &&
+            blocker.worker_version_contract === "beta_worker_json_version_v1" &&
+            blocker.artifact_and_protocol_upload_interface === "canonical_beta_json_modules" &&
+            blocker.artifact_and_protocol_binding_digest === "bare_canonical_role_and_caller_bound_sha256" &&
+            blocker.artifact_and_protocol_version_request_digest ===
+                "bare_canonical_method_path_query_and_body_sha256" &&
             blocker.lifecycle_digest_encoding === "bare_sha256_hex" &&
-            blocker.protocol_carries_artifact_digest === false &&
-            blocker.artifact_protocol_lifecycle_digest_compatible === false &&
-            blocker.isolated_canary_may_resolve_this_blocker === false,
-        "the production artifact/protocol/lifecycle digest incompatibility must remain explicit"
+            blocker.protocol_carries_artifact_digest === true &&
+            blocker.artifact_protocol_lifecycle_digest_compatible === true &&
+            blocker.isolated_canary_required_for_digest_compatibility === false &&
+            blocker.isolated_canary_status === "not_run" &&
+            blocker.first_version_preview_safety_resolved === false &&
+            blocker.credentialed_production_adapters_implemented === false &&
+            blocker.opaque_evidence_consumer_implemented === false,
+        "local digest identity may be resolved only while remote safety and evidence remain blocked"
     );
     check(
         Array.isArray(fixture.observations) && fixture.observations.length === 0,

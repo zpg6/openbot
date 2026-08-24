@@ -225,16 +225,20 @@
         ]
     },
     "production_path_blocker": {
-        "status": "unresolved",
-        "artifact_upload_interface": "classic_multipart_metadata_and_module_parts",
-        "protocol_upload_interface": "beta_json_modules",
-        "artifact_binding_digest": "bare_canonical_role_and_caller_bound_sha256",
-        "protocol_binding_digest": "sha256_prefixed_beta_binding_only_sha256",
+        "status": "local_digest_identity_resolved_remote_safety_unresolved",
+        "worker_version_contract": "beta_worker_json_version_v1",
+        "artifact_and_protocol_upload_interface": "canonical_beta_json_modules",
+        "artifact_and_protocol_binding_digest": "bare_canonical_role_and_caller_bound_sha256",
+        "artifact_and_protocol_version_request_digest": "bare_canonical_method_path_query_and_body_sha256",
         "lifecycle_digest_encoding": "bare_sha256_hex",
-        "protocol_carries_artifact_digest": false,
-        "artifact_protocol_lifecycle_digest_compatible": false,
-        "isolated_canary_may_resolve_this_blocker": false,
-        "required_resolution": "one_reviewed_upload_serialization_and_one_canonical_artifact_and_binding_digest_chain"
+        "protocol_carries_artifact_digest": true,
+        "artifact_protocol_lifecycle_digest_compatible": true,
+        "isolated_canary_required_for_digest_compatibility": false,
+        "isolated_canary_status": "not_run",
+        "first_version_preview_safety_resolved": false,
+        "credentialed_production_adapters_implemented": false,
+        "opaque_evidence_consumer_implemented": false,
+        "required_resolution": "reviewed_canary_preview_safety_production_adapters_and_opaque_evidence"
     },
     "observations": [],
     "sources": [

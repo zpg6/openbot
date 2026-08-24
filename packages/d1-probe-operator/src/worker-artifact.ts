@@ -1,10 +1,6 @@
 import { z } from "zod";
 
-import {
-    canonicalizeJsonV1,
-    digestCanonicalJsonV1,
-    type CanonicalJsonValueV1,
-} from "@openbot/gate-attestation/internal";
+import { digestCanonicalJsonV1, type CanonicalJsonValueV1 } from "@openbot/gate-attestation/internal";
 
 import { D1_PROBE_COMPATIBILITY_DATE_V1, D1_PROBE_WRANGLER_VERSION_V1 } from "./contracts.js";
 import {
@@ -13,15 +9,25 @@ import {
 } from "./cloudflare-database-bootstrap.js";
 import { resolveCreatedD1ProbeDatabaseV1 } from "./cloudflare-database.js";
 import { resolveVerifiedD1ProbePreflightV1 } from "./verified-preflight.js";
+import {
+    compileD1ProbeWorkerJsonVersionContractV1,
+    D1_PROBE_WORKER_MAIN_MODULE_V1,
+    D1_PROBE_WORKER_MODULE_LIMIT_BYTES_V1,
+    D1_PROBE_WORKER_NODE_VERSION_V1,
+    D1_PROBE_WORKER_PNPM_VERSION_V1,
+    type D1ProbeWorkerVersionRoleV1,
+} from "./worker-version-contract.js";
 
-export const D1_PROBE_WORKER_NODE_VERSION_V1 = "22.19.0";
-export const D1_PROBE_WORKER_PNPM_VERSION_V1 = "11.22.0";
-export const D1_PROBE_WORKER_MAIN_MODULE_V1 = "entry.js";
-export const D1_PROBE_WORKER_MODULE_LIMIT_BYTES_V1 = 8 * 1024 * 1024;
+export {
+    D1_PROBE_WORKER_MAIN_MODULE_V1,
+    D1_PROBE_WORKER_MODULE_LIMIT_BYTES_V1,
+    D1_PROBE_WORKER_NODE_VERSION_V1,
+    D1_PROBE_WORKER_PNPM_VERSION_V1,
+} from "./worker-version-contract.js";
 
 const Sha256Schema = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
 const WorkerRoleV1Schema = z.enum(["sink", "writer_a", "writer_b"]);
-export type D1ProbeWorkerArtifactRoleV1 = z.infer<typeof WorkerRoleV1Schema>;
+export type D1ProbeWorkerArtifactRoleV1 = D1ProbeWorkerVersionRoleV1;
 
 const DependencyDigestsV1Schema = z
     .object({
@@ -95,6 +101,7 @@ const WorkerModuleInputV1Schema = z
 
 const CompileInputV1Schema = z
     .object({
+        operation_id: z.string().regex(/^[0-9a-f]{32}$/u),
         build: WorkerBuildObservationV1Schema,
         modules: z.tuple([WorkerModuleInputV1Schema, WorkerModuleInputV1Schema, WorkerModuleInputV1Schema]),
     })
@@ -109,29 +116,19 @@ type ResourcePlanV1 = Readonly<{
     }>[];
 }>;
 
-export interface D1ProbeWorkerMultipartPartV1 {
-    readonly part_index: 0 | 1;
-    readonly form_name: "metadata" | typeof D1_PROBE_WORKER_MAIN_MODULE_V1;
-    readonly file_name: typeof D1_PROBE_WORKER_MAIN_MODULE_V1 | null;
-    readonly content_type: "application/json" | "application/javascript+module";
-    readonly byte_length: number;
-    readonly sha256: string;
-}
-
 export interface D1ProbeWorkerArtifactManifestV1 {
     readonly role: D1ProbeWorkerArtifactRoleV1;
+    readonly artifact_contract: "beta_worker_json_version_v1";
     readonly generated_script_name: string;
     readonly generated_script_name_commitment: string;
     readonly main_module: typeof D1_PROBE_WORKER_MAIN_MODULE_V1;
     readonly selected_entrypoint: "D1ProbeSinkService" | "D1ProbeWriterAService" | "D1ProbeWriterBService";
     readonly module_byte_length: number;
     readonly module_sha256: string;
-    readonly metadata_byte_length: number;
-    readonly metadata_sha256: string;
     readonly binding_configuration_digest: string;
+    readonly version_request_digest: string;
     readonly eligible_for_upload: false;
     readonly deployment_ready: false;
-    readonly multipart_parts: readonly [D1ProbeWorkerMultipartPartV1, D1ProbeWorkerMultipartPartV1];
     readonly artifact_digest: string;
 }
 
@@ -177,22 +174,7 @@ export type CompileD1ProbeWorkerArtifactsDenialV1 =
 type InternalArtifactV1 = Readonly<{
     manifest: D1ProbeWorkerArtifactManifestV1;
 }>;
-const encoder = new TextEncoder();
 const strictDecoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-
-const arrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
-    bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-
-const toHex = (value: ArrayBuffer): string =>
-    [...new Uint8Array(value)].map(byte => byte.toString(16).padStart(2, "0")).join("");
-
-const rawSha256 = async (bytes: Uint8Array): Promise<string | null> => {
-    try {
-        return `sha256:${toHex(await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer(bytes)))}`;
-    } catch {
-        return null;
-    }
-};
 
 const deepFreeze = <T>(value: T): T => {
     if (typeof value !== "object" || value === null || Object.isFrozen(value) || value instanceof Uint8Array) {
@@ -273,37 +255,8 @@ const safeModuleText = (bytes: Uint8Array): string | null => {
 const resource = (plan: ResourcePlanV1, kind: "sink_script" | "writer_a_script" | "writer_b_script") =>
     plan.resources.find(candidate => candidate.resource_kind === kind) ?? null;
 
-const bindingsFor = (
-    role: D1ProbeWorkerArtifactRoleV1,
-    databaseId: string,
-    sinkScriptName: string
-): CanonicalJsonValueV1[] => [
-    { type: "d1", name: "PROBE_DB", database_id: databaseId },
-    ...(role === "sink"
-        ? []
-        : [
-              {
-                  type: "service",
-                  name: "PROBE_SINK",
-                  service: sinkScriptName,
-                  entrypoint: "D1ProbeSinkService",
-              },
-          ]),
-    { type: "version_metadata", name: "VERSION_METADATA" },
-];
-
-const metadataFor = (
-    role: D1ProbeWorkerArtifactRoleV1,
-    databaseId: string,
-    sinkScriptName: string
-): CanonicalJsonValueV1 => ({
-    main_module: D1_PROBE_WORKER_MAIN_MODULE_V1,
-    compatibility_date: D1_PROBE_COMPATIBILITY_DATE_V1,
-    compatibility_flags: [],
-    bindings: bindingsFor(role, databaseId, sinkScriptName),
-});
-
 const artifactFor = async (
+    operationId: string,
     role: D1ProbeWorkerArtifactRoleV1,
     scriptName: string,
     scriptNameCommitment: string,
@@ -316,58 +269,31 @@ const artifactFor = async (
     const observed = build.workers[workerIndex];
     if (observed === undefined || observed.output_byte_length !== moduleBytesInput.byteLength) return null;
     if (safeModuleText(moduleBytesInput) === null) return null;
-    const moduleBytes = new Uint8Array(moduleBytesInput);
-    const metadataBytes = encoder.encode(canonicalizeJsonV1(metadataFor(role, databaseId, sinkScriptName)));
-    const [moduleSha256, metadataSha256, bindingConfigurationDigest] = await Promise.all([
-        rawSha256(moduleBytes),
-        rawSha256(metadataBytes),
-        digestCanonicalJsonV1("openbot.d1-probe.worker-binding-configuration.v1", {
-            caller_script_name_commitment: scriptNameCommitment,
-            role,
-            bindings: bindingsFor(role, databaseId, sinkScriptName),
-        }),
-    ]);
-    if (moduleSha256 === null || metadataSha256 === null || bindingConfigurationDigest === null) return null;
-    const multipartParts = [
-        {
-            part_index: 0 as const,
-            form_name: "metadata" as const,
-            file_name: null,
-            content_type: "application/json" as const,
-            byte_length: metadataBytes.byteLength,
-            sha256: metadataSha256,
-        },
-        {
-            part_index: 1 as const,
-            form_name: D1_PROBE_WORKER_MAIN_MODULE_V1,
-            file_name: D1_PROBE_WORKER_MAIN_MODULE_V1,
-            content_type: "application/javascript+module" as const,
-            byte_length: moduleBytes.byteLength,
-            sha256: moduleSha256,
-        },
-    ] as const;
-    const unsignedManifest = {
+    const versionContract = await compileD1ProbeWorkerJsonVersionContractV1({
         role,
-        generated_script_name: scriptName,
+        operation_id: operationId,
         generated_script_name_commitment: scriptNameCommitment,
-        main_module: D1_PROBE_WORKER_MAIN_MODULE_V1 as typeof D1_PROBE_WORKER_MAIN_MODULE_V1,
-        selected_entrypoint: expectedBuildProjection[role].selected_entrypoint,
-        module_byte_length: moduleBytes.byteLength,
-        module_sha256: moduleSha256,
-        metadata_byte_length: metadataBytes.byteLength,
-        metadata_sha256: metadataSha256,
-        binding_configuration_digest: bindingConfigurationDigest,
-        eligible_for_upload: false as const,
-        deployment_ready: false as const,
-        multipart_parts: multipartParts,
-    };
-    const artifactDigest = await digestCanonicalJsonV1(
-        "openbot.d1-probe.worker-version-artifact.v1",
-        unsignedManifest as unknown as CanonicalJsonValueV1
-    );
-    if (artifactDigest === null) return null;
+        database_id: databaseId,
+        sink_script_name: sinkScriptName,
+        module_bytes: moduleBytesInput,
+    });
+    if (versionContract === null) return null;
     return {
-        manifest: deepFreeze({ ...unsignedManifest, artifact_digest: artifactDigest }),
+        manifest: deepFreeze({
+            role,
+            artifact_contract: "beta_worker_json_version_v1",
+            generated_script_name: scriptName,
+            generated_script_name_commitment: scriptNameCommitment,
+            main_module: D1_PROBE_WORKER_MAIN_MODULE_V1,
+            selected_entrypoint: expectedBuildProjection[role].selected_entrypoint,
+            module_byte_length: moduleBytesInput.byteLength,
+            module_sha256: versionContract.module_sha256,
+            binding_configuration_digest: versionContract.binding_configuration_digest,
+            version_request_digest: versionContract.version_request_digest,
+            eligible_for_upload: false,
+            deployment_ready: false,
+            artifact_digest: versionContract.artifact_digest,
+        }),
     };
 };
 
@@ -417,6 +343,7 @@ export const compileUntrustedD1ProbeWorkerArtifactCandidateV1 = async (
     const artifacts = await Promise.all(
         roles.map((role, index) =>
             artifactFor(
+                parsed.operation_id,
                 role,
                 resources[index]!.generated_name,
                 resources[index]!.generated_name_commitment,
@@ -448,7 +375,7 @@ export const compileUntrustedD1ProbeWorkerArtifactCandidateV1 = async (
         database_name_commitment: initialized.database_name_commitment,
         build_observation_digest: buildObservationDigest,
         dependency_digest: dependencyDigest,
-        artifact_digests: exactArtifacts.map(artifact => artifact.manifest.artifact_digest),
+        artifacts: exactArtifacts.map(artifact => artifact.manifest) as unknown as CanonicalJsonValueV1[],
     });
     if (candidateDigest === null) return { success: false, code: "digest_unavailable" };
     const candidate = deepFreeze({

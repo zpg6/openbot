@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { digestCanonicalJsonV1, type CanonicalJsonValueV1 } from "@openbot/gate-attestation/internal";
 
 import { compileUntrustedD1ProbeCloudflareWorkerProtocolV1 as compileProtocol } from "./cloudflare-worker-protocol.js";
+import { compileD1ProbeWorkerJsonVersionContractV1 } from "./worker-version-contract.js";
 
 const commitmentKey = { hmac_key_base64url: "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE" };
-const commitmentKeyIdDigest = "6".repeat(64);
+const commitmentKeyIdDigest = "45a7064c002c4b269eb5932fd42622c7b2ed330deef98203ea1bd342d56d238c";
 const accountId = "a".repeat(32);
 const operationId = "b".repeat(32);
 const workerId = "1".repeat(32);
@@ -21,10 +22,6 @@ const topology = {
 } as const;
 const moduleBytes = new TextEncoder().encode("export class D1ProbeSinkService {}; export default {};");
 const moduleBase64 = btoa(String.fromCharCode(...moduleBytes));
-const sha256Text = async (value: string): Promise<string> => {
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
-    return `sha256:${[...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
-};
 const hmacIdentity = async (domain: string, value: string): Promise<string> => {
     const raw = Uint8Array.from(atob(commitmentKey.hmac_key_base64url), character => character.charCodeAt(0));
     const key = await crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -34,6 +31,21 @@ const hmacIdentity = async (domain: string, value: string): Promise<string> => {
         new TextEncoder().encode(`${domain}\u0000${JSON.stringify(value)}`)
     );
     return [...new Uint8Array(signature)].map(byte => byte.toString(16).padStart(2, "0")).join("");
+};
+const artifactManifestFor = async (role: "sink" | "writer_a" | "writer_b", bytes = moduleBytes) => {
+    const scriptName = topology[role];
+    const scriptNameCommitment = await hmacIdentity(
+        `openbot.d1-probe.generated-resource-name.${role === "sink" ? "sink_script" : `${role}_script`}.v1`,
+        scriptName
+    );
+    return compileD1ProbeWorkerJsonVersionContractV1({
+        role,
+        operation_id: operationId,
+        generated_script_name_commitment: scriptNameCommitment,
+        database_id: databaseId,
+        sink_script_name: topology.sink,
+        module_bytes: bytes,
+    });
 };
 const reverseObjectKeyOrder = (value: unknown): CanonicalJsonValueV1 => {
     if (value === null || typeof value === "boolean" || typeof value === "number" || typeof value === "string") {
@@ -216,7 +228,7 @@ describe("Cloudflare Worker provisioning protocol", () => {
             method: "POST",
             path: "/accounts/{account_id}/workers/workers/{worker_id}/versions",
             query: { deploy: false },
-            request_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+            request_digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
         });
         const expectedVersionBody = {
             main_module: "entry.js",
@@ -233,20 +245,24 @@ describe("Cloudflare Worker provisioning protocol", () => {
             ],
         };
         expect(result.protocol.version.create.request_digest).toBe(
-            await sha256Text(
-                `openbot.d1-probe.cloudflare-version-request.v1\u0000${JSON.stringify({
-                    method: "POST",
-                    path: "/accounts/{account_id}/workers/workers/{worker_id}/versions",
-                    query: { deploy: false },
-                    body: expectedVersionBody,
-                })}`
-            )
+            await digestCanonicalJsonV1("openbot.d1-probe.cloudflare-version-request.v1", {
+                method: "POST",
+                path: "/accounts/{account_id}/workers/workers/{worker_id}/versions",
+                query: { deploy: false },
+                body: expectedVersionBody,
+            } as unknown as CanonicalJsonValueV1)
         );
+        const artifactManifest = await artifactManifestFor("sink");
+        expect(artifactManifest).not.toBeNull();
         expect(result.protocol.version.binding_configuration_digest).toBe(
-            await sha256Text(`openbot.d1-probe.cloudflare-worker-bindings.v1\u0000${JSON.stringify(bindings)}`)
+            artifactManifest?.binding_configuration_digest
         );
+        expect(result.protocol.version.artifact_digest).toBe(artifactManifest?.artifact_digest);
+        expect(result.protocol.version.binding_configuration_digest).toMatch(/^[0-9a-f]{64}$/u);
+        expect(result.protocol.version.artifact_digest).toMatch(/^[0-9a-f]{64}$/u);
         expect(result.protocol.version).toMatchObject({
             id_commitment: expect.stringMatching(/^[0-9a-f]{64}$/u),
+            artifact_contract: "beta_worker_json_version_v1",
             marker_match_count: 1,
             urls: [],
             has_preview: false,
@@ -256,22 +272,20 @@ describe("Cloudflare Worker provisioning protocol", () => {
             method: "POST",
             path: "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
             query: { force: false },
-            request_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+            request_digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
         });
         expect(result.protocol.deployment.id_commitment).toMatch(/^[0-9a-f]{64}$/u);
         expect(result.protocol.deployment.create.request_digest).toBe(
-            await sha256Text(
-                `openbot.d1-probe.cloudflare-deployment-request.v1\u0000${JSON.stringify({
-                    method: "POST",
-                    path: "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
-                    query: { force: false },
-                    body: {
-                        strategy: "percentage",
-                        annotations: { "workers/message": markers.deployment },
-                        versions: [{ version_id: versionId, percentage: 100 }],
-                    },
-                })}`
-            )
+            await digestCanonicalJsonV1("openbot.d1-probe.cloudflare-deployment-request.v1", {
+                method: "POST",
+                path: "/accounts/{account_id}/workers/scripts/{script_name}/deployments",
+                query: { force: false },
+                body: {
+                    strategy: "percentage",
+                    annotations: { "workers/message": markers.deployment },
+                    versions: [{ version_id: versionId, percentage: 100 }],
+                },
+            } as CanonicalJsonValueV1)
         );
         expect(result.protocol.runtime).toEqual({
             version_id_commitment: result.protocol.version.id_commitment,
@@ -354,7 +368,11 @@ describe("Cloudflare Worker provisioning protocol", () => {
         expect(result.success).toBe(true);
         expect(sinkResult.success).toBe(true);
         if (!result.success || !sinkResult.success) return;
-        expect(result.protocol.version.binding_configuration_digest).toMatch(/^sha256:[0-9a-f]{64}$/u);
+        expect(result.protocol.version.binding_configuration_digest).toMatch(/^[0-9a-f]{64}$/u);
+        expect(result.protocol.version.artifact_digest).toMatch(/^[0-9a-f]{64}$/u);
+        const writerArtifact = await artifactManifestFor("writer_a");
+        expect(result.protocol.version.binding_configuration_digest).toBe(writerArtifact?.binding_configuration_digest);
+        expect(result.protocol.version.artifact_digest).toBe(writerArtifact?.artifact_digest);
         expect(result.protocol.shell.readback.worker_id_commitment).toBe(
             sinkResult.protocol.shell.readback.worker_id_commitment
         );
@@ -401,18 +419,15 @@ describe("Cloudflare Worker provisioning protocol", () => {
         });
     });
 
-    it("emits and binds the caller's reviewed commitment key ID digest", async () => {
+    it("derives and binds the commitment key ID digest", async () => {
         const initial = await compileUntrustedD1ProbeCloudflareWorkerProtocolV1(validInput());
         const changed = await compileUntrustedD1ProbeCloudflareWorkerProtocolV1(
             mutate(input => (input.commitment_key_id_digest = "7".repeat(64)))
         );
         expect(initial.success).toBe(true);
-        expect(changed.success).toBe(true);
-        if (!initial.success || !changed.success) return;
+        expect(changed).toEqual({ success: false, code: "commitment_key_id_mismatch" });
+        if (!initial.success) return;
         expect(initial.protocol.commitment_key_id_digest).toBe(commitmentKeyIdDigest);
-        expect(changed.protocol.commitment_key_id_digest).toBe("7".repeat(64));
-        expect(changed.protocol.account_id_commitment).toBe(initial.protocol.account_id_commitment);
-        expect(changed.protocol.protocol_digest).not.toBe(initial.protocol.protocol_digest);
     });
 
     it.each([
@@ -494,7 +509,7 @@ describe("Cloudflare Worker provisioning protocol", () => {
         );
         expect(recomputed).toBe(protocolDigest);
         expect(reorderedDigest).toBe(protocolDigest);
-        expect(protocolDigest).toBe("5cdc1f72a4fd7bb5502ad83916e69b72461b9198162cb6d13fdfe1da034466a5");
+        expect(protocolDigest).toBe("04cc15cdb3089ff623764f4b36396e5c1fc1bc599208076941f9c03461e84e52");
     });
 
     it("binds peer topology used only by dependency-ordered cleanup", async () => {
@@ -626,6 +641,43 @@ describe("Cloudflare Worker provisioning protocol", () => {
                 "runtime timestamp",
                 mutate(input => (input.runtime_version_metadata.timestamp = "2026-08-24T15:16:18.000Z")),
                 "runtime_version_metadata_mismatch",
+            ],
+        ];
+        for (const [name, input, code] of cases) {
+            const result = await compileUntrustedD1ProbeCloudflareWorkerProtocolV1(input);
+            expect(result, name).toEqual({ success: false, code });
+        }
+    });
+
+    it("rejects every reviewed input substitution that could change the artifact digest chain", async () => {
+        const cases: Array<[string, unknown, string]> = [
+            ["role", mutate(input => (input.role = "writer_a")), "worker_identity_mismatch"],
+            [
+                "sink script",
+                mutate(input => {
+                    input.role = "writer_a";
+                    input.beta_worker_readback.name = topology.writer_a;
+                    const prefix = `openbot:d1-probe:v1:${operationId}:writer_a`;
+                    input.beta_worker_readback.tags = [`${prefix}:owner`];
+                    input.topology.sink = "openbot-d1-probe-0000000000000004";
+                }),
+                "binding_mismatch",
+            ],
+            [
+                "database",
+                mutate(input => (input.database_id = "66666666-6666-4666-8666-666666666666")),
+                "binding_mismatch",
+            ],
+            ["module", mutate(input => (input.module_bytes[0] ^= 1)), "module_mismatch"],
+            [
+                "beta binding",
+                mutate(input => (input.beta_version_readback.bindings[0].database_id = otherVersionId)),
+                "binding_mismatch",
+            ],
+            [
+                "classic binding",
+                mutate(input => (input.classic_version_readback.resources.bindings[0].database_id = otherVersionId)),
+                "binding_mismatch",
             ],
         ];
         for (const [name, input, code] of cases) {

@@ -2,11 +2,11 @@ import {
     D1_DISPOSABLE_PROBE_SCHEMA_MANIFEST_V1,
     D1_DISPOSABLE_PROBE_SCHEMA_STATEMENTS_V1,
 } from "@openbot/d1-probe-rpc/schema";
-import { canonicalizeJsonV1, type CanonicalJsonValueV1 } from "@openbot/gate-attestation/internal";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { initializeD1ProbeDatabaseV1, type InitializedD1ProbeDatabaseV1 } from "./cloudflare-database-bootstrap.js";
 import { createD1ProbeDatabaseV1 } from "./cloudflare-database.js";
+import { compileUntrustedD1ProbeCloudflareWorkerProtocolV1 } from "./cloudflare-worker-protocol.js";
 import { createD1ProbeLifecycleJournalV1 } from "./lifecycle.js";
 import { compileD1ProbePreflightPlanV1 } from "./preflight.js";
 import { readD1ProbeCloudflareRouteV1 } from "./cloudflare-route-reader.js";
@@ -16,6 +16,7 @@ import { compileUntrustedD1ProbeWorkerArtifactCandidateV1 } from "./worker-artif
 const key = "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE";
 const apiToken = "w".repeat(32);
 const databaseId = "33333333-3333-4333-8333-333333333333";
+const operationId = "d".repeat(32);
 const encoder = new TextEncoder();
 const suffixes = {
     database: "0000000000000000",
@@ -42,7 +43,7 @@ const request = () => ({
     configuration_digest: "3".repeat(64),
     probe_definition_digest: "4".repeat(64),
     collector_build_digest: "5".repeat(64),
-    commitment_key_id_digest: "6".repeat(64),
+    commitment_key_id_digest: "45a7064c002c4b269eb5932fd42622c7b2ed330deef98203ea1bd342d56d238c",
     operator_database_deny_list: ["11111111-1111-1111-1111-111111111111"],
     resource_suffixes: { ...suffixes },
 });
@@ -277,10 +278,107 @@ const build = (workerModules = modules()) => ({
     ],
 });
 
-const digestBytes = async (bytes: Uint8Array): Promise<string> => {
-    const source = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    const digest = await crypto.subtle.digest("SHA-256", source);
-    return `sha256:${[...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("")}`;
+const protocolInput = (role: "sink" | "writer_a" | "writer_b", moduleBytes: Uint8Array): Record<string, unknown> => {
+    const scriptName = `openbot-d1-probe-${suffixes[`${role}_script`]}`;
+    const topology = {
+        sink: `openbot-d1-probe-${suffixes.sink_script}`,
+        writer_a: `openbot-d1-probe-${suffixes.writer_a_script}`,
+        writer_b: `openbot-d1-probe-${suffixes.writer_b_script}`,
+    };
+    const markerPrefix = `openbot:d1-probe:v1:${operationId}:${role}`;
+    const versionId = "22222222-2222-4222-8222-222222222222";
+    const deploymentId = "44444444-4444-4444-8444-444444444444";
+    const createdOn = "2026-08-24T15:16:17.000Z";
+    const annotations = {
+        "workers/message": `${markerPrefix}:first-private-version`,
+        "workers/tag": `${markerPrefix}:version`,
+        "workers/triggered_by": "openbot-d1-probe-operator",
+    };
+    const bindings = [
+        { name: "PROBE_DB", type: "d1", database_id: databaseId },
+        ...(role === "sink"
+            ? []
+            : [
+                  {
+                      name: "PROBE_SINK",
+                      type: "service",
+                      service: topology.sink,
+                      entrypoint: "D1ProbeSinkService",
+                  },
+              ]),
+        { name: "VERSION_METADATA", type: "version_metadata" },
+    ];
+    const deployment = {
+        id: deploymentId,
+        strategy: "percentage",
+        annotations: { "workers/message": `${markerPrefix}:deployment` },
+        versions: [{ version_id: versionId, percentage: 100 }],
+    };
+    return {
+        schema_version: 1,
+        projection_contract: "reviewed_cloudflare_fields_only_v1",
+        commitment_key_id_digest: request().commitment_key_id_digest,
+        account_id: request().account_id,
+        operation_id: operationId,
+        operation_window: {
+            dispatch_started_on: "2026-08-24T14:59:59.000Z",
+            dispatch_finished_on: "2026-08-24T15:00:01.000Z",
+            observation_started_on: "2026-08-24T15:00:01.000Z",
+            observation_finished_on: "2026-08-24T15:01:01.000Z",
+        },
+        role,
+        topology,
+        database_id: databaseId,
+        module_bytes: moduleBytes,
+        beta_worker_readback: {
+            id: "1".repeat(32),
+            name: scriptName,
+            created_on: "2026-08-24T15:00:00.000Z",
+            tags: [`${markerPrefix}:owner`],
+            logpush: false,
+            observability: { enabled: false },
+            subdomain: { enabled: false, previews_enabled: false },
+            tail_consumers: [],
+            deployed_on: null,
+        },
+        classic_subdomain_readback: { enabled: false, previews_enabled: false },
+        preupload_beta_version_list: { complete: true, total_count: 0, versions: [] },
+        preupload_deployment_list: { complete: true, deployments: [] },
+        beta_version_list: {
+            complete: true,
+            total_count: 1,
+            versions: [{ id: versionId, annotations, urls: [] }],
+        },
+        beta_version_readback: {
+            id: versionId,
+            created_on: createdOn,
+            annotations,
+            urls: [],
+            main_module: "entry.js",
+            compatibility_date: "2026-08-22",
+            compatibility_flags: [],
+            bindings,
+            modules: [
+                {
+                    name: "entry.js",
+                    content_type: "application/javascript+module",
+                    content_base64: btoa(String.fromCharCode(...moduleBytes)),
+                },
+            ],
+        },
+        classic_version_readback: {
+            id: versionId,
+            metadata: { hasPreview: false },
+            resources: {
+                bindings,
+                script_runtime: { compatibility_date: "2026-08-22", compatibility_flags: [] },
+            },
+        },
+        deployment_list: { complete: true, deployments: [deployment] },
+        deployment_readback: deployment,
+        post_deployment_subdomain_readback: { enabled: false, previews_enabled: false },
+        runtime_version_metadata: { id: versionId, tag: `${markerPrefix}:version`, timestamp: createdOn },
+    };
 };
 
 describe("untrusted D1 probe Worker artifact candidate", () => {
@@ -293,6 +391,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
     it("binds the exact direct-API metadata, ordered parts, roles, and run database without upload authority", async () => {
         const workerModules = modules();
         const result = await compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+            operation_id: operationId,
             build: build(workerModules),
             modules: workerModules,
         });
@@ -310,64 +409,60 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
             routes_present: false,
         });
         expect(result.candidate.artifacts.map(artifact => artifact.role)).toEqual(["sink", "writer_a", "writer_b"]);
+        expect(
+            result.candidate.artifacts.every(artifact => artifact.artifact_contract === "beta_worker_json_version_v1")
+        ).toBe(true);
         expect(result.candidate.artifacts.map(artifact => artifact.selected_entrypoint)).toEqual([
             "D1ProbeSinkService",
             "D1ProbeWriterAService",
             "D1ProbeWriterBService",
         ]);
         for (const artifact of result.candidate.artifacts) {
-            expect(artifact.multipart_parts.map(part => part.form_name)).toEqual(["metadata", "entry.js"]);
-            expect(artifact.multipart_parts.map(part => part.part_index)).toEqual([0, 1]);
             expect(artifact.eligible_for_upload).toBe(false);
             expect(artifact.deployment_ready).toBe(false);
         }
-
-        const sinkMetadata = encoder.encode(
-            canonicalizeJsonV1({
-                bindings: [
-                    { database_id: databaseId, name: "PROBE_DB", type: "d1" },
-                    { name: "VERSION_METADATA", type: "version_metadata" },
-                ],
-                compatibility_date: "2026-08-22",
-                compatibility_flags: [],
-                main_module: "entry.js",
-            } as CanonicalJsonValueV1)
-        );
-        expect(result.candidate.artifacts[0].metadata_sha256).toBe(await digestBytes(sinkMetadata));
-        expect(new TextDecoder().decode(sinkMetadata)).toContain('"database_id"');
-        expect(new TextDecoder().decode(sinkMetadata)).not.toContain('"id"');
-        const writerMetadata = encoder.encode(
-            canonicalizeJsonV1({
-                bindings: [
-                    { database_id: databaseId, name: "PROBE_DB", type: "d1" },
-                    {
-                        entrypoint: "D1ProbeSinkService",
-                        name: "PROBE_SINK",
-                        service: `openbot-d1-probe-${suffixes.sink_script}`,
-                        type: "service",
-                    },
-                    { name: "VERSION_METADATA", type: "version_metadata" },
-                ],
-                compatibility_date: "2026-08-22",
-                compatibility_flags: [],
-                main_module: "entry.js",
-            } as CanonicalJsonValueV1)
-        );
-        expect(result.candidate.artifacts[1].metadata_sha256).toBe(await digestBytes(writerMetadata));
-        expect(result.candidate.artifacts[1].metadata_sha256).toBe(result.candidate.artifacts[2].metadata_sha256);
         expect(result.candidate.artifacts[1].binding_configuration_digest).not.toBe(
             result.candidate.artifacts[2].binding_configuration_digest
         );
     });
 
+    it("gives the artifact candidate and reviewed Cloudflare protocol one digest chain for every role", async () => {
+        const workerModules = modules();
+        const candidate = await compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+            operation_id: operationId,
+            build: build(workerModules),
+            modules: workerModules,
+        });
+        expect(candidate.success).toBe(true);
+        if (!candidate.success) return;
+
+        for (const [index, role] of (["sink", "writer_a", "writer_b"] as const).entries()) {
+            const protocol = await compileUntrustedD1ProbeCloudflareWorkerProtocolV1(
+                protocolInput(role, workerModules[index]!.bytes),
+                { hmac_key_base64url: key }
+            );
+            expect(protocol.success, role).toBe(true);
+            if (!protocol.success) continue;
+            const artifact = candidate.candidate.artifacts[index]!;
+            expect(protocol.protocol.version.artifact_digest, role).toBe(artifact.artifact_digest);
+            expect(protocol.protocol.version.binding_configuration_digest, role).toBe(
+                artifact.binding_configuration_digest
+            );
+            expect(protocol.protocol.version.module_sha256, role).toBe(artifact.module_sha256);
+            expect(protocol.protocol.version.create.request_digest, role).toBe(artifact.version_request_digest);
+        }
+    });
+
     it("is deterministic and binds one-byte module and dependency changes", async () => {
         const firstModules = modules();
         const first = await compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+            operation_id: operationId,
             build: build(firstModules),
             modules: firstModules,
         });
         const repeatedModules = modules();
         const repeated = await compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+            operation_id: operationId,
             build: build(repeatedModules),
             modules: repeatedModules,
         });
@@ -377,6 +472,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
         const mutatedModules = modules();
         mutatedModules[1]!.bytes[0] = (mutatedModules[1]!.bytes[0] ?? 0) ^ 1;
         const mutatedModule = await compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+            operation_id: operationId,
             build: build(mutatedModules),
             modules: mutatedModules,
         });
@@ -389,6 +485,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
         const dependencyBuild = build(dependencyModules);
         dependencyBuild.dependency_digests.pnpm_lock_sha256 = sha("8");
         const mutatedDependency = await compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+            operation_id: operationId,
             build: dependencyBuild,
             modules: dependencyModules,
         });
@@ -400,7 +497,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
 
     it("copies inputs and emits no raw database ID, module bytes, route, credential, or authority", async () => {
         const workerModules = modules();
-        const input = { build: build(workerModules), modules: workerModules };
+        const input = { operation_id: operationId, build: build(workerModules), modules: workerModules };
         const result = await compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, input);
         expect(result.success).toBe(true);
         if (!result.success) return;
@@ -423,6 +520,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
         sourceMapped.workers[1]!.source_map_emitted = true as false;
         await expect(
             compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+                operation_id: operationId,
                 build: sourceMapped,
                 modules: workerModules,
             })
@@ -432,6 +530,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
         sharedExports.workers[1]!.exports = ["D1ProbeWriterAService", "D1ProbeWriterBService", "default"];
         await expect(
             compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+                operation_id: operationId,
                 build: sharedExports,
                 modules: workerModules,
             })
@@ -441,6 +540,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
         localIngress.workers[1]!.public_fetch_contract = "access_writer_b_trigger_v1";
         await expect(
             compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+                operation_id: operationId,
                 build: localIngress,
                 modules: workerModules,
             })
@@ -450,6 +550,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
         commentModules[2]!.bytes = encoder.encode("export default {};\n//# sourceMappingURL=entry.js.map");
         await expect(
             compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+                operation_id: operationId,
                 build: build(commentModules),
                 modules: commentModules,
             })
@@ -467,6 +568,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
             pathModules[0]!.bytes = encoder.encode(`export default ${JSON.stringify(path)}`);
             await expect(
                 compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+                    operation_id: operationId,
                     build: build(pathModules),
                     modules: pathModules,
                 })
@@ -487,12 +589,24 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
             "gate_authority",
         ]) {
             const workerModules = modules();
-            cases.push({ build: { ...build(workerModules), [key]: true }, modules: workerModules });
+            cases.push({
+                operation_id: operationId,
+                build: { ...build(workerModules), [key]: true },
+                modules: workerModules,
+            });
         }
         const enabled = build(modules());
-        cases.push({ build: { ...enabled, workers_dev: true }, modules: modules() });
-        cases.push({ build: { ...enabled, compatibility_flags: ["nodejs_compat"] }, modules: modules() });
-        cases.push({ build: { ...enabled, wrangler_version: "4.126.0" }, modules: modules() });
+        cases.push({ operation_id: operationId, build: { ...enabled, workers_dev: true }, modules: modules() });
+        cases.push({
+            operation_id: operationId,
+            build: { ...enabled, compatibility_flags: ["nodejs_compat"] },
+            modules: modules(),
+        });
+        cases.push({
+            operation_id: operationId,
+            build: { ...enabled, wrangler_version: "4.126.0" },
+            modules: modules(),
+        });
         for (const hostile of cases) {
             const result = await compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, hostile);
             expect(result).toEqual({ success: false, code: "invalid_worker_build_observation" });
@@ -501,6 +615,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
         const reordered = modules().reverse();
         await expect(
             compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+                operation_id: operationId,
                 build: build(reordered),
                 modules: reordered,
             })
@@ -509,13 +624,18 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
         const empty = modules();
         empty[0]!.bytes = new Uint8Array();
         await expect(
-            compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, { build: build(empty), modules: empty })
+            compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+                operation_id: operationId,
+                build: build(empty),
+                modules: empty,
+            })
         ).resolves.toEqual({ success: false, code: "invalid_worker_build_observation" });
 
         const invalidUtf8 = modules();
         invalidUtf8[0]!.bytes = Uint8Array.of(0xff);
         await expect(
             compileUntrustedD1ProbeWorkerArtifactCandidateV1(initialized, {
+                operation_id: operationId,
                 build: build(invalidUtf8),
                 modules: invalidUtf8,
             })
@@ -526,7 +646,7 @@ describe("untrusted D1 probe Worker artifact candidate", () => {
         await expect(
             compileUntrustedD1ProbeWorkerArtifactCandidateV1(
                 { schema_version: 1, kind: "initialized_d1_probe_database" } as InitializedD1ProbeDatabaseV1,
-                { build: build(), modules: modules() }
+                { operation_id: operationId, build: build(), modules: modules() }
             )
         ).resolves.toEqual({ success: false, code: "invalid_initialized_database" });
 

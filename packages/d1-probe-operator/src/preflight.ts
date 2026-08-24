@@ -19,6 +19,7 @@ import {
 } from "./contracts.js";
 
 const encoder = new TextEncoder();
+const COMMITMENT_KEY_ID_DOMAIN_V1 = "openbot.d1-probe.commitment-key-id.v1";
 
 const arrayBuffer = (bytes: Uint8Array): ArrayBuffer =>
     bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
@@ -56,6 +57,7 @@ const hmac = async (key: CryptoKey, domain: string, value: CanonicalJsonValueV1)
 export type D1ProbePreflightDenialV1 =
     | "invalid_preflight_request"
     | "invalid_commitment_key"
+    | "commitment_key_id_mismatch"
     | "commitment_unavailable"
     | "plan_digest_unavailable"
     | "invalid_preflight_plan";
@@ -79,7 +81,14 @@ export const compileD1ProbePreflightPlanV1 = async (
         return { success: false, code: "invalid_commitment_key" };
     }
     let key: CryptoKey;
+    let keyIdDigest: string;
+    let keyIdInput: Uint8Array | null = null;
     try {
+        const keyIdDomain = encoder.encode(`${COMMITMENT_KEY_ID_DOMAIN_V1}\u0000`);
+        keyIdInput = new Uint8Array(keyIdDomain.byteLength + rawKey.byteLength);
+        keyIdInput.set(keyIdDomain);
+        keyIdInput.set(rawKey, keyIdDomain.byteLength);
+        keyIdDigest = toHex(await globalThis.crypto.subtle.digest("SHA-256", arrayBuffer(keyIdInput)));
         key = await globalThis.crypto.subtle.importKey(
             "raw",
             arrayBuffer(rawKey),
@@ -89,6 +98,12 @@ export const compileD1ProbePreflightPlanV1 = async (
         );
     } catch {
         return { success: false, code: "invalid_commitment_key" };
+    } finally {
+        keyIdInput?.fill(0);
+        rawKey.fill(0);
+    }
+    if (keyIdDigest !== request.data.commitment_key_id_digest) {
+        return { success: false, code: "commitment_key_id_mismatch" };
     }
 
     const accountCommitment = await hmac(key, "openbot.identity.cloudflare_account_id.v1", request.data.account_id);

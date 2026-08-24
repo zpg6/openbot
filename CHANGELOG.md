@@ -6,10 +6,11 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 
 ### Added
 
-- An operator-only Cloudflare Worker API interoperability canary and FD-only command. It uses one fixed inert no-binding module, per-execution ownership, fresh pre-delete ownership readback, checkout-local replay resistance, nonzero uncertainty exits, and bounded signal cleanup. Its checked-in result remains `not_run`, it grants no lifecycle or gate authority, and the production artifact/protocol/lifecycle digest mismatch remains a separate blocker.
+- Pure offline helpers generate canonical Cloudflare Worker API canary plans and check a returned transcript's caller-claim shape against retained operator context. They perform no network or filesystem work, do not resolve response digests, and grant no mutation, adjudication, lifecycle, or gate authority.
+- An operator-only Cloudflare Worker API interoperability canary and FD-only command. It uses one fixed inert no-binding module, per-execution ownership, fresh pre-delete ownership readback, checkout-local replay resistance, nonzero uncertainty exits, and bounded signal cleanup. Its checked-in result remains `not_run` and it grants no lifecycle or gate authority.
 - A pure Cloudflare Worker provisioning protocol for private beta shells, non-deploying Versions, classic readback, 100 percent Deployment, runtime identity, and no-force cleanup. It exposes no Cloudflare-assigned ID, API token, HMAC key, or module bytes, performs no network call, and remains blocked on a disposable-account interoperability canary.
 - Role-specific D1 probe Worker HTTP entrypoints with direct Access checks, strict runtime-version observations, first-primary sink readback, and a lifecycle contract that separates Version upload from 100% Deployment. Remote upload remains blocked until preview-safety and opaque evidence consumers exist.
-- A private pure compiler for upload-ineligible D1 probe Worker artifact candidates. It binds exact module and canonical direct-API multipart metadata digests for the sink and both writers, while granting no upload, deployment, lifecycle, or gate authority.
+- A shared `beta_worker_json_version_v1` projection gives D1 probe artifact candidates, provisioning protocols, and lifecycle observations one canonical Version body and matching artifact, binding-configuration, and request digests. The candidates remain upload-ineligible and grant no deployment, lifecycle, or gate authority.
 - Initial implementation plan for the self-hosted read-only Bot runtime.
 - TypeScript repository foundation, core contracts, and public project documentation.
 - Cloudflare Workers tests use the current Vitest plugin package.
