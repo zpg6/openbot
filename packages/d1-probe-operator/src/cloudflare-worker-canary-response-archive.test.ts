@@ -59,6 +59,8 @@ const observedClaim = async (
         request_method: "GET",
         transcript_sequence: 1,
         effect_phase: "response_observed",
+        intent_observed_at_ms: 1_785_999_999_998,
+        dispatch_started_at_ms: 1_785_999_999_999,
         request_digest: randomDigest(),
         request_path_digest: randomDigest(),
         response_status: 200,
@@ -247,6 +249,7 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
         const intent = await buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1({
             ...observedDraft,
             effect_phase: "dispatch_intent",
+            dispatch_started_at_ms: null,
             response_status: null,
             response_digest: null,
             ambiguity_classification: "not_dispatched",

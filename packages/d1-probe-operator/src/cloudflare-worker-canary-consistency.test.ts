@@ -125,6 +125,8 @@ const claimFor = async (
         request_method: "GET",
         transcript_sequence: 1,
         effect_phase: "dispatch_intent",
+        intent_observed_at_ms: 5_010,
+        dispatch_started_at_ms: null,
         request_digest: randomDigest(),
         request_path_digest: randomDigest(),
         response_status: null,
@@ -151,6 +153,17 @@ const nextClaim = async (
         ...draft,
         journal_revision: current.journal_revision + 1,
         previous_claim_digest: current.claim_digest,
+        ...(overrides.effect_phase === "dispatch_started" && overrides.dispatch_started_at_ms === undefined
+            ? { dispatch_started_at_ms: current.intent_observed_at_ms + 1 }
+            : {}),
+        ...(overrides.effect_phase === "dispatch_intent"
+            ? {
+                  intent_observed_at_ms:
+                      overrides.intent_observed_at_ms ??
+                      (current.dispatch_started_at_ms ?? current.intent_observed_at_ms) + 1,
+                  dispatch_started_at_ms: null,
+              }
+            : {}),
         ...overrides,
     });
     if (claim === null) throw new Error("next claim did not validate");
@@ -483,6 +496,7 @@ describe("Cloudflare Worker canary read-only consistency", () => {
             journal_revision: 1,
             previous_claim_digest: randomDigest(),
             effect_phase: "dispatch_started",
+            dispatch_started_at_ms: 5_011,
             ambiguity_classification: "may_have_dispatched",
         });
         const gapPath = d1ProbeCloudflareWorkerCanaryEffectJournalPathV1(gapOperation.plan.plan_digest, 1);

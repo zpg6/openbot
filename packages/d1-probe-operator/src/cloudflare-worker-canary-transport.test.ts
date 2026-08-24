@@ -17,6 +17,11 @@ const jsonResponse = (body: unknown, status = 200, headers: Record<string, strin
         headers: { "content-type": "application/json", ...headers },
     });
 
+const sha256Hex = async (value: string): Promise<string> =>
+    [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))]
+        .map(byte => byte.toString(16).padStart(2, "0"))
+        .join("");
+
 const createTransport = (fetch: typeof globalThis.fetch, clock: () => number = () => now) =>
     createD1ProbeCloudflareWorkerCanaryTransportV1({
         api_token: token,
@@ -105,6 +110,192 @@ describe("Cloudflare Worker canary shared transport", () => {
         release!();
         await expect(result).resolves.toMatchObject({ ok: true, status: 200 });
         expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it("awaits a frozen redacted response capture with an isolated exact byte copy", async () => {
+        const order: string[] = [];
+        const exactBody = '{ "secret_response": "kept-exact", "value": 7 }';
+        const fetchMock = vi.fn(async () => {
+            order.push("fetch");
+            return new Response(exactBody, {
+                status: 201,
+                headers: {
+                    "content-type": "application/json; charset=utf-8",
+                    "content-encoding": "identity",
+                },
+            });
+        });
+        const transport = createTransport(fetchMock as unknown as typeof globalThis.fetch);
+        const prepared = await transport.prepare.forward.post(
+            "/accounts/raw-account/scripts/raw-name",
+            {
+                secret_request: "must-not-leak",
+            },
+            [201]
+        );
+        expect(prepared).not.toBeNull();
+        let release: (() => void) | undefined;
+        let retainedBytes: Uint8Array | undefined;
+        let resultSettled = false;
+
+        const result = transport.dispatch(
+            prepared!,
+            async () => {
+                order.push("record");
+            },
+            async (context, exactResponseBytes) => {
+                order.push("capture");
+                expect(Object.isFrozen(context)).toBe(true);
+                expect(context).toEqual({
+                    transcript_sequence: 1,
+                    request_method: "POST",
+                    request_path_digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+                    request_digest: expect.stringMatching(/^[0-9a-f]{64}$/u),
+                    response_status: 201,
+                    response_digest: await sha256Hex(exactBody),
+                    caller_asserted_response_content_type: "application/json; charset=utf-8",
+                    caller_asserted_response_content_encoding: "identity",
+                    caller_asserted_response_observed_at_ms: now,
+                });
+                expect(context.response_digest).toBe(transport.transcript[0]?.response_digest);
+                const serialized = JSON.stringify(context);
+                expect(serialized).not.toContain("raw-account");
+                expect(serialized).not.toContain("raw-name");
+                expect(serialized).not.toContain("must-not-leak");
+                expect(serialized).not.toContain(token);
+                expect(new TextDecoder().decode(exactResponseBytes)).toBe(exactBody);
+                expect(() =>
+                    Object.assign(context as unknown as Record<string, unknown>, { response_status: 500 })
+                ).toThrow();
+                retainedBytes = exactResponseBytes;
+                exactResponseBytes.fill(0x78);
+                await new Promise<void>(resolve => {
+                    release = resolve;
+                });
+            }
+        );
+        void result.finally(() => {
+            resultSettled = true;
+        });
+
+        await vi.waitFor(() => expect(order).toEqual(["record", "fetch", "capture"]));
+        expect(resultSettled).toBe(false);
+        release!();
+        await expect(result).resolves.toEqual({
+            ok: true,
+            status: 201,
+            json: { secret_response: "kept-exact", value: 7 },
+        });
+        expect(retainedBytes).toBeDefined();
+        expect([...retainedBytes!].every(byte => byte === 0)).toBe(true);
+        expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it("returns an ambiguous local failure after a rejected capture and consumes POST and DELETE dispatches", async () => {
+        const fetchMock = vi.fn(async () => jsonResponse({ observed: true }));
+        let rejectedCallbackBytes: Uint8Array | undefined;
+        const capture = vi.fn(async (_context, bytes: Uint8Array) => {
+            rejectedCallbackBytes = bytes;
+            throw new Error("archive unavailable after response");
+        });
+        const record = vi.fn(async () => undefined);
+        const transport = createTransport(fetchMock as unknown as typeof globalThis.fetch);
+        const post = await transport.prepare.forward.post("/post-once", { value: true });
+        const deletion = await transport.prepare.cleanup.delete("/delete-once");
+        expect(post).not.toBeNull();
+        expect(deletion).not.toBeNull();
+
+        await expect(transport.dispatch(post!, record, capture)).resolves.toEqual({ ok: false, status: null });
+        expect([...rejectedCallbackBytes!].every(byte => byte === 0)).toBe(true);
+        await expect(transport.dispatch(post!, record, capture)).resolves.toEqual({ ok: false, status: null });
+        await expect(transport.dispatch(deletion!, record, capture)).resolves.toEqual({ ok: false, status: null });
+        expect([...rejectedCallbackBytes!].every(byte => byte === 0)).toBe(true);
+        await expect(transport.dispatch(deletion!, record, capture)).resolves.toEqual({ ok: false, status: null });
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(record).toHaveBeenCalledTimes(2);
+        expect(capture).toHaveBeenCalledTimes(2);
+        expect(transport.transcript).toEqual([
+            expect.objectContaining({ method: "POST", status: 200, response_digest: expect.any(String) }),
+            expect.objectContaining({ method: "DELETE", status: 200, response_digest: expect.any(String) }),
+        ]);
+    });
+
+    it("keeps parser bytes isolated when a hostile capture transfers its callback buffer", async () => {
+        const exactBody = '{"detached":true}';
+        const fetchMock = vi.fn(
+            async () => new Response(exactBody, { headers: { "content-type": "application/json" } })
+        );
+        const transport = createTransport(fetchMock as unknown as typeof globalThis.fetch);
+        const prepared = await transport.prepare.forward.get("/detached-callback-copy");
+        expect(prepared).not.toBeNull();
+        let callerRetainedCopy: Uint8Array | undefined;
+
+        await expect(
+            transport.dispatch(
+                prepared!,
+                async () => undefined,
+                async (_context, bytes) => {
+                    callerRetainedCopy = structuredClone(bytes, { transfer: [bytes.buffer] });
+                    expect(bytes.byteLength).toBe(0);
+                }
+            )
+        ).resolves.toEqual({ ok: true, status: 200, json: { detached: true } });
+        expect(new TextDecoder().decode(callerRetainedCopy)).toBe(exactBody);
+        expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it("captures bounded malformed JSON but not oversized or encoded responses", async () => {
+        const malformed = "{not-json";
+        const oversized = JSON.stringify("a".repeat(256 * 1024));
+        const replies = [
+            new Response(malformed, { headers: { "content-type": "application/json" } }),
+            new Response(oversized, { headers: { "content-type": "application/json" } }),
+            new Response("{}", {
+                headers: { "content-type": "application/json", "content-encoding": "gzip" },
+            }),
+        ];
+        const fetchMock = vi.fn(async () => replies.shift()!);
+        const capture = vi.fn(async (_context, bytes: Uint8Array) => {
+            expect(new TextDecoder().decode(bytes)).toBe(malformed);
+        });
+        const transport = createTransport(fetchMock as unknown as typeof globalThis.fetch);
+
+        for (const path of ["/malformed", "/oversized", "/encoded"] as const) {
+            const prepared = await transport.prepare.forward.get(path);
+            expect(prepared).not.toBeNull();
+            await expect(transport.dispatch(prepared!, async () => undefined, capture)).resolves.toEqual({
+                ok: false,
+                status: 200,
+            });
+        }
+
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(capture).toHaveBeenCalledOnce();
+        expect(transport.transcript[0]).toMatchObject({ status: 200, response_digest: await sha256Hex(malformed) });
+        expect(transport.transcript[1]).toMatchObject({ status: null, response_digest: null });
+        expect(transport.transcript[2]).toMatchObject({ status: null, response_digest: null });
+    });
+
+    it("rejects capture metadata that the response archive cannot represent without changing the legacy path", async () => {
+        const contentType = `application/json; note=${"a".repeat(513)}`;
+        const fetchMock = vi.fn(async () => new Response("{}", { headers: { "content-type": contentType } }));
+        const transport = createTransport(fetchMock as unknown as typeof globalThis.fetch);
+        const prepared = await transport.prepare.forward.get("/unrepresentable-content-type");
+        expect(prepared).not.toBeNull();
+        const capture = vi.fn(async () => undefined);
+
+        await expect(transport.dispatch(prepared!, async () => undefined, capture)).resolves.toEqual({
+            ok: false,
+            status: 200,
+        });
+        await expect(transport.forward.get("/legacy-long-content-type")).resolves.toEqual({
+            ok: true,
+            status: 200,
+            json: {},
+        });
+        expect(capture).not.toHaveBeenCalled();
+        expect(fetchMock).toHaveBeenCalledTimes(2);
     });
 
     it("rejects copied, forged, and foreign prepared capabilities", async () => {
@@ -297,6 +488,38 @@ describe("Cloudflare Worker canary shared transport", () => {
         await expect(transport.forward.get("/clock-failure")).resolves.toEqual({ ok: false, status: null });
         expect(fetchMock).not.toHaveBeenCalled();
         expect(transport.transcript).toEqual([]);
+    });
+
+    it("keeps the legacy clock and transcript vector unchanged without a capture hook", async () => {
+        const path = "/legacy-vector";
+        const responseBody = canonicalizeJsonV1({ legacy: true });
+        const readings = [now, now + 25];
+        const clock = vi.fn(() => readings.shift()!);
+        const fetchMock = vi.fn(
+            async () => new Response(responseBody, { headers: { "content-type": "application/json" } })
+        );
+        const transport = createTransport(fetchMock as unknown as typeof globalThis.fetch, clock);
+
+        await expect(transport.forward.get(path)).resolves.toEqual({
+            ok: true,
+            status: 200,
+            json: { legacy: true },
+        });
+        expect(clock).toHaveBeenCalledTimes(2);
+        expect(transport.transcript).toEqual([
+            {
+                sequence: 1,
+                method: "GET",
+                path_digest: await sha256Hex(path),
+                request_digest: await digestCanonicalJsonV1(
+                    "openbot.d1-probe.cloudflare-worker-api-canary-request.v1",
+                    { method: "GET", path }
+                ),
+                response_digest: await sha256Hex(responseBody),
+                status: 200,
+                observed_at_ms: now + 25,
+            },
+        ]);
     });
 
     it("does not expose an untranscribed response status when the post-response clock fails", async () => {

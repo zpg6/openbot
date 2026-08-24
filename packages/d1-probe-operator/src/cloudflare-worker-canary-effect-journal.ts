@@ -23,6 +23,7 @@ const OPERATION_RECORD_DIGEST_DOMAIN_V1 = "openbot.d1-probe.cloudflare-worker-ap
 const DigestV1Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const SafeRevisionV1Schema = z.number().int().safe().nonnegative();
 const TranscriptSequenceV1Schema = z.number().int().safe().positive();
+const SafeTimeV1Schema = z.number().int().safe().nonnegative();
 const ResponseStatusV1Schema = z.number().int().min(100).max(599).nullable();
 const MAX_CLAIM_BYTES_V1 = 32 * 1024;
 const MAX_JOURNAL_REVISIONS_V1 = 256;
@@ -214,6 +215,8 @@ const UntrustedEffectClaimDraftV1Schema = z
         request_method: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestMethodV1Schema,
         transcript_sequence: TranscriptSequenceV1Schema,
         effect_phase: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimPhaseV1Schema,
+        intent_observed_at_ms: SafeTimeV1Schema,
+        dispatch_started_at_ms: SafeTimeV1Schema.nullable(),
         request_digest: DigestV1Schema,
         request_path_digest: DigestV1Schema,
         response_status: ResponseStatusV1Schema,
@@ -247,11 +250,18 @@ const UntrustedEffectClaimDraftV1Schema = z
         }
         if (
             claim.effect_phase === "dispatch_intent" &&
-            (claim.response_status !== null ||
+            (claim.dispatch_started_at_ms !== null ||
+                claim.response_status !== null ||
                 claim.response_digest !== null ||
                 claim.ambiguity_classification !== "not_dispatched")
         ) {
             context.addIssue({ code: "custom", message: "dispatch intent must be a pre-effect claim" });
+        }
+        if (
+            claim.effect_phase !== "dispatch_intent" &&
+            (claim.dispatch_started_at_ms === null || claim.dispatch_started_at_ms < claim.intent_observed_at_ms)
+        ) {
+            context.addIssue({ code: "custom", message: "post-intent claims require ordered dispatch timing" });
         }
         if (
             claim.effect_phase === "dispatch_started" &&
@@ -587,6 +597,7 @@ const sameRequest = (
     left.request_kind === right.request_kind &&
     left.request_method === right.request_method &&
     left.workflow_step === right.workflow_step &&
+    left.intent_observed_at_ms === right.intent_observed_at_ms &&
     left.request_digest === right.request_digest &&
     left.request_path_digest === right.request_path_digest &&
     left.operation_revision === right.operation_revision &&
@@ -616,15 +627,22 @@ const transitionCode = (
         return "journal_transition_denied";
     }
     if (next.transcript_sequence === current.transcript_sequence) {
-        return sameRequest(current, next) && validPhaseAdvance(current.effect_phase, next.effect_phase)
-            ? null
-            : "journal_transition_denied";
+        if (!sameRequest(current, next) || !validPhaseAdvance(current.effect_phase, next.effect_phase)) {
+            return "journal_transition_denied";
+        }
+        if (current.dispatch_started_at_ms !== null && next.dispatch_started_at_ms !== current.dispatch_started_at_ms) {
+            return "journal_transition_denied";
+        }
+        return null;
     }
     if (
         next.transcript_sequence !== current.transcript_sequence + 1 ||
         !terminalPhase(current.effect_phase) ||
         next.effect_phase !== "dispatch_intent"
     ) {
+        return "journal_transition_denied";
+    }
+    if (current.dispatch_started_at_ms === null || next.intent_observed_at_ms < current.dispatch_started_at_ms) {
         return "journal_transition_denied";
     }
     if (!(workflowTransitions[current.workflow_step] as readonly string[]).includes(next.workflow_step)) {

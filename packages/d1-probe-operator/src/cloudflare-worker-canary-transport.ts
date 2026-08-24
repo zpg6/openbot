@@ -58,6 +58,25 @@ export type D1ProbeCloudflareWorkerCanaryRecordDispatchV1 = (
     intent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1
 ) => Promise<void>;
 
+export interface D1ProbeCloudflareWorkerCanaryResponseCaptureContextV1 {
+    readonly transcript_sequence: number;
+    readonly request_method: "GET" | "POST" | "DELETE";
+    readonly request_path_digest: string;
+    readonly request_digest: string;
+    readonly response_status: number;
+    readonly response_digest: string;
+    readonly caller_asserted_response_content_type: string | null;
+    readonly caller_asserted_response_content_encoding: "identity" | null;
+    readonly caller_asserted_response_observed_at_ms: number;
+}
+
+// This caller-controlled hook receives sensitive raw bytes. Its return proves neither archive publication nor claim
+// authenticity. The transport clears its byte copy when practical, but the caller can copy or transfer those bytes.
+export type D1ProbeCloudflareWorkerCanaryCaptureResponsePreimageCallerControlledV1 = (
+    context: D1ProbeCloudflareWorkerCanaryResponseCaptureContextV1,
+    exactResponseBytes: Uint8Array
+) => Promise<void>;
+
 type PrepareGetV1 = (
     path: string,
     acceptedStatuses?: readonly number[]
@@ -94,7 +113,8 @@ export interface D1ProbeCloudflareWorkerCanaryTransportV1 {
     };
     readonly dispatch: (
         prepared: D1ProbeCloudflareWorkerCanaryPreparedDispatchV1,
-        recordIntentAndStarted: D1ProbeCloudflareWorkerCanaryRecordDispatchV1
+        recordIntentAndStarted: D1ProbeCloudflareWorkerCanaryRecordDispatchV1,
+        captureResponsePreimageCallerControlled?: D1ProbeCloudflareWorkerCanaryCaptureResponsePreimageCallerControlledV1
     ) => Promise<D1ProbeCloudflareWorkerCanaryJsonResponseV1>;
     readonly forward: { readonly get: GetV1; readonly post: PostV1 };
     readonly cleanup: { readonly get: GetV1; readonly delete: DeleteV1 };
@@ -105,7 +125,7 @@ interface PreparedDispatchStateV1 {
     readonly path: string;
     readonly path_digest: string;
     readonly request_digest: string;
-    readonly body: string | undefined;
+    body: string | undefined;
     readonly accepted_statuses: readonly number[];
     readonly window: D1ProbeCloudflareWorkerCanaryTransportWindowV1;
     readonly window_class: "forward" | "cleanup";
@@ -196,6 +216,7 @@ export const createD1ProbeCloudflareWorkerCanaryTransportV1 = (
     const dispatchPrepared = async (
         prepared: D1ProbeCloudflareWorkerCanaryPreparedDispatchV1,
         recordIntentAndStarted: D1ProbeCloudflareWorkerCanaryRecordDispatchV1,
+        captureResponsePreimageCallerControlled?: D1ProbeCloudflareWorkerCanaryCaptureResponsePreimageCallerControlledV1,
         legacyObservedAt?: number
     ): Promise<D1ProbeCloudflareWorkerCanaryJsonResponseV1> => {
         const state = preparedDispatches.get(prepared);
@@ -232,20 +253,27 @@ export const createD1ProbeCloudflareWorkerCanaryTransportV1 = (
             }
             const remainingMs = state.window.expires_at_ms - fetchObservedAt;
             if (remainingMs <= 0) return { ok: false, status: null };
-            const response = await dependencies.fetch(`${API_ROOT_V1}${state.path}`, {
-                method: state.method,
-                redirect: "manual",
-                signal: AbortSignal.timeout(Math.max(1, Math.min(MAX_REQUEST_DURATION_MS_V1, remainingMs))),
-                headers: {
-                    Accept: "application/json",
-                    "Accept-Encoding": "identity",
-                    Authorization: `Bearer ${dependencies.api_token}`,
-                    ...(state.body === undefined ? {} : { "Content-Type": "application/json" }),
-                },
-                ...(state.body === undefined ? {} : { body: state.body }),
-            });
+            let requestBody = state.body;
+            state.body = undefined;
+            let response: Response;
+            try {
+                response = await dependencies.fetch(`${API_ROOT_V1}${state.path}`, {
+                    method: state.method,
+                    redirect: "manual",
+                    signal: AbortSignal.timeout(Math.max(1, Math.min(MAX_REQUEST_DURATION_MS_V1, remainingMs))),
+                    headers: {
+                        Accept: "application/json",
+                        "Accept-Encoding": "identity",
+                        Authorization: `Bearer ${dependencies.api_token}`,
+                        ...(requestBody === undefined ? {} : { "Content-Type": "application/json" }),
+                    },
+                    ...(requestBody === undefined ? {} : { body: requestBody }),
+                });
+            } finally {
+                requestBody = undefined;
+            }
             const encoding = response.headers.get("content-encoding");
-            const contentType = response.headers.get("content-type") ?? "";
+            const contentType = response.headers.get("content-type");
             if (response.type === "opaqueredirect" || (encoding !== null && encoding !== "identity")) {
                 return { ok: false, status: response.status };
             }
@@ -260,49 +288,97 @@ export const createD1ProbeCloudflareWorkerCanaryTransportV1 = (
             if (reader === undefined) return { ok: false, status: response.status };
             const chunks: Uint8Array[] = [];
             let responseSize = 0;
-            for (;;) {
-                const chunk = await reader.read();
-                if (chunk.done) break;
-                responseSize += chunk.value.byteLength;
-                if (responseSize > MAX_RESPONSE_BYTES_V1) {
-                    await reader.cancel().catch(() => undefined);
+            let bytes: Uint8Array | null = null;
+            try {
+                for (;;) {
+                    const chunk = await reader.read();
+                    if (chunk.done) break;
+                    responseSize += chunk.value.byteLength;
+                    if (responseSize > MAX_RESPONSE_BYTES_V1) {
+                        chunk.value.fill(0);
+                        await reader.cancel().catch(() => undefined);
+                        return { ok: false, status: response.status };
+                    }
+                    chunks.push(chunk.value);
+                }
+                bytes = new Uint8Array(responseSize);
+                let offset = 0;
+                for (const chunk of chunks) {
+                    bytes.set(chunk, offset);
+                    offset += chunk.byteLength;
+                }
+            } finally {
+                for (const chunk of chunks) chunk.fill(0);
+                chunks.length = 0;
+            }
+            if (bytes === null) return { ok: false, status: null };
+            try {
+                aggregateBytes += bytes.byteLength;
+                const responseObservedAt = readClock();
+                if (responseObservedAt === null) return { ok: false, status: null };
+                const digestedEntry = {
+                    ...entry,
+                    response_digest: await sha256(bytes),
+                    status: response.status,
+                    observed_at_ms: responseObservedAt,
+                };
+                transcript[transcriptIndex] = digestedEntry;
+                if (captureResponsePreimageCallerControlled !== undefined) {
+                    if (
+                        response.status < 100 ||
+                        response.status > 599 ||
+                        !Number.isInteger(response.status) ||
+                        responseObservedAt < 0 ||
+                        (contentType !== null &&
+                            (contentType.length < 1 ||
+                                contentType.length > 512 ||
+                                !/^[\x20-\x7e]+$/u.test(contentType)))
+                    ) {
+                        return { ok: false, status: response.status };
+                    }
+                    const captureContext = Object.freeze({
+                        transcript_sequence: entry.sequence,
+                        request_method: state.method,
+                        request_path_digest: state.path_digest,
+                        request_digest: state.request_digest,
+                        response_status: response.status,
+                        response_digest: digestedEntry.response_digest,
+                        caller_asserted_response_content_type: contentType,
+                        caller_asserted_response_content_encoding: encoding,
+                        caller_asserted_response_observed_at_ms: responseObservedAt,
+                    });
+                    const callbackBytes = bytes.slice();
+                    try {
+                        await captureResponsePreimageCallerControlled(captureContext, callbackBytes);
+                    } finally {
+                        try {
+                            callbackBytes.fill(0);
+                        } catch {
+                            // A hostile callback can detach its copy. It still cannot mutate the parser's bytes.
+                        }
+                    }
+                }
+                if (
+                    !insideWindow(responseObservedAt, state.window) ||
+                    aggregateBytes > MAX_AGGREGATE_RESPONSE_BYTES_V1 ||
+                    !state.accepted_statuses.includes(response.status)
+                ) {
                     return { ok: false, status: response.status };
                 }
-                chunks.push(chunk.value);
-            }
-            const bytes = new Uint8Array(responseSize);
-            let offset = 0;
-            for (const chunk of chunks) {
-                bytes.set(chunk, offset);
-                offset += chunk.byteLength;
-            }
-            aggregateBytes += bytes.byteLength;
-            const responseObservedAt = readClock();
-            if (responseObservedAt === null) return { ok: false, status: null };
-            transcript[transcriptIndex] = {
-                ...entry,
-                response_digest: await sha256(bytes),
-                status: response.status,
-                observed_at_ms: responseObservedAt,
-            };
-            if (
-                !insideWindow(responseObservedAt, state.window) ||
-                aggregateBytes > MAX_AGGREGATE_RESPONSE_BYTES_V1 ||
-                !state.accepted_statuses.includes(response.status)
-            ) {
-                return { ok: false, status: response.status };
-            }
-            if (!contentType.toLowerCase().startsWith("application/json")) {
-                return { ok: false, status: response.status };
-            }
-            try {
-                return {
-                    ok: true,
-                    status: response.status,
-                    json: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown,
-                };
-            } catch {
-                return { ok: false, status: response.status };
+                if (contentType?.toLowerCase().startsWith("application/json") !== true) {
+                    return { ok: false, status: response.status };
+                }
+                try {
+                    return {
+                        ok: true,
+                        status: response.status,
+                        json: JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown,
+                    };
+                } catch {
+                    return { ok: false, status: response.status };
+                }
+            } finally {
+                bytes.fill(0);
             }
         } catch {
             return { ok: false, status: null };
@@ -323,7 +399,8 @@ export const createD1ProbeCloudflareWorkerCanaryTransportV1 = (
         if (prepared === null) return { ok: false, status: null };
         // The existing runner records nothing here. This adapter grants no persistence or dispatch authority.
         const legacyOrderingAdapter: D1ProbeCloudflareWorkerCanaryRecordDispatchV1 = async () => undefined;
-        return await dispatchPrepared(prepared, legacyOrderingAdapter, observedAt);
+        // The legacy adapter omits raw response capture. response_preimage_capture_implemented remains false.
+        return await dispatchPrepared(prepared, legacyOrderingAdapter, undefined, observedAt);
     };
 
     return {
@@ -358,7 +435,8 @@ export const createD1ProbeCloudflareWorkerCanaryTransportV1 = (
                     ),
             },
         },
-        dispatch: async (prepared, recordIntentAndStarted) => await dispatchPrepared(prepared, recordIntentAndStarted),
+        dispatch: async (prepared, recordIntentAndStarted, captureResponsePreimageCallerControlled) =>
+            await dispatchPrepared(prepared, recordIntentAndStarted, captureResponsePreimageCallerControlled),
         forward: {
             get: async (path, acceptedStatuses) =>
                 await requestJson("GET", path, dependencies.forward_window, undefined, acceptedStatuses),

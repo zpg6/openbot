@@ -197,6 +197,8 @@ function checkD1ProbeWorkerCanaryTransportImportBoundary(file, specifier) {
     const transportModule = path.resolve("packages/d1-probe-operator/src/cloudflare-worker-canary-transport");
     if (resolvedImport !== transportModule) return;
     const reviewedConsumers = new Set([
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.test.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.ts",
         "packages/d1-probe-operator/src/cloudflare-worker-canary-transport.test.ts",
         "packages/d1-probe-operator/src/cloudflare-worker-interoperability-canary.test.ts",
         "packages/d1-probe-operator/src/cloudflare-worker-interoperability-canary.ts",
@@ -343,6 +345,28 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-response-archive.test.ts",
             new Set(["./cloudflare-worker-canary-effect-journal.js", "./cloudflare-worker-canary-response-archive.js"]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.ts",
+            new Set([
+                "./cloudflare-worker-canary-consistency.js",
+                "./cloudflare-worker-canary-driver-lease.js",
+                "./cloudflare-worker-canary-effect-journal.js",
+                "./cloudflare-worker-canary-operation.js",
+                "./cloudflare-worker-canary-transport.js",
+            ]),
+        ],
+        [
+            "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.test.ts",
+            new Set([
+                "./cloudflare-worker-canary-consistency.js",
+                "./cloudflare-worker-canary-dispatch-claims.js",
+                "./cloudflare-worker-canary-driver-lease.js",
+                "./cloudflare-worker-canary-effect-journal.js",
+                "./cloudflare-worker-canary-operation.js",
+                "./cloudflare-worker-canary-plan.js",
+                "./cloudflare-worker-canary-transport.js",
+            ]),
         ],
         ["packages/d1-probe-operator/src/cloudflare-worker-canary-driver-lease.ts", new Set()],
         [
@@ -522,6 +546,11 @@ function checkD1ProbeCanaryTransportBoundary(file, content, imports) {
     const consumedIndex = content.indexOf("state.consumed = true");
     const hookIndex = content.indexOf("await recordIntentAndStarted(intent)");
     const fetchIndex = content.indexOf("dependencies.fetch(");
+    const transcriptIndex = content.indexOf("transcript[transcriptIndex] = digestedEntry");
+    const captureIndex = content.indexOf(
+        "await captureResponsePreimageCallerControlled(captureContext, callbackBytes)"
+    );
+    const parseIndex = content.indexOf('JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes))');
     const capabilityMethods = capability => {
         const matches = [
             ...returnedCapabilities.matchAll(new RegExp(`${capability}:\\s*\\{([\\s\\S]*?)\\n\\s*\\},`, "gu")),
@@ -549,15 +578,37 @@ function checkD1ProbeCanaryTransportBoundary(file, content, imports) {
         !content.includes("const preparedDispatches = new WeakMap") ||
         !content.includes("const prepared = Object.freeze({") ||
         !content.includes("const intent = Object.freeze({") ||
+        !content.includes("const captureContext = Object.freeze({") ||
+        !content.includes("transcript_sequence: entry.sequence") ||
+        !content.includes("request_method: state.method") ||
+        !content.includes("request_path_digest: state.path_digest") ||
+        !content.includes("request_digest: state.request_digest") ||
+        !content.includes("response_status: response.status") ||
+        !content.includes("response_digest: digestedEntry.response_digest") ||
+        !content.includes("caller_asserted_response_content_type: contentType") ||
+        !content.includes("caller_asserted_response_content_encoding: encoding") ||
+        !content.includes("caller_asserted_response_observed_at_ms: responseObservedAt") ||
+        !content.includes("response.status < 100") ||
+        !content.includes("response.status > 599") ||
+        !content.includes("!Number.isInteger(response.status)") ||
+        !content.includes("responseObservedAt < 0") ||
+        !content.includes("contentType.length > 512") ||
+        !content.includes("!/^[\\x20-\\x7e]+$/u.test(contentType)") ||
+        !content.includes("const callbackBytes = bytes.slice()") ||
+        !content.includes("callbackBytes.fill(0)") ||
+        !content.includes("bytes.fill(0)") ||
         consumedIndex < 0 ||
         hookIndex <= consumedIndex ||
         fetchIndex <= hookIndex ||
+        transcriptIndex <= fetchIndex ||
+        captureIndex <= transcriptIndex ||
+        parseIndex <= captureIndex ||
         !content.includes("window_class: state.window_class") ||
         !content.includes("intent_observed_at_ms: state.intent_observed_at_ms") ||
         !content.includes(
             "const legacyOrderingAdapter: D1ProbeCloudflareWorkerCanaryRecordDispatchV1 = async () => undefined"
         ) ||
-        !content.includes("return await dispatchPrepared(prepared, legacyOrderingAdapter, observedAt)") ||
+        !content.includes("return await dispatchPrepared(prepared, legacyOrderingAdapter, undefined, observedAt)") ||
         JSON.stringify(capabilityMethods("forward")) !== JSON.stringify(["get", "post"]) ||
         JSON.stringify(capabilityMethods("cleanup")) !== JSON.stringify(["get", "delete"]) ||
         /\b(?:FormData|WebSocket|EventSource|XMLHttpRequest|child_process|spawn|execFile|process\.env)\b/u.test(
@@ -743,6 +794,12 @@ function checkD1ProbeCanaryEffectJournalBoundary(file, content, imports) {
         !content.includes('claim.operation_state !== "prepared"') ||
         !content.includes("operation_record_digest: DigestV1Schema") ||
         !content.includes("request_method: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestMethodV1Schema") ||
+        !content.includes("intent_observed_at_ms: SafeTimeV1Schema") ||
+        !content.includes("dispatch_started_at_ms: SafeTimeV1Schema.nullable()") ||
+        !content.includes("claim.dispatch_started_at_ms < claim.intent_observed_at_ms") ||
+        !content.includes("left.intent_observed_at_ms === right.intent_observed_at_ms") ||
+        !content.includes("next.dispatch_started_at_ms !== current.dispatch_started_at_ms") ||
+        !content.includes("next.intent_observed_at_ms < current.dispatch_started_at_ms") ||
         !content.includes("D1_PROBE_CLOUDFLARE_WORKER_CANARY_EFFECT_JOURNAL_AUTHORITY_V1 = false") ||
         !content.includes("caller_mutation_authority: z.literal(false)") ||
         !content.includes("authoritative: z.literal(false)") ||
@@ -773,7 +830,12 @@ function checkD1ProbeCanaryDriverLeaseBoundary(file, content, imports) {
             specifier.startsWith(".") &&
             path.resolve(path.dirname(file), specifier).replace(/\.(?:js|ts)$/u, "") === leaseModule
     );
-    if (importsLease && file !== test) {
+    const reviewedConsumers = new Set([
+        test,
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.test.ts",
+    ]);
+    if (importsLease && !reviewedConsumers.has(file)) {
         errors.push(`${file}: the unwired Worker canary driver lease may be imported only by its focused test`);
     }
     if (
@@ -839,7 +901,12 @@ function checkD1ProbeCanaryConsistencyBoundary(file, content, imports) {
             specifier.startsWith(".") &&
             path.resolve(path.dirname(file), specifier).replace(/\.(?:js|ts)$/u, "") === consistencyModule
     );
-    if (importsConsistency && file !== test) {
+    const reviewedConsumers = new Set([
+        test,
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.test.ts",
+    ]);
+    if (importsConsistency && !reviewedConsumers.has(file)) {
         errors.push(`${file}: the unwired Worker canary consistency reader may be imported only by its focused test`);
     }
     const testOnlySymbol = "readD1ProbeCloudflareWorkerCanaryConsistencyWithReadersTestOnlyV1";
@@ -975,6 +1042,82 @@ function checkD1ProbeCanaryResponseArchiveBoundary(file, content, imports) {
     ) {
         errors.push(
             `${file}: the response archive must remain bounded, encrypted, write-only, caller-claim bound, and non-authoritative`
+        );
+    }
+}
+
+function checkD1ProbeCanaryDispatchClaimsBoundary(file, content, imports) {
+    const source = "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.ts";
+    const test = "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.test.ts";
+    const adapterModule = path.resolve("packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims");
+    const importsAdapter = imports.some(
+        specifier =>
+            specifier.startsWith(".") &&
+            path.resolve(path.dirname(file), specifier).replace(/\.(?:js|ts)$/u, "") === adapterModule
+    );
+    if (importsAdapter && file !== test) {
+        errors.push(`${file}: the unwired durable dispatch-claim adapter may be imported only by its focused test`);
+    }
+    const testOnlySymbol = "createD1ProbeCloudflareWorkerCanaryDispatchClaimsWithDependenciesTestOnlyV1";
+    if (
+        file.startsWith("packages/d1-probe-operator/src/") &&
+        content.includes(testOnlySymbol) &&
+        file !== source &&
+        file !== test
+    ) {
+        errors.push(
+            `${file}: the Worker canary dispatch-claim dependency seam may be consumed only by its focused test`
+        );
+    }
+    if (file !== source) return;
+    const allowedImports = new Set([
+        "./cloudflare-worker-canary-consistency.js",
+        "./cloudflare-worker-canary-driver-lease.js",
+        "./cloudflare-worker-canary-effect-journal.js",
+        "./cloudflare-worker-canary-operation.js",
+        "./cloudflare-worker-canary-transport.js",
+    ]);
+    const leaseAssertions = [...content.matchAll(/await assertLease\(dependencies, owner\)/gu)].length;
+    const consistencyReads = [
+        ...content.matchAll(/await dependencies\.read_consistency\(operation\.plan\.plan_digest\)/gu),
+    ].length;
+    const appendCalls = [...content.matchAll(/await dependencies\.append_effect_claim\(/gu)].length;
+    if (
+        imports.some(specifier => !allowedImports.has(specifier)) ||
+        !content.includes("assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseV1") ||
+        !content.includes("readD1ProbeCloudflareWorkerCanaryConsistencyV1") ||
+        !content.includes("appendD1ProbeCloudflareWorkerCanaryEffectJournalV1") ||
+        !content.includes("validateD1ProbeCloudflareWorkerCanaryOperationV1") ||
+        !content.includes("digestD1ProbeCloudflareWorkerCanaryOperationRecordV1") ||
+        !content.includes("commitD1ProbeCloudflareWorkerCanaryExecutionNonceV1") ||
+        !content.includes("let consumed = false") ||
+        !content.includes("consumed = true") ||
+        leaseAssertions !== 4 ||
+        consistencyReads !== 3 ||
+        appendCalls !== 2 ||
+        !content.includes('afterIntent.classification !== "claim_behind"') ||
+        !content.includes('afterStarted.classification !== "ambiguous_dispatch"') ||
+        !content.includes(
+            "intent.intent_observed_at_ms < Math.max(operation.plan.not_before_ms, operation.updated_at_ms)"
+        ) ||
+        !content.includes("intent.dispatch_started_at_ms >= operation.plan.expires_at_ms") ||
+        !content.includes("createWithDependencies(input, fixedDependencies)") ||
+        !content.includes("caller_mutation_authority: false") ||
+        !content.includes("authoritative: false") ||
+        !content.includes("eligible_for_upload: false") ||
+        !content.includes("eligible_for_attestation: false") ||
+        !content.includes("lifecycle_advance_allowed: false") ||
+        !content.includes("gate_promotion_allowed: false") ||
+        content.includes('window_class: "cleanup"') ||
+        /\b(?:fetch|FormData|WebSocket|EventSource|XMLHttpRequest|child_process|spawn|execFile|process|Authorization|Bearer|api_token|hmac_key_base64url|TestOnlyStore)\b/u.test(
+            content
+        ) ||
+        /caller_mutation_authority:\s*true|authoritative:\s*true|eligible_for_upload:\s*true|eligible_for_attestation:\s*true|gate_promotion_allowed:\s*true|lifecycle_advance_allowed:\s*true/u.test(
+            content
+        )
+    ) {
+        errors.push(
+            `${file}: the dispatch-claim adapter must remain forward-only, lease/head fenced, one-use, unwired, and non-authoritative`
         );
     }
 }
@@ -1302,11 +1445,34 @@ const redacted = {
     intent_observed_at_ms: state.intent_observed_at_ms,
 };
 const legacyOrderingAdapter: D1ProbeCloudflareWorkerCanaryRecordDispatchV1 = async () => undefined;
-return await dispatchPrepared(prepared, legacyOrderingAdapter, observedAt);
 dependencies.fetch();
 digestCanonicalJsonV1();
 canonicalizeJsonV1(body);
-const response = { response_digest: await sha256(bytes) };
+const digestedEntry = { response_digest: await sha256(bytes) };
+transcript[transcriptIndex] = digestedEntry;
+response.status < 100;
+response.status > 599;
+!Number.isInteger(response.status);
+responseObservedAt < 0;
+contentType.length > 512;
+!/^[\\x20-\\x7e]+$/u.test(contentType);
+const captureContext = Object.freeze({
+    transcript_sequence: entry.sequence,
+    request_method: state.method,
+    request_path_digest: state.path_digest,
+    request_digest: state.request_digest,
+    response_status: response.status,
+    response_digest: digestedEntry.response_digest,
+    caller_asserted_response_content_type: contentType,
+    caller_asserted_response_content_encoding: encoding,
+    caller_asserted_response_observed_at_ms: responseObservedAt,
+});
+const callbackBytes = bytes.slice();
+await captureResponsePreimageCallerControlled(captureContext, callbackBytes);
+callbackBytes.fill(0);
+bytes.fill(0);
+const parsed = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+return await dispatchPrepared(prepared, legacyOrderingAdapter, undefined, observedAt);
 const request = { redirect: "manual", "Accept-Encoding": "identity" };
 return {
     transcript,
@@ -1334,6 +1500,17 @@ checkD1ProbeCanaryTransportBoundary(
 if (errors.length !== beforeCanaryTransportOrderingPositiveSelfTest) {
     errors.push("Worker API canary transport self-test rejected its one-use ordering contract");
 }
+
+const beforeCanaryTransportCaptureBoundsSelfTest = errors.length;
+checkD1ProbeCanaryTransportBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-transport.ts",
+    canaryTransportOrderingFixture.replace("contentType.length > 512;", "contentType.length > 4096;"),
+    ["@openbot/gate-attestation/internal"]
+);
+if (errors.length !== beforeCanaryTransportCaptureBoundsSelfTest + 1) {
+    errors.push("Worker API canary transport self-test did not pin the response-capture metadata bounds");
+}
+errors.splice(beforeCanaryTransportCaptureBoundsSelfTest, 1);
 
 const beforeCanaryTransportLegacyAdapterSelfTest = errors.length;
 checkD1ProbeCanaryTransportBoundary(
@@ -1504,6 +1681,8 @@ const operationStateTransitions = {
 const schema = {
     operation_record_digest: DigestV1Schema,
     request_method: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestMethodV1Schema,
+    intent_observed_at_ms: SafeTimeV1Schema,
+    dispatch_started_at_ms: SafeTimeV1Schema.nullable(),
     caller_mutation_authority: z.literal(false),
     authoritative: z.literal(false),
     eligible_for_upload: z.literal(false),
@@ -1511,6 +1690,10 @@ const schema = {
     lifecycle_advance_allowed: z.literal(false),
     gate_promotion_allowed: z.literal(false),
 };
+claim.dispatch_started_at_ms < claim.intent_observed_at_ms;
+left.intent_observed_at_ms === right.intent_observed_at_ms;
+next.dispatch_started_at_ms !== current.dispatch_started_at_ms;
+next.intent_observed_at_ms < current.dispatch_started_at_ms;
 claim.workflow_step !== "prepared_worker_list";
 claim.operation_revision !== 0;
 claim.operation_state !== "prepared";
@@ -1534,6 +1717,20 @@ checkD1ProbeCanaryEffectJournalBoundary(
 if (errors.length !== beforeCanaryEffectJournalPositiveSelfTest) {
     errors.push("Worker API canary effect journal self-test rejected its fixed bounded contract");
 }
+
+const beforeCanaryEffectJournalTimingSelfTest = errors.length;
+checkD1ProbeCanaryEffectJournalBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-effect-journal.ts",
+    canaryEffectJournalBoundaryFixture.replace(
+        "next.intent_observed_at_ms < current.dispatch_started_at_ms;",
+        "next.intent_observed_at_ms < 0;"
+    ),
+    ["node:fs/promises"]
+);
+if (errors.length !== beforeCanaryEffectJournalTimingSelfTest + 1) {
+    errors.push("Worker API canary effect journal self-test did not pin cross-request timing monotonicity");
+}
+errors.splice(beforeCanaryEffectJournalTimingSelfTest, 1);
 
 const beforeCanaryEffectJournalCapabilitySelfTest = errors.length;
 checkD1ProbeCanaryEffectJournalBoundary(
@@ -1778,6 +1975,58 @@ if (errors.length !== beforeCanaryResponseArchiveTestSeamSelfTest + 1) {
 }
 errors.splice(beforeCanaryResponseArchiveTestSeamSelfTest, 1);
 
+const canaryDispatchClaimsSourcePath = "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.ts";
+const canaryDispatchClaimsSource = await readFile(canaryDispatchClaimsSourcePath, "utf8");
+const canaryDispatchClaimsImports = importsFromSource(canaryDispatchClaimsSource);
+const beforeCanaryDispatchClaimsPositiveSelfTest = errors.length;
+checkD1ProbeCanaryDispatchClaimsBoundary(
+    canaryDispatchClaimsSourcePath,
+    canaryDispatchClaimsSource,
+    canaryDispatchClaimsImports
+);
+if (errors.length !== beforeCanaryDispatchClaimsPositiveSelfTest) {
+    errors.push("Worker API canary dispatch-claim self-test rejected its fixed unwired contract");
+}
+
+const beforeCanaryDispatchClaimsCapabilitySelfTest = errors.length;
+checkD1ProbeCanaryDispatchClaimsBoundary(
+    canaryDispatchClaimsSourcePath,
+    `${canaryDispatchClaimsSource}\nfetch("https://example.invalid"); caller_mutation_authority: true`,
+    [...canaryDispatchClaimsImports, "node:https"]
+);
+if (errors.length !== beforeCanaryDispatchClaimsCapabilitySelfTest + 1) {
+    errors.push("Worker API canary dispatch-claim self-test did not reject network or authority access");
+}
+errors.splice(beforeCanaryDispatchClaimsCapabilitySelfTest, 1);
+
+for (const specifier of [
+    "./cloudflare-worker-canary-dispatch-claims.js",
+    "./cloudflare-worker-canary-dispatch-claims",
+    "./subdirectory/../cloudflare-worker-canary-dispatch-claims.js",
+]) {
+    const beforeCanaryDispatchClaimsConsumerSelfTest = errors.length;
+    checkD1ProbeCanaryDispatchClaimsBoundary(
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-command.ts",
+        "const dispatchClaims = adapter.record_dispatch;",
+        [specifier]
+    );
+    if (errors.length !== beforeCanaryDispatchClaimsConsumerSelfTest + 1) {
+        errors.push(`Worker API canary dispatch-claim self-test did not reject import spelling ${specifier}`);
+    }
+    errors.splice(beforeCanaryDispatchClaimsConsumerSelfTest, 1);
+}
+
+const beforeCanaryDispatchClaimsTestSeamSelfTest = errors.length;
+checkD1ProbeCanaryDispatchClaimsBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-command.ts",
+    "createD1ProbeCloudflareWorkerCanaryDispatchClaimsWithDependenciesTestOnlyV1();",
+    []
+);
+if (errors.length !== beforeCanaryDispatchClaimsTestSeamSelfTest + 1) {
+    errors.push("Worker API canary dispatch-claim self-test did not fence its injected dependency seam");
+}
+errors.splice(beforeCanaryDispatchClaimsTestSeamSelfTest, 1);
+
 const beforeRpcManifestSelfTest = errors.length;
 checkManifest(
     "apps/<self-test>/package.json",
@@ -1923,6 +2172,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
     checkD1ProbeCanaryDriverLeaseBoundary(file, content, imports);
     checkD1ProbeCanaryConsistencyBoundary(file, content, imports);
     checkD1ProbeCanaryResponseArchiveBoundary(file, content, imports);
+    checkD1ProbeCanaryDispatchClaimsBoundary(file, content, imports);
     checkD1ProbeOperatorNetworkBoundary(file, content, imports);
 
     if (

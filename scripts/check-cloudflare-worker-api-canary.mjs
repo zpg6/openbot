@@ -28,6 +28,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.shared_bounded_transport_implemented === true &&
             fixture.implementation?.unregistered_runner_uses_shared_bounded_transport === true &&
             fixture.implementation?.caller_controlled_pre_dispatch_ordering_seam_implemented === true &&
+            fixture.implementation?.durable_forward_dispatch_claim_adapter_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_durable_dispatch_claim_adapter === false &&
             fixture.implementation?.credentialed_runner_persists_pre_dispatch_claims === false &&
             fixture.implementation?.canonical_plan_generator_implemented === true &&
             fixture.implementation?.root_plan_command_registered === true &&
@@ -48,6 +50,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.root_recovery_inspector_command_registered === true &&
             fixture.implementation?.secure_secret_fd_launcher_implemented === false &&
             fixture.implementation?.encrypted_response_preimage_archive_implemented === true &&
+            fixture.implementation?.bounded_response_preimage_capture_hook_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_response_preimage_capture_hook === false &&
             fixture.implementation?.credentialed_runner_writes_encrypted_response_preimages === false &&
             fixture.implementation?.response_preimage_capture_implemented === false &&
             fixture.implementation?.reviewed_observation_fixture_transition_implemented === false &&
@@ -56,7 +60,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
         "the isolated canary implementation state drifted"
     );
     check(
-        Object.values(fixture.authority ?? {}).every(value => value === false),
+        Object.values(fixture.authority ?? {}).every(value => value === false) &&
+            fixture.authority?.dispatch_claim_adapter_authenticates_transport === false &&
+            fixture.authority?.response_capture_hook_proves_archive_publication === false &&
+            fixture.authority?.response_capture_hook_prevents_plaintext_retention === false,
         "the isolated canary must grant no evidence, upload, lifecycle, attestation, or gate authority"
     );
     check(
@@ -102,6 +109,13 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.consistency_snapshot_scope === "locally_forgeable_may_stale_reassert_heads_before_effect" &&
             workflow.consistency_reader_filesystem_writes === false &&
             workflow.pre_dispatch_ordering_scope === "caller_controlled_one_use_hook_no_persistence_proof" &&
+            workflow.durable_dispatch_claim_adapter_scope === "forward_only_intent_then_started_non_atomic_unwired" &&
+            workflow.durable_dispatch_claim_adapter_binds_cleanup_grace === false &&
+            workflow.durable_dispatch_claim_adapter_writes_terminal_claims === false &&
+            workflow.started_claim_may_remain_ambiguous_after_local_failure === true &&
+            workflow.response_capture_scope === "caller_controlled_bounded_byte_copy_no_archive_or_claim_proof" &&
+            workflow.response_capture_caller_can_retain_plaintext === true &&
+            workflow.archive_before_response_observed_enforced === false &&
             workflow.response_archive_scope === "encrypted_write_only_caller_claim_bound_body_preimage" &&
             workflow.response_archive_production_plaintext_reader_available === false &&
             workflow.response_archive_claims_complete_transport_observation === false &&

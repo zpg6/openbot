@@ -56,6 +56,8 @@ const draft = (
     request_method: "GET",
     transcript_sequence: 1,
     effect_phase: "dispatch_intent",
+    intent_observed_at_ms: 1_000,
+    dispatch_started_at_ms: null,
     request_digest: randomDigest(),
     request_path_digest: randomDigest(),
     response_status: null,
@@ -94,6 +96,17 @@ const nextRecord = async (
         ...draftFromClaim(current),
         journal_revision: current.journal_revision + 1,
         previous_claim_digest: current.claim_digest,
+        ...(overrides.effect_phase === "dispatch_started" && overrides.dispatch_started_at_ms === undefined
+            ? { dispatch_started_at_ms: current.intent_observed_at_ms + 1 }
+            : {}),
+        ...(overrides.effect_phase === "dispatch_intent"
+            ? {
+                  intent_observed_at_ms:
+                      overrides.intent_observed_at_ms ??
+                      (current.dispatch_started_at_ms ?? current.intent_observed_at_ms) + 1,
+                  dispatch_started_at_ms: null,
+              }
+            : {}),
         ...overrides,
     } as Partial<D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimDraftV1>);
 
@@ -123,6 +136,8 @@ const nextIntent = async (
     await nextRecord(current, {
         transcript_sequence: current.transcript_sequence + 1,
         effect_phase: "dispatch_intent",
+        intent_observed_at_ms: (current.dispatch_started_at_ms ?? current.intent_observed_at_ms) + 1,
+        dispatch_started_at_ms: null,
         request_digest: randomDigest(),
         request_path_digest: randomDigest(),
         response_status: null,
@@ -227,6 +242,33 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
                 draft({ request_kind: "create_version", operation_state: "shell_dispatching" })
             )
         ).resolves.toBeNull();
+        const withoutIntentTime = { ...draft() } as Record<string, unknown>;
+        delete withoutIntentTime["intent_observed_at_ms"];
+        await expect(buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(withoutIntentTime)).resolves.toBeNull();
+        const withoutDispatchTime = { ...draft() } as Record<string, unknown>;
+        delete withoutDispatchTime["dispatch_started_at_ms"];
+        await expect(buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(withoutDispatchTime)).resolves.toBeNull();
+        await expect(
+            buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(draft({ dispatch_started_at_ms: 1_001 }))
+        ).resolves.toBeNull();
+        await expect(
+            buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(
+                draft({
+                    effect_phase: "dispatch_started",
+                    dispatch_started_at_ms: null,
+                    ambiguity_classification: "may_have_dispatched",
+                })
+            )
+        ).resolves.toBeNull();
+        await expect(
+            buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(
+                draft({
+                    effect_phase: "dispatch_started",
+                    dispatch_started_at_ms: 999,
+                    ambiguity_classification: "may_have_dispatched",
+                })
+            )
+        ).resolves.toBeNull();
     });
 
     it("commits the execution nonce without retaining the nonce", async () => {
@@ -245,6 +287,7 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
         const wrongChain = await nextRecord(intent, {
             previous_claim_digest: randomDigest(),
             effect_phase: "dispatch_started",
+            dispatch_started_at_ms: 1_001,
             ambiguity_classification: "may_have_dispatched",
         });
         await expect(appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(wrongChain)).resolves.toEqual({
@@ -262,6 +305,16 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
             request_digest: randomDigest(),
         });
         await expect(appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(changedRequest)).resolves.toEqual({
+            success: false,
+            code: "journal_transition_denied",
+        });
+
+        const changedIntentTime = await nextRecord(intent, {
+            effect_phase: "dispatch_started",
+            intent_observed_at_ms: intent.intent_observed_at_ms + 1,
+            ambiguity_classification: "may_have_dispatched",
+        });
+        await expect(appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(changedIntentTime)).resolves.toEqual({
             success: false,
             code: "journal_transition_denied",
         });
@@ -335,6 +388,51 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
             request_path_digest: randomDigest(),
         });
         await expect(appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(earlyNext)).resolves.toEqual({
+            success: false,
+            code: "journal_transition_denied",
+        });
+    });
+
+    it("keeps dispatch timing immutable and monotonic", async () => {
+        const intent = await record();
+        const started = await nextRecord(intent, {
+            effect_phase: "dispatch_started",
+            dispatch_started_at_ms: 1_005,
+            ambiguity_classification: "may_have_dispatched",
+        });
+        for (const claim of [intent, started]) {
+            expect((await appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(claim)).success).toBe(true);
+        }
+        const driftedTerminal = await nextRecord(started, {
+            effect_phase: "response_observed",
+            dispatch_started_at_ms: 1_006,
+            response_status: 200,
+            response_digest: randomDigest(),
+            ambiguity_classification: "none",
+        });
+        await expect(appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(driftedTerminal)).resolves.toEqual({
+            success: false,
+            code: "journal_transition_denied",
+        });
+        const observed = await nextRecord(started, {
+            effect_phase: "response_observed",
+            response_status: 200,
+            response_digest: randomDigest(),
+            ambiguity_classification: "none",
+        });
+        expect((await appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(observed)).success).toBe(true);
+        const clockRollback = await nextRecord(observed, {
+            transcript_sequence: 2,
+            effect_phase: "dispatch_intent",
+            intent_observed_at_ms: 1_004,
+            dispatch_started_at_ms: null,
+            request_digest: randomDigest(),
+            request_path_digest: randomDigest(),
+            response_status: null,
+            response_digest: null,
+            ambiguity_classification: "not_dispatched",
+        });
+        await expect(appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(clockRollback)).resolves.toEqual({
             success: false,
             code: "journal_transition_denied",
         });
@@ -559,6 +657,7 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
             journal_revision: 1,
             previous_claim_digest: randomDigest(),
             effect_phase: "dispatch_started",
+            dispatch_started_at_ms: 1_001,
             ambiguity_classification: "may_have_dispatched",
         });
         const gapPath = d1ProbeCloudflareWorkerCanaryEffectJournalPathV1(gapPlan, 1);
