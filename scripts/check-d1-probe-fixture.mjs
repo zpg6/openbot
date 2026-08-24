@@ -169,10 +169,28 @@ check(
     "the D1 Cloudflare reader transport limits changed"
 );
 check(
-    routeReader.operator_command_registered === false &&
+    routeReader.operator_command_registered === true &&
+        routeReader.operator_command === "pnpm d1-probe:check-route" &&
+        routeReader.arguments_allowed === false &&
+        routeReader.stdin?.kind === "canonical_route_check_command_v1" &&
+        routeReader.stdin?.maximum_bytes === 2097152 &&
+        routeReader.stdin?.optional_single_trailing_lf === true &&
+        routeReader.commitment_key_input?.file_descriptor === 3 &&
+        routeReader.commitment_key_input?.maximum_bytes === 128 &&
+        JSON.stringify(routeReader.commitment_key_input?.allowed_descriptor_types) ===
+            JSON.stringify(["fifo", "socket"]) &&
+        routeReader.commitment_key_input?.environment_fallback === false &&
+        routeReader.api_token_input?.file_descriptor === 4 &&
+        routeReader.api_token_input?.maximum_bytes === 256 &&
+        JSON.stringify(routeReader.api_token_input?.allowed_descriptor_types) === JSON.stringify(["fifo", "socket"]) &&
+        routeReader.api_token_input?.environment_fallback === false &&
+        routeReader.stdout === "canonical_non_authoritative_inspection_only" &&
+        routeReader.stderr === "fixed_error_code_only" &&
         routeReader.performs_mutation === false &&
+        routeReader.performs_deployment === false &&
+        routeReader.gate_promotion_allowed === false &&
         routeReader.authoritative === false,
-    "the D1 Cloudflare reader must remain an unwired read-only library"
+    "the D1 Cloudflare reader command boundary changed"
 );
 check(
     deployment.operational_identity?.account_id_hmac_commitment_required === true,

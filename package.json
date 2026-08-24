@@ -23,6 +23,7 @@
         "check:fixtures": "node scripts/check-fixtures.mjs && node scripts/check-d1-probe-fixture.mjs",
         "gate:attest:d1": "corepack pnpm --dir packages/gate-signer attest",
         "d1-probe:plan": "corepack pnpm --dir packages/d1-probe-operator plan",
+        "d1-probe:check-route": "corepack pnpm --dir packages/d1-probe-operator check-route",
         "d1-probe:build-local": "node scripts/d1-probe-workers.mjs",
         "db:generate:d1": "drizzle-kit generate --config packages/db-d1/drizzle.config.ts",
         "db:migrate:d1:local": "wrangler d1 migrations apply CONTROL_DB_FRESH --local --config apps/control-plane/wrangler.d1.jsonc --env preview",

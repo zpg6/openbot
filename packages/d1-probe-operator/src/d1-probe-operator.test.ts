@@ -22,6 +22,7 @@ import {
 import { compileD1ProbePreflightPlanV1 } from "./preflight.js";
 import { readD1ProbeCloudflareRouteV1 } from "./cloudflare-route-reader.js";
 import { inspectD1ProbeRouteReadbackV1 } from "./route-precheck.js";
+import { executeD1ProbeRouteCheckV1 } from "./route-command.js";
 import {
     resolveVerifiedD1ProbePreflightV1,
     verifyD1ProbePreflightV1,
@@ -178,6 +179,52 @@ const runCli = async (
                 return;
             }
             keyStream.end(keyInput);
+        }
+    });
+
+const runRouteCli = async (
+    input: string,
+    keyInput?: string,
+    tokenInput?: string,
+    extraArguments: string[] = [],
+    environment: NodeJS.ProcessEnv = process.env
+): Promise<{ code: number | null; stdout: string; stderr: string }> =>
+    await new Promise((resolve, reject) => {
+        const child = spawn(
+            process.execPath,
+            ["--import", "tsx", new URL("./route-cli.ts", import.meta.url).pathname, ...extraArguments],
+            {
+                cwd: new URL("../", import.meta.url).pathname,
+                env: environment,
+                stdio: ["pipe", "pipe", "pipe", "pipe", "pipe"],
+            }
+        );
+        const stdout: Buffer[] = [];
+        const stderr: Buffer[] = [];
+        if (child.stdout === null || child.stderr === null || child.stdin === null) {
+            reject(new Error("missing route-check child standard stream"));
+            return;
+        }
+        child.stdout.on("data", chunk => stdout.push(Buffer.from(chunk)));
+        child.stderr.on("data", chunk => stderr.push(Buffer.from(chunk)));
+        child.once("error", reject);
+        child.once("close", code =>
+            resolve({
+                code,
+                stdout: Buffer.concat(stdout).toString("utf8"),
+                stderr: Buffer.concat(stderr).toString("utf8"),
+            })
+        );
+        child.stdin.end(input);
+        for (const descriptor of [3, 4] as const) {
+            const secret = descriptor === 3 ? keyInput : tokenInput;
+            const stream = child.stdio[descriptor];
+            if (stream === undefined || stream === null || !("end" in stream)) {
+                reject(new Error(`missing route-check file descriptor ${descriptor}`));
+                return;
+            }
+            stream.on("error", () => undefined);
+            stream.end(secret ?? "");
         }
     });
 
@@ -1011,4 +1058,140 @@ describe("D1 probe Cloudflare route reader", () => {
             })
         ).toEqual({ success: false, code: "dns_record_not_proxied" });
     });
+});
+
+describe("D1 probe route-check command", () => {
+    it("reverifies the exact plan before the credentialed reader and emits only a non-authoritative result", async () => {
+        const compiledPlan = await plan();
+        const command = {
+            schema_version: 1,
+            kind: "d1_probe_route_check_command",
+            request: request(),
+            plan: compiledPlan,
+        };
+        const apiToken = "x".repeat(32);
+        const fetchMock = vi.fn(async (input: string | URL | Request) =>
+            String(input).includes("/dns_records?")
+                ? jsonResponse(cloudflareDnsResponse(1))
+                : jsonResponse(cloudflareZoneResponse())
+        );
+        const result = await executeD1ProbeRouteCheckV1(command, key, apiToken, {
+            fetch: fetchMock as typeof globalThis.fetch,
+        });
+        expect(result).toMatchObject({
+            success: true,
+            inspection: {
+                authoritative: false,
+                deploy_performed: false,
+                eligible_for_deployment: false,
+                gate_promotion_allowed: false,
+            },
+        });
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(JSON.stringify(result)).not.toContain(key);
+        expect(JSON.stringify(result)).not.toContain(apiToken);
+        expect(JSON.stringify(result)).not.toContain(request().account_id);
+        expect(JSON.stringify(result)).not.toContain(request().zone_id);
+    });
+
+    it("denies malformed, hostile, or substituted commands before any API request", async () => {
+        const compiledPlan = await plan();
+        const fetchMock = vi.fn();
+        const dependencies = { fetch: fetchMock as typeof globalThis.fetch };
+        const hostile = new Proxy(
+            {},
+            {
+                ownKeys: () => {
+                    throw new Error("hostile command");
+                },
+            }
+        );
+        expect(await executeD1ProbeRouteCheckV1(hostile, key, "x".repeat(32), dependencies)).toEqual({
+            success: false,
+            code: "invalid_route_check_command",
+        });
+        expect(
+            await executeD1ProbeRouteCheckV1(
+                {
+                    schema_version: 1,
+                    kind: "d1_probe_route_check_command",
+                    request: request(),
+                    plan: { ...compiledPlan, plan_digest: hex("f") },
+                },
+                key,
+                "x".repeat(32),
+                dependencies
+            )
+        ).toEqual({ success: false, code: "preflight_plan_mismatch" });
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
+    it("reads both secrets only from their file descriptors and rejects before network on invalid input", async () => {
+        const compiledPlan = await plan();
+        const command = canonicalizeJsonV1({
+            schema_version: 1,
+            kind: "d1_probe_route_check_command",
+            request: request(),
+            plan: compiledPlan,
+        } as CanonicalJsonValueV1);
+
+        expect(await runRouteCli(command)).toEqual({
+            code: 1,
+            stdout: "",
+            stderr: "commitment_key_unavailable\n",
+        });
+        expect(await runRouteCli(command, key)).toEqual({
+            code: 1,
+            stdout: "",
+            stderr: "api_token_unavailable\n",
+        });
+        expect(
+            await runRouteCli(command, key, undefined, [], {
+                ...process.env,
+                CLOUDFLARE_API_TOKEN: "x".repeat(32),
+            })
+        ).toEqual({ code: 1, stdout: "", stderr: "api_token_unavailable\n" });
+        expect(await runRouteCli(command, key, "too-short")).toEqual({
+            code: 1,
+            stdout: "",
+            stderr: "invalid_api_token\n",
+        });
+        expect(await runRouteCli(command, "k".repeat(129), "x".repeat(32))).toEqual({
+            code: 1,
+            stdout: "",
+            stderr: "commitment_key_unavailable\n",
+        });
+        expect(await runRouteCli(command, key, "x".repeat(257))).toEqual({
+            code: 1,
+            stdout: "",
+            stderr: "api_token_unavailable\n",
+        });
+    }, 30_000);
+
+    it("requires canonical stdin, no arguments, and an exact HMAC-bound plan", async () => {
+        const compiledPlan = await plan();
+        const command = {
+            schema_version: 1,
+            kind: "d1_probe_route_check_command",
+            request: request(),
+            plan: compiledPlan,
+        };
+        expect(await runRouteCli(`${JSON.stringify(command, null, 2)}\n`, key, "too-short")).toEqual({
+            code: 1,
+            stdout: "",
+            stderr: "invalid_canonical_json\n",
+        });
+        expect(
+            await runRouteCli(canonicalizeJsonV1(command as CanonicalJsonValueV1), key, "too-short", ["extra"])
+        ).toEqual({ code: 1, stdout: "", stderr: "usage_error\n" });
+        const substituted = canonicalizeJsonV1({
+            ...command,
+            plan: { ...compiledPlan, plan_digest: hex("f") },
+        } as CanonicalJsonValueV1);
+        expect(await runRouteCli(substituted, key, "x".repeat(32))).toEqual({
+            code: 1,
+            stdout: "",
+            stderr: "preflight_plan_mismatch\n",
+        });
+    }, 30_000);
 });

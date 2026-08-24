@@ -78,8 +78,31 @@
             "accept_encoding": "identity",
             "dns_per_page": 1000,
             "dns_page_limit": 64,
-            "operator_command_registered": false,
+            "operator_command_registered": true,
+            "operator_command": "pnpm d1-probe:check-route",
+            "arguments_allowed": false,
+            "stdin": {
+                "kind": "canonical_route_check_command_v1",
+                "maximum_bytes": 2097152,
+                "optional_single_trailing_lf": true
+            },
+            "commitment_key_input": {
+                "file_descriptor": 3,
+                "maximum_bytes": 128,
+                "allowed_descriptor_types": ["fifo", "socket"],
+                "environment_fallback": false
+            },
+            "api_token_input": {
+                "file_descriptor": 4,
+                "maximum_bytes": 256,
+                "allowed_descriptor_types": ["fifo", "socket"],
+                "environment_fallback": false
+            },
+            "stdout": "canonical_non_authoritative_inspection_only",
+            "stderr": "fixed_error_code_only",
             "performs_mutation": false,
+            "performs_deployment": false,
+            "gate_promotion_allowed": false,
             "authoritative": false
         },
         "operational_identity": {
