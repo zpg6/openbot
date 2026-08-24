@@ -417,6 +417,72 @@ check(
     deployment.service_bindings?.access_context_expected_on_private_rpc === false,
     "Access context does not propagate over service bindings"
 );
+const workerArtifact = deployment.worker_artifact_candidate ?? {};
+check(workerArtifact.implemented === true, "the pure Worker artifact candidate compiler is required");
+check(
+    workerArtifact.kind === "untrusted_d1_probe_worker_artifact_candidate" &&
+        workerArtifact.package === "@openbot/d1-probe-operator" &&
+        workerArtifact.pure_compiler === true &&
+        workerArtifact.input_build_fields_are_untrusted_claims === true,
+    "Worker artifact output must stay private, pure, untrusted, and upload-ineligible"
+);
+check(
+    JSON.stringify(workerArtifact.roles_in_fixed_order) === JSON.stringify(["sink", "writer_a", "writer_b"]) &&
+        workerArtifact.exact_generated_script_names_from_verified_preflight === true &&
+        workerArtifact.exact_run_database_from_initialized_target === true,
+    "Worker candidates must bind the fixed roles, verified names, and initialized run database"
+);
+check(
+    workerArtifact.exact_module_bytes_hashed === true &&
+        workerArtifact.canonical_versions_upload_metadata_hashed === true &&
+        JSON.stringify(workerArtifact.ordered_multipart_part_manifest) === JSON.stringify(["metadata", "entry.js"]),
+    "Worker candidates must bind exact module and canonical ordered multipart metadata"
+);
+check(
+    workerArtifact.d1_binding_field === "database_id" &&
+        workerArtifact.wrangler_4_125_raw_metadata_byte_mirror === false &&
+        workerArtifact.wrangler_output_requires_reviewed_normalization === true,
+    "the direct-API candidate must not claim byte identity with Wrangler output"
+);
+check(
+    workerArtifact.compatibility_date === "2026-08-22" &&
+        Array.isArray(workerArtifact.compatibility_flags) &&
+        workerArtifact.compatibility_flags.length === 0 &&
+        workerArtifact.wrangler_version === "4.125.0" &&
+        workerArtifact.node_version === "22.19.0" &&
+        workerArtifact.pnpm_version === "11.22.0" &&
+        workerArtifact.observability_enabled === false &&
+        workerArtifact.observability_is_untrusted_build_claim === true,
+    "Worker artifact toolchain and compatibility pins changed"
+);
+check(
+    workerArtifact.role_only_exports_required === true &&
+        workerArtifact.role_specific_source_entrypoints_required === true &&
+        workerArtifact.role_pinned_access_fetch_contract_required === true &&
+        workerArtifact.runtime_version_response_contract === "required_not_observed" &&
+        workerArtifact.binding_configuration_digest_is_role_and_caller_bound === true &&
+        workerArtifact.package_and_build_dependency_digests_required === true,
+    "Worker candidate identity and provenance contracts changed"
+);
+check(
+    workerArtifact.source_maps_allowed === false &&
+        workerArtifact.absolute_workstation_paths_allowed === false &&
+        workerArtifact.assets_or_additional_modules_allowed === false &&
+        workerArtifact.upload_metadata_credentials_variables_secrets_tails_logs_routes_allowed === false &&
+        workerArtifact.current_local_bundles_eligible === false,
+    "unsafe or current local Worker artifacts must remain ineligible"
+);
+check(
+    workerArtifact.eligible_for_upload === false &&
+        workerArtifact.deployment_ready === false &&
+        workerArtifact.raw_upload_bytes_exposed === false &&
+        workerArtifact.upload_adapter_implemented === false &&
+        workerArtifact.deployment_adapter_implemented === false &&
+        workerArtifact.lifecycle_advance_allowed === false &&
+        workerArtifact.gate_promotion_allowed === false &&
+        workerArtifact.future_upload_and_deployment_require_separate_lifecycle_and_reconciliation === true,
+    "Worker candidates must carry no upload, deployment, lifecycle, or gate authority"
+);
 check(deployment.public_exposure?.workers_dev === false, "workers.dev must stay disabled");
 check(deployment.public_exposure?.preview_urls === false, "preview URLs must stay disabled");
 check(

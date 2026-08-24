@@ -6,6 +6,7 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 
 ### Added
 
+- A private pure compiler for upload-ineligible D1 probe Worker artifact candidates. It binds exact module and canonical direct-API multipart metadata digests for the sink and both writers, while granting no upload, deployment, lifecycle, or gate authority.
 - Initial implementation plan for the self-hosted read-only Bot runtime.
 - TypeScript repository foundation, core contracts, and public project documentation.
 - Cloudflare Workers tests use the current Vitest plugin package.

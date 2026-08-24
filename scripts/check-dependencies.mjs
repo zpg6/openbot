@@ -152,6 +152,21 @@ function checkD1ProbeOperatorNetworkBoundary(file, content, imports) {
     }
 }
 
+function checkD1ProbeWorkerArtifactCandidateBoundary(file, content, imports) {
+    if (file !== "packages/d1-probe-operator/src/worker-artifact.ts") return;
+    if (imports.some(specifier => specifier.startsWith("node:"))) {
+        errors.push(`${file}: the Worker artifact candidate compiler must not import Node capabilities`);
+    }
+    if (/\b(?:fetch|FormData|process|spawn|readFile|writeFile)\b/u.test(content)) {
+        errors.push(`${file}: the Worker artifact candidate compiler must remain pure`);
+    }
+    if (
+        /eligible_for_upload:\s*true|deployment_ready:\s*true|resolveD1ProbeWorkerArtifact|new\s+WeakMap/u.test(content)
+    ) {
+        errors.push(`${file}: an untrusted Worker artifact candidate cannot mint upload authority`);
+    }
+}
+
 function checkD1ProbeRpcImportBoundary(file, specifier) {
     const resolvedImport = specifier.startsWith(".") ? path.resolve(path.dirname(file), specifier) : null;
     const schemaRoot = path.resolve("packages/d1-probe-rpc/src/schema");
@@ -324,6 +339,17 @@ if (errors.length !== beforeOperatorFetchSelfTest + 1) {
 }
 errors.splice(beforeOperatorFetchSelfTest, 1);
 
+const beforeWorkerArtifactSelfTest = errors.length;
+checkD1ProbeWorkerArtifactCandidateBoundary(
+    "packages/d1-probe-operator/src/worker-artifact.ts",
+    "export const eligible_for_upload: true = true",
+    []
+);
+if (errors.length !== beforeWorkerArtifactSelfTest + 1) {
+    errors.push("Worker artifact candidate boundary self-test did not reject upload authority");
+}
+errors.splice(beforeWorkerArtifactSelfTest, 1);
+
 const beforeRpcManifestSelfTest = errors.length;
 checkManifest(
     "apps/<self-test>/package.json",
@@ -454,6 +480,7 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
             errors.push(`${file}: deferred database or vendor dependency imported: ${specifier}`);
         }
     }
+    checkD1ProbeWorkerArtifactCandidateBoundary(file, content, imports);
     checkD1ProbeOperatorNetworkBoundary(file, content, imports);
 
     if (
