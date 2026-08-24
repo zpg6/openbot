@@ -26,6 +26,8 @@ The plan stores domain-separated HMAC commitments for the origin, Access applica
 
 The later deployment boundary cannot trust a parsed plan by shape. It must recompile the complete plan from the parsed request and HMAC key and compare the canonical bytes. Successful comparison creates an opaque in-memory verified preflight context. Its resolver accepts only the exact object minted by that verifier, returns deeply frozen copies of the request and recompiled plan, and retains no HMAC key. A copied or type-cast object does not resolve. This boundary still performs no deployment and grants no gate authority.
 
+The route precheck accepts only that opaque context and a strict projection of Cloudflare readback. It binds the returned zone ID and owning account to the preflight request. The zone must be active, full, and unpaused. The probe hostname must equal the zone name or be its subdomain. DNS lookup uses the exact-name field and `proxied=true`, captures every page with consistent pagination metadata, and accepts only unique proxied A, AAAA, or CNAME records for that hostname. An empty, partial, mismatched, unsupported, or unproxied result denies. The projection does not prove that Cloudflare returned the bytes. Until a credentialed adapter performs both API reads, the inspection remains non-authoritative, is not eligible for deployment, and cannot close a gate.
+
 The journal accepts only the fixed create and cleanup prefix below. Skipped, repeated, renamed, or substituted resources deny. An ambiguous create, delete, in-flight state, or absence observation moves the journal to terminal `manual_required`; the operator cannot continue the same plan blindly. This preflight and journal make a later deployment driver safer, but they do not implement that driver or close a D1 gate.
 
 ## Private receipt RPC
@@ -144,3 +146,5 @@ A lost delete response, ID mismatch, unexpected resource, failed absence check, 
 - [Cloudflare Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/)
 - [Workers script deletion](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/methods/delete/)
 - [Cloudflare Access service policies](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/common-policies/)
+- [Cloudflare zone details](https://developers.cloudflare.com/api/resources/zones/methods/get/)
+- [Cloudflare DNS record list](https://developers.cloudflare.com/api/resources/dns/subresources/records/methods/list/)

@@ -20,6 +20,7 @@ import {
     markD1ProbeLifecycleAmbiguousV1,
 } from "./lifecycle.js";
 import { compileD1ProbePreflightPlanV1 } from "./preflight.js";
+import { inspectD1ProbeRouteReadbackV1 } from "./route-precheck.js";
 import {
     resolveVerifiedD1ProbePreflightV1,
     verifyD1ProbePreflightV1,
@@ -54,6 +55,50 @@ const plan = async () => {
     if (!result.success) throw new Error(result.code);
     return result.plan;
 };
+
+const verifiedPreflight = async () => {
+    const rawRequest = request();
+    const compiledPlan = await plan();
+    const result = await verifyD1ProbePreflightV1(rawRequest, compiledPlan, { hmac_key_base64url: key });
+    if (!result.success) throw new Error(result.code);
+    return result.verified;
+};
+
+const routeReadback = () => ({
+    schema_version: 1 as const,
+    kind: "untrusted_d1_probe_route_readback" as const,
+    zone: {
+        id: request().zone_id,
+        account_id: request().account_id,
+        name: "example.test",
+        status: "active" as const,
+        type: "full" as const,
+        paused: false,
+    },
+    dns_query: {
+        zone_id: request().zone_id,
+        name_exact: "probe.example.test",
+        proxied: true as const,
+        pages: [
+            {
+                page: 1,
+                per_page: 1000 as const,
+                count: 1,
+                total_count: 1,
+                total_pages: 1,
+                records: [
+                    {
+                        id: "c".repeat(32),
+                        name: "probe.example.test",
+                        type: "A" as const,
+                        proxiable: true,
+                        proxied: true,
+                    },
+                ],
+            },
+        ],
+    },
+});
 
 const runCli = async (
     input: string,
@@ -524,5 +569,175 @@ describe("D1 probe verified preflight", () => {
             success: false,
             code: "invalid_commitment_key",
         });
+    });
+});
+
+describe("D1 probe route readback inspection", () => {
+    it("binds an active full zone and complete proxied DNS readback without granting deployment authority", async () => {
+        const verified = await verifiedPreflight();
+        const result = inspectD1ProbeRouteReadbackV1(verified, routeReadback());
+        expect(result).toEqual({
+            success: true,
+            inspection: {
+                schema_version: 1,
+                kind: "untrusted_d1_probe_route_inspection",
+                status: "route_requirements_observed",
+                authoritative: false,
+                deploy_performed: false,
+                eligible_for_deployment: false,
+                gate_promotion_allowed: false,
+                plan_digest: (await plan()).plan_digest,
+                dns_record_count: 1,
+            },
+        });
+        if (result.success) expect(Object.isFrozen(result.inspection)).toBe(true);
+        expect(JSON.stringify(result)).not.toContain(request().account_id);
+        expect(JSON.stringify(result)).not.toContain(request().zone_id);
+        expect(JSON.stringify(result)).not.toContain("c".repeat(32));
+    });
+
+    it("denies account, zone, lifecycle, zone-boundary, and query substitution", async () => {
+        const verified = await verifiedPreflight();
+        const cases = [
+            [
+                { ...routeReadback(), zone: { ...routeReadback().zone, account_id: "d".repeat(32) } },
+                "cloudflare_account_mismatch",
+            ],
+            [{ ...routeReadback(), zone: { ...routeReadback().zone, id: "d".repeat(32) } }, "cloudflare_zone_mismatch"],
+            [{ ...routeReadback(), zone: { ...routeReadback().zone, status: "pending" } }, "cloudflare_zone_inactive"],
+            [{ ...routeReadback(), zone: { ...routeReadback().zone, type: "partial" } }, "cloudflare_zone_unsupported"],
+            [{ ...routeReadback(), zone: { ...routeReadback().zone, paused: true } }, "cloudflare_zone_paused"],
+            [
+                { ...routeReadback(), zone: { ...routeReadback().zone, name: "other.test" } },
+                "probe_hostname_outside_zone",
+            ],
+            [
+                { ...routeReadback(), dns_query: { ...routeReadback().dns_query, name_exact: "other.example.test" } },
+                "dns_query_mismatch",
+            ],
+        ] as const;
+        for (const [readback, code] of cases) {
+            expect(inspectD1ProbeRouteReadbackV1(verified, readback)).toEqual({ success: false, code });
+        }
+    });
+
+    it("denies incomplete, empty, duplicate, mismatched, or unproxied DNS observations", async () => {
+        const verified = await verifiedPreflight();
+        const base = routeReadback();
+        const secondPage = {
+            ...base.dns_query.pages[0],
+            page: 2,
+            records: [{ ...base.dns_query.pages[0]!.records[0]!, id: "d".repeat(32) }],
+        };
+        const cases = [
+            [
+                {
+                    ...base,
+                    dns_query: {
+                        ...base.dns_query,
+                        pages: [{ ...base.dns_query.pages[0], total_pages: 2 }],
+                    },
+                },
+                "dns_pagination_incomplete",
+            ],
+            [
+                {
+                    ...base,
+                    dns_query: {
+                        ...base.dns_query,
+                        pages: [{ ...base.dns_query.pages[0], count: 0, total_count: 0, records: [] }],
+                    },
+                },
+                "proxied_dns_missing",
+            ],
+            [
+                {
+                    ...base,
+                    dns_query: {
+                        ...base.dns_query,
+                        pages: [
+                            { ...base.dns_query.pages[0], total_pages: 2, total_count: 2 },
+                            {
+                                ...secondPage,
+                                total_pages: 2,
+                                total_count: 2,
+                                records: base.dns_query.pages[0]!.records,
+                            },
+                        ],
+                    },
+                },
+                "dns_record_mismatch",
+            ],
+            [
+                {
+                    ...base,
+                    dns_query: {
+                        ...base.dns_query,
+                        pages: [
+                            {
+                                ...base.dns_query.pages[0],
+                                records: [{ ...base.dns_query.pages[0]!.records[0]!, name: "other.example.test" }],
+                            },
+                        ],
+                    },
+                },
+                "dns_record_mismatch",
+            ],
+            [
+                {
+                    ...base,
+                    dns_query: {
+                        ...base.dns_query,
+                        pages: [
+                            {
+                                ...base.dns_query.pages[0],
+                                records: [{ ...base.dns_query.pages[0]!.records[0]!, proxied: false }],
+                            },
+                        ],
+                    },
+                },
+                "dns_record_not_proxied",
+            ],
+        ] as const;
+        for (const [readback, code] of cases) {
+            expect(inspectD1ProbeRouteReadbackV1(verified, readback)).toEqual({ success: false, code });
+        }
+    });
+
+    it("rejects shape-only preflight tokens, malformed pagination, hostile input, and later input mutation", async () => {
+        expect(
+            inspectD1ProbeRouteReadbackV1(
+                { schema_version: 1, kind: "verified_d1_probe_preflight" } as VerifiedD1ProbePreflightV1,
+                routeReadback()
+            )
+        ).toEqual({ success: false, code: "invalid_verified_preflight" });
+
+        const verified = await verifiedPreflight();
+        const malformed = routeReadback();
+        malformed.dns_query.pages[0]!.count = 2;
+        expect(inspectD1ProbeRouteReadbackV1(verified, malformed)).toEqual({
+            success: false,
+            code: "invalid_cloudflare_readback",
+        });
+
+        const hostile = new Proxy(
+            {},
+            {
+                ownKeys: () => {
+                    throw new Error("hostile readback");
+                },
+            }
+        );
+        expect(() => inspectD1ProbeRouteReadbackV1(verified, hostile)).not.toThrow();
+        expect(inspectD1ProbeRouteReadbackV1(verified, hostile)).toEqual({
+            success: false,
+            code: "invalid_cloudflare_readback",
+        });
+
+        const mutable = routeReadback();
+        const result = inspectD1ProbeRouteReadbackV1(verified, mutable);
+        mutable.zone.account_id = "f".repeat(32);
+        expect(result.success).toBe(true);
+        if (result.success) expect(result.inspection.dns_record_count).toBe(1);
     });
 });

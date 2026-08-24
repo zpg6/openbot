@@ -26,3 +26,4 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 - A private D1 gateway parent command with canonical stdin, file-descriptor-only Access credentials, signal-driven child cleanup, fixed exit codes, and no root command or deployment path.
 - An opaque D1 preflight verification boundary that recompiles the complete HMAC-bound plan, rejects substituted canonical bytes, freezes resolved deployment inputs, and retains no commitment key.
 - HMAC-bound D1 probe routing that derives two exact Writer paths, one exact readback path, their target scripts and methods, and one narrow Access application path from a canonical HTTPS origin.
+- A non-authoritative D1 route-readback inspector that binds the verified preflight to an active full Cloudflare zone and a complete exact-name proxied DNS projection. It performs no API call or deployment and cannot authorize either.

@@ -112,6 +112,23 @@ check(
     "D1 deployment must verify the planned origin against the zone and proxied DNS"
 );
 check(
+    preflightVerification.untrusted_route_readback_inspector_implemented === true &&
+        preflightVerification.zone_id_account_status_type_and_paused_bound === true &&
+        preflightVerification.probe_hostname_must_belong_to_zone === true,
+    "D1 route precheck must bind the planned origin to one usable Cloudflare zone"
+);
+check(
+    preflightVerification.exact_name_proxied_dns_query_required === true &&
+        preflightVerification.complete_dns_pagination_and_unique_records_required === true &&
+        JSON.stringify(preflightVerification.accepted_dns_record_types) === JSON.stringify(["A", "AAAA", "CNAME"]),
+    "D1 route precheck must require a complete exact-name proxied DNS readback"
+);
+check(
+    preflightVerification.route_readback_inspection_eligible_for_deployment === false &&
+        preflightVerification.credentialed_cloudflare_readback_adapter_implemented === false,
+    "caller-supplied Cloudflare readback cannot authorize D1 probe deployment"
+);
+check(
     preflightVerification.verified_context_is_opaque_and_in_memory_only === true,
     "the verified D1 preflight context must remain opaque and in memory"
 );
