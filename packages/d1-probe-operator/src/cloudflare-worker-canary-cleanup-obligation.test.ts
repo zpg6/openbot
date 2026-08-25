@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
     D1_PROBE_CLOUDFLARE_WORKER_CANARY_CLEANUP_OBLIGATION_ROOT_V1,
     compileD1ProbeCloudflareWorkerCanaryCleanupObligationV1,
+    matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1,
     publishD1ProbeCloudflareWorkerCanaryCleanupObligationV1,
     readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyV1,
 } from "./cloudflare-worker-canary-cleanup-obligation.js";
@@ -118,6 +119,29 @@ describe("Cloudflare Worker canary cleanup obligation", () => {
             lifecycle_advance_allowed: false,
             gate_promotion_allowed: false,
         });
+    });
+
+    it("matches later operation revisions only when immutable execution identity is unchanged", async () => {
+        const obligation = await makeObligation();
+        const laterOperation = buildNextD1ProbeCloudflareWorkerCanaryOperationV1(
+            obligation.operation,
+            "shell_dispatching",
+            obligation.operation.updated_at_ms + 1
+        );
+        expect(
+            matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1(
+                obligation,
+                laterOperation,
+                obligation.execution_nonce_commitment
+            )
+        ).toBe(true);
+        expect(
+            matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1(
+                obligation,
+                { ...laterOperation, attempt_tag: `openbot-canary-attempt-${"2f".repeat(16)}` },
+                obligation.execution_nonce_commitment
+            )
+        ).toBe(false);
     });
 
     it("publishes once and reads the exact canonical record without modifying it", async () => {

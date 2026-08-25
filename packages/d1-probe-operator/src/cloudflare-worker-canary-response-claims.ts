@@ -19,6 +19,12 @@ import {
     type D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1,
 } from "./cloudflare-worker-canary-driver-lease.js";
 import {
+    matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1,
+    readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyV1,
+    type D1ProbeCloudflareWorkerCanaryCleanupObligationResultV1,
+    type D1ProbeCloudflareWorkerCanaryCleanupObligationV1,
+} from "./cloudflare-worker-canary-cleanup-obligation.js";
+import {
     readD1ProbeCloudflareWorkerCanaryConsistencyV1,
     type D1ProbeCloudflareWorkerCanaryConsistencyV1,
 } from "./cloudflare-worker-canary-consistency.js";
@@ -49,43 +55,95 @@ const ExecutionNonceV1 = /^[0-9a-f]{32}$/u;
 const OwnerNonceV1 = /^[A-Za-z0-9_-]{43}$/u;
 
 const workflowBindings = {
-    prepared_worker_list: { request_kind: "inspect_worker", request_method: "GET", operation_state: "prepared" },
-    shell_create: { request_kind: "create_worker", request_method: "POST", operation_state: "shell_dispatching" },
+    prepared_worker_list: {
+        request_kind: "inspect_worker",
+        request_method: "GET",
+        operation_state: "prepared",
+        window_class: "forward",
+    },
+    shell_create: {
+        request_kind: "create_worker",
+        request_method: "POST",
+        operation_state: "shell_dispatching",
+        window_class: "forward",
+    },
     shell_dispatch_reconciliation: {
         request_kind: "inspect_worker",
         request_method: "GET",
         operation_state: "shell_dispatching",
+        window_class: "forward",
     },
-    shell_readback: { request_kind: "inspect_worker", request_method: "GET", operation_state: "shell_identified" },
+    shell_readback: {
+        request_kind: "inspect_worker",
+        request_method: "GET",
+        operation_state: "shell_identified",
+        window_class: "forward",
+    },
     version_create: {
         request_kind: "create_version",
         request_method: "POST",
         operation_state: "version_dispatching",
+        window_class: "forward",
     },
     version_dispatch_reconciliation: {
         request_kind: "inspect_worker",
         request_method: "GET",
         operation_state: "version_dispatching",
+        window_class: "forward",
     },
     version_readback: {
         request_kind: "inspect_worker",
         request_method: "GET",
         operation_state: "version_identified",
+        window_class: "forward",
     },
     deployment_create: {
         request_kind: "create_deployment",
         request_method: "POST",
         operation_state: "deployment_dispatching",
+        window_class: "forward",
     },
     deployment_dispatch_reconciliation: {
         request_kind: "inspect_worker",
         request_method: "GET",
         operation_state: "deployment_dispatching",
+        window_class: "forward",
     },
     deployment_readback: {
         request_kind: "inspect_worker",
         request_method: "GET",
         operation_state: "deployment_identified",
+        window_class: "forward",
+    },
+    cleanup_worker_readback: {
+        request_kind: "inspect_cleanup",
+        request_method: "GET",
+        operation_state: "cleanup_reconciling",
+        window_class: "cleanup",
+    },
+    cleanup_worker_list: {
+        request_kind: "inspect_cleanup",
+        request_method: "GET",
+        operation_state: "cleanup_reconciling",
+        window_class: "cleanup",
+    },
+    delete_worker: {
+        request_kind: "delete_worker",
+        request_method: "DELETE",
+        operation_state: "delete_dispatching",
+        window_class: "cleanup",
+    },
+    deleted_worker_readback: {
+        request_kind: "inspect_cleanup",
+        request_method: "GET",
+        operation_state: "delete_dispatching",
+        window_class: "cleanup",
+    },
+    deleted_worker_list: {
+        request_kind: "inspect_cleanup",
+        request_method: "GET",
+        operation_state: "delete_dispatching",
+        window_class: "cleanup",
     },
 } as const;
 
@@ -139,6 +197,10 @@ export interface D1ProbeCloudflareWorkerCanaryResponseClaimsTestOnlyDependencies
     readonly append_effect_claim: (
         claim: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1
     ) => Promise<D1ProbeCloudflareWorkerCanaryEffectJournalAppendResultV1>;
+    readonly read_cleanup_obligation: (
+        planDigest: string,
+        executionNonceCommitment: string
+    ) => Promise<D1ProbeCloudflareWorkerCanaryCleanupObligationResultV1>;
 }
 
 const authority = Object.freeze({
@@ -158,6 +220,7 @@ const fixedDependencies: D1ProbeCloudflareWorkerCanaryResponseClaimsTestOnlyDepe
     build_effect_claim: buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
     archive_response_preimage: archiveD1ProbeCloudflareWorkerCanaryResponsePreimageV1,
     append_effect_claim: appendD1ProbeCloudflareWorkerCanaryEffectJournalV1,
+    read_cleanup_obligation: readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyV1,
 };
 
 const exactKeys = (input: Record<string, unknown>, keys: readonly string[]): boolean => {
@@ -317,6 +380,7 @@ const exactClaimHead = (
     snapshot.claim_execution_nonce_commitment === claim.execution_nonce_commitment &&
     snapshot.claim_lease_generation === claim.lease_generation &&
     snapshot.claim_lease_record_digest === claim.lease_record_digest &&
+    snapshot.claim_cleanup_obligation_digest === claim.cleanup_obligation_digest &&
     snapshot.claim_workflow_step === claim.workflow_step &&
     snapshot.claim_effect_phase === claim.effect_phase &&
     snapshot.claim_ambiguity_classification === claim.ambiguity_classification;
@@ -327,9 +391,15 @@ const exactStartedForIntent = (
     operationDigest: string,
     nonceCommitment: string,
     workflowStep: WorkflowStepV1,
-    intent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1
+    intent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1,
+    cleanupObligation: D1ProbeCloudflareWorkerCanaryCleanupObligationV1 | null
 ): boolean => {
     const binding = workflowBindings[workflowStep];
+    const lowerBound = Math.max(
+        operation.updated_at_ms,
+        cleanupObligation?.cleanup_grace.automatic_cleanup_not_before_ms ?? operation.plan.not_before_ms
+    );
+    const upperBound = cleanupObligation?.cleanup_grace.automatic_cleanup_expires_at_ms ?? operation.plan.expires_at_ms;
     return (
         claim.effect_phase === "dispatch_started" &&
         claim.ambiguity_classification === "may_have_dispatched" &&
@@ -342,6 +412,7 @@ const exactStartedForIntent = (
         claim.request_kind === binding.request_kind &&
         claim.request_method === binding.request_method &&
         claim.request_method === intent.method &&
+        intent.window_class === binding.window_class &&
         claim.transcript_sequence === intent.sequence &&
         claim.request_digest === intent.request_digest &&
         claim.request_path_digest === intent.path_digest &&
@@ -349,25 +420,28 @@ const exactStartedForIntent = (
         claim.dispatch_started_at_ms === intent.dispatch_started_at_ms &&
         claim.response_status === null &&
         claim.response_digest === null &&
+        claim.cleanup_obligation_digest === (cleanupObligation?.obligation_digest ?? null) &&
         claim.dispatch_started_at_ms !== null &&
         claim.journal_revision < 255 &&
-        claim.intent_observed_at_ms >= Math.max(operation.plan.not_before_ms, operation.updated_at_ms) &&
+        claim.intent_observed_at_ms >= lowerBound &&
         claim.dispatch_started_at_ms >= claim.intent_observed_at_ms &&
-        claim.dispatch_started_at_ms < operation.plan.expires_at_ms
+        claim.dispatch_started_at_ms < upperBound
     );
 };
 
 const contextMatchesBinding = (
     context: D1ProbeCloudflareWorkerCanaryResponseCaptureContextV1,
     intent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1,
-    operation: D1ProbeCloudflareWorkerCanaryOperationV1
+    operation: D1ProbeCloudflareWorkerCanaryOperationV1,
+    cleanupObligation: D1ProbeCloudflareWorkerCanaryCleanupObligationV1 | null
 ): boolean =>
     context.transcript_sequence === intent.sequence &&
     context.request_method === intent.method &&
     context.request_path_digest === intent.path_digest &&
     context.request_digest === intent.request_digest &&
     context.caller_asserted_response_observed_at_ms >= intent.dispatch_started_at_ms &&
-    context.caller_asserted_response_observed_at_ms < operation.plan.expires_at_ms;
+    context.caller_asserted_response_observed_at_ms <
+        (cleanupObligation?.cleanup_grace.automatic_cleanup_expires_at_ms ?? operation.plan.expires_at_ms);
 
 const assertLease = async (
     dependencies: D1ProbeCloudflareWorkerCanaryResponseClaimsTestOnlyDependenciesV1,
@@ -410,6 +484,7 @@ const readExactStartedHead = async (
     nonceCommitment: string,
     workflowStep: WorkflowStepV1,
     intent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1,
+    cleanupObligation: D1ProbeCloudflareWorkerCanaryCleanupObligationV1 | null,
     expectedClaimDigest?: string,
     expectedLeaseEpoch?: { readonly generation: number; readonly record_digest: string }
 ): Promise<D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1 | null> => {
@@ -420,7 +495,15 @@ const readExactStartedHead = async (
         (expectedLeaseEpoch !== undefined &&
             (head.lease_generation !== expectedLeaseEpoch.generation ||
                 head.lease_record_digest !== expectedLeaseEpoch.record_digest)) ||
-        !exactStartedForIntent(head, operation, operationDigest, nonceCommitment, workflowStep, intent)
+        !exactStartedForIntent(
+            head,
+            operation,
+            operationDigest,
+            nonceCommitment,
+            workflowStep,
+            intent,
+            cleanupObligation
+        )
     ) {
         return null;
     }
@@ -449,6 +532,7 @@ const makeResponseDraft = (
     execution_nonce_commitment: started.execution_nonce_commitment,
     lease_generation: started.lease_generation,
     lease_record_digest: started.lease_record_digest,
+    cleanup_obligation_digest: started.cleanup_obligation_digest,
     workflow_step: started.workflow_step,
     request_kind: started.request_kind,
     request_method: started.request_method,
@@ -475,6 +559,7 @@ const archiveContext = (
     operation_revision: claim.operation_revision,
     operation_state: claim.operation_state,
     operation_record_digest: claim.operation_record_digest,
+    cleanup_obligation_digest: claim.cleanup_obligation_digest,
     claim_digest: claim.claim_digest,
     journal_revision: claim.journal_revision,
     transcript_sequence: claim.transcript_sequence,
@@ -500,6 +585,7 @@ const exactArchiveReceipt = (
     result.receipt.schema_version === 1 &&
     result.receipt.kind === "untrusted_d1_probe_cloudflare_worker_api_canary_response_archive_receipt" &&
     result.receipt.plan_digest === claim.plan_digest &&
+    result.receipt.cleanup_obligation_digest === claim.cleanup_obligation_digest &&
     result.receipt.claim_digest === claim.claim_digest &&
     result.receipt.journal_revision === claim.journal_revision &&
     result.receipt.transcript_sequence === claim.transcript_sequence &&
@@ -577,6 +663,34 @@ const createWithDependencies = async (
             commitD1ProbeCloudflareWorkerCanaryExecutionNonceV1(operation.execution_nonce),
         ]);
         if (operationDigest === null || nonceCommitment === null) return denied();
+        let cleanupObligation: D1ProbeCloudflareWorkerCanaryCleanupObligationV1 | null = null;
+        if (workflowBindings[workflowStep].window_class === "cleanup") {
+            const read = await dependencies.read_cleanup_obligation(operation.plan.plan_digest, nonceCommitment);
+            if (
+                !read.success ||
+                !matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1(
+                    read.obligation,
+                    operation,
+                    nonceCommitment
+                )
+            ) {
+                return denied();
+            }
+            cleanupObligation = read.obligation;
+        }
+        const reassertCleanupObligation = async (): Promise<boolean> => {
+            if (cleanupObligation === null) return true;
+            const read = await dependencies.read_cleanup_obligation(operation.plan.plan_digest, nonceCommitment);
+            return (
+                read.success &&
+                read.obligation.obligation_digest === cleanupObligation.obligation_digest &&
+                matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1(
+                    read.obligation,
+                    operation,
+                    nonceCommitment
+                )
+            );
+        };
         const dispatchClaims = await dependencies.create_dispatch_claims({
             operation,
             driver_lease_owner: owner,
@@ -623,6 +737,7 @@ const createWithDependencies = async (
                 if (intent === null) return failCapture();
                 await dispatchClaims.record_dispatch(intent);
                 if (discardRequested || privateKey === null) return failCapture();
+                if (!(await reassertCleanupObligation())) return failCapture();
                 const leaseEpoch = await assertLease(dependencies, owner);
                 if (leaseEpoch === null) return failCapture();
                 const started = await readExactStartedHead(
@@ -632,6 +747,7 @@ const createWithDependencies = async (
                     nonceCommitment,
                     workflowStep,
                     intent,
+                    cleanupObligation,
                     undefined,
                     leaseEpoch
                 );
@@ -644,6 +760,7 @@ const createWithDependencies = async (
                 ) {
                     failCapture();
                 }
+                if (!(await reassertCleanupObligation())) return failCapture();
                 boundIntent = intent;
                 boundStartedDigest = started.claim_digest;
                 boundLeaseEpoch = leaseEpoch;
@@ -686,7 +803,7 @@ const createWithDependencies = async (
                 if (localKey === null) failCapture();
                 const context = contextFrom(contextInput);
                 if (context === null) return failCapture();
-                if (!contextMatchesBinding(context, intent, operation)) return failCapture();
+                if (!contextMatchesBinding(context, intent, operation, cleanupObligation)) return failCapture();
                 if (!(responseBytesInput instanceof Uint8Array)) return failCapture();
                 if (
                     responseBytesInput.byteLength >
@@ -699,6 +816,7 @@ const createWithDependencies = async (
                     failCapture();
                 }
                 if (!(await assertLease(dependencies, owner))) failCapture();
+                if (!(await reassertCleanupObligation())) failCapture();
                 requireCaptureActive();
                 const started = await readExactStartedHead(
                     dependencies,
@@ -707,6 +825,7 @@ const createWithDependencies = async (
                     nonceCommitment,
                     workflowStep,
                     intent,
+                    cleanupObligation,
                     startedDigest,
                     leaseEpoch
                 );
@@ -722,6 +841,7 @@ const createWithDependencies = async (
                 }
                 requireCaptureActive();
                 if (!(await assertLease(dependencies, owner))) failCapture();
+                if (!(await reassertCleanupObligation())) failCapture();
                 requireCaptureActive();
                 const archived = await dependencies.archive_response_preimage(
                     responseClaim,
@@ -732,6 +852,7 @@ const createWithDependencies = async (
                 requireCaptureActive();
                 if (!exactArchiveReceipt(archived, responseClaim, responseBytes.byteLength)) failCapture();
                 if (!(await assertLease(dependencies, owner))) failCapture();
+                if (!(await reassertCleanupObligation())) failCapture();
                 requireCaptureActive();
                 const unchangedStarted = await readExactStartedHead(
                     dependencies,
@@ -740,12 +861,14 @@ const createWithDependencies = async (
                     nonceCommitment,
                     workflowStep,
                     intent,
+                    cleanupObligation,
                     started.claim_digest,
                     leaseEpoch
                 );
                 if (unchangedStarted === null) return failCapture();
                 requireCaptureActive();
                 if (!(await assertLease(dependencies, owner))) failCapture();
+                if (!(await reassertCleanupObligation())) failCapture();
                 requireCaptureActive();
                 const appended = await dependencies.append_effect_claim(responseClaim);
                 requireCaptureActive();
@@ -764,6 +887,7 @@ const createWithDependencies = async (
                 }
                 requireCaptureActive();
                 if (!(await assertLease(dependencies, owner))) failCapture();
+                if (!(await reassertCleanupObligation())) failCapture();
                 requireCaptureActive();
                 state = "finished";
             } catch {

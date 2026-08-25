@@ -44,11 +44,13 @@ export interface D1ProbeCloudflareWorkerCanaryBaseRecoveryV1 {
     readonly claim_journal_revision: number | null;
     readonly claim_digest: string | null;
     readonly claim_effect_phase: string | null;
+    readonly claim_cleanup_obligation_digest: string | null;
     readonly driver_lease_generation: number | null;
     readonly driver_lease_record_digest: string | null;
     readonly archive_record_count: number;
     readonly archive_head_claim_digest: string | null;
     readonly archive_head_record_digest: string | null;
+    readonly archive_head_cleanup_obligation_digest: string | null;
     readonly mutation_replay_allowed: false;
     readonly cleanup_authorized: false;
     readonly recovery_action_authorized: false;
@@ -93,11 +95,13 @@ const report = (
         claim_journal_revision: consistency?.claim_journal_revision ?? null,
         claim_digest: consistency?.claim_digest ?? null,
         claim_effect_phase: consistency?.claim_effect_phase ?? null,
+        claim_cleanup_obligation_digest: consistency?.claim_cleanup_obligation_digest ?? null,
         driver_lease_generation: consistency?.driver_lease_generation ?? null,
         driver_lease_record_digest: consistency?.driver_lease_record_digest ?? null,
         archive_record_count: records.length,
         archive_head_claim_digest: archiveHead?.claim_digest ?? null,
         archive_head_record_digest: archiveHead?.archive_record_digest ?? null,
+        archive_head_cleanup_obligation_digest: archiveHead?.cleanup_obligation_digest ?? null,
         mutation_replay_allowed: false,
         cleanup_authorized: false,
         recovery_action_authorized: false,
@@ -118,6 +122,7 @@ const exactArchiveBinding = (
 ): boolean =>
     binding.journal_revision === record.journal_revision &&
     binding.claim_digest === record.claim_digest &&
+    binding.cleanup_obligation_digest === record.cleanup_obligation_digest &&
     binding.transcript_sequence === record.transcript_sequence &&
     binding.response_status === record.response_status &&
     binding.response_digest === record.response_digest;
@@ -240,6 +245,7 @@ const classify = (
             ahead !== undefined &&
             consistency.claim_effect_phase === "dispatch_started" &&
             consistency.claim_journal_revision !== null &&
+            ahead.cleanup_obligation_digest === consistency.claim_cleanup_obligation_digest &&
             ahead.journal_revision === consistency.claim_journal_revision + 1
         ) {
             return report(

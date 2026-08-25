@@ -357,6 +357,7 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-consistency.test.ts",
             new Set([
+                "./cloudflare-worker-canary-cleanup-obligation.js",
                 "./cloudflare-worker-canary-consistency.js",
                 "./cloudflare-worker-canary-driver-lease.js",
                 "./cloudflare-worker-canary-effect-journal.js",
@@ -376,6 +377,8 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-archive-reconciliation.ts",
             new Set([
+                "./cloudflare-worker-canary-cleanup-grace.js",
+                "./cloudflare-worker-canary-cleanup-obligation.js",
                 "./cloudflare-worker-canary-consistency.js",
                 "./cloudflare-worker-canary-driver-lease.js",
                 "./cloudflare-worker-canary-effect-journal.js",
@@ -398,6 +401,7 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.ts",
             new Set([
+                "./cloudflare-worker-canary-cleanup-obligation.js",
                 "./cloudflare-worker-canary-consistency.js",
                 "./cloudflare-worker-canary-driver-lease.js",
                 "./cloudflare-worker-canary-effect-journal.js",
@@ -408,6 +412,8 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.test.ts",
             new Set([
+                "./cloudflare-worker-canary-cleanup-grace.js",
+                "./cloudflare-worker-canary-cleanup-obligation.js",
                 "./cloudflare-worker-canary-consistency.js",
                 "./cloudflare-worker-canary-dispatch-claims.js",
                 "./cloudflare-worker-canary-driver-lease.js",
@@ -420,6 +426,7 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-response-claims.ts",
             new Set([
+                "./cloudflare-worker-canary-cleanup-obligation.js",
                 "./cloudflare-worker-canary-consistency.js",
                 "./cloudflare-worker-canary-dispatch-claims.js",
                 "./cloudflare-worker-canary-driver-lease.js",
@@ -432,6 +439,8 @@ function checkD1ProbeWorkerApiCanaryBoundary(file, content, imports) {
         [
             "packages/d1-probe-operator/src/cloudflare-worker-canary-response-claims.test.ts",
             new Set([
+                "./cloudflare-worker-canary-cleanup-grace.js",
+                "./cloudflare-worker-canary-cleanup-obligation.js",
                 "./cloudflare-worker-canary-consistency.js",
                 "./cloudflare-worker-canary-driver-lease.js",
                 "./cloudflare-worker-canary-effect-journal.js",
@@ -632,8 +641,18 @@ function checkD1ProbeCanaryCleanupObligationImportBoundary(file, specifier) {
     const resolvedImport = path.resolve(path.dirname(file), specifier).replace(/\.(?:js|ts)$/u, "");
     const obligationModule = path.resolve("packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup-obligation");
     if (resolvedImport !== obligationModule) return;
-    if (file !== "packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup-obligation.test.ts") {
-        errors.push(`${file}: the cleanup obligation record remains unwired outside its focused test`);
+    const reviewedConsumers = new Set([
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-cleanup-obligation.test.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-dispatch-claims.test.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-response-claims.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-response-claims.test.ts",
+        "packages/d1-probe-operator/src/cloudflare-worker-canary-archive-reconciliation.ts",
+    ]);
+    if (!reviewedConsumers.has(file)) {
+        errors.push(
+            `${file}: cleanup obligations may be consumed only by reviewed unwired claim and recovery adapters`
+        );
     }
 }
 
@@ -919,6 +938,13 @@ function checkD1ProbeCanaryEffectJournalBoundary(file, content, imports) {
         !content.includes('"d1-probe-canary-effect-journal"') ||
         !content.includes("const MAX_CLAIM_BYTES_V1 = 32 * 1024") ||
         !content.includes("const MAX_JOURNAL_REVISIONS_V1 = 256") ||
+        !content.includes("cleanup_obligation_digest: DigestV1Schema.nullable()") ||
+        !content.includes(
+            "cleanupWorkflowSteps.has(claim.workflow_step) !== (claim.cleanup_obligation_digest !== null)"
+        ) ||
+        !content.includes("left.cleanup_obligation_digest === right.cleanup_obligation_digest") ||
+        !content.includes("current.cleanup_obligation_digest !== null") ||
+        !content.includes("next.cleanup_obligation_digest !== current.cleanup_obligation_digest") ||
         !content.includes("canonicalizeJsonV1(claim as CanonicalJsonValueV1)") ||
         !content.includes("await handle.sync()") ||
         !content.includes("await link(tempPath, finalPath)") ||
@@ -1106,7 +1132,9 @@ function checkD1ProbeCanaryConsistencyBoundary(file, content, imports) {
         !content.includes("driver_lease_generation: lease?.generation ?? null") ||
         !content.includes("driver_lease_record_digest: lease?.record_digest ?? null") ||
         !content.includes("driver_lease_state: lease?.state ?? null") ||
+        !content.includes("claim_cleanup_obligation_digest: claim?.cleanup_obligation_digest ?? null") ||
         !content.includes("response_claim_bindings: Object.freeze([...responseClaimBindings])") ||
+        !content.includes("cleanup_obligation_digest: claim.cleanup_obligation_digest") ||
         !content.includes('claim.effect_phase === "response_observed"') ||
         !content.includes("transcript_sequence: claim.transcript_sequence") ||
         !content.includes("response_status: claim.response_status") ||
@@ -1203,6 +1231,12 @@ function checkD1ProbeCanaryResponseArchiveBoundary(file, content, imports) {
         !content.includes('"d1-probe-canary-response-archive"') ||
         !content.includes("validateD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1") ||
         !content.includes('claim.effect_phase !== "response_observed"') ||
+        !content.includes("cleanup_obligation_digest: DigestV1Schema.nullable()") ||
+        !content.includes("context.cleanup_obligation_digest === claim.cleanup_obligation_digest") ||
+        !content.includes("cleanup_obligation_digest: envelope.cleanup_obligation_digest") ||
+        !content.includes("envelope.cleanup_obligation_digest === started.cleanup_obligation_digest") ||
+        !content.includes("envelope.cleanup_obligation_digest === record.cleanup_obligation_digest") ||
+        !content.includes("cleanup_obligation_digest: envelope.cleanup_obligation_digest") ||
         !content.includes("caller_asserted_response_content_type") ||
         !content.includes('caller_asserted_response_content_encoding: z.literal("identity").nullable()') ||
         !content.includes("caller_asserted_response_observed_at_ms") ||
@@ -1308,6 +1342,7 @@ function checkD1ProbeCanaryDispatchClaimsBoundary(file, content, imports) {
     }
     if (file !== source) return;
     const allowedImports = new Set([
+        "./cloudflare-worker-canary-cleanup-obligation.js",
         "./cloudflare-worker-canary-consistency.js",
         "./cloudflare-worker-canary-driver-lease.js",
         "./cloudflare-worker-canary-effect-journal.js",
@@ -1337,10 +1372,14 @@ function checkD1ProbeCanaryDispatchClaimsBoundary(file, content, imports) {
         appendCalls !== 2 ||
         !content.includes('afterIntent.classification !== "claim_behind"') ||
         !content.includes('afterStarted.classification !== "ambiguous_dispatch"') ||
-        !content.includes(
-            "intent.intent_observed_at_ms < Math.max(operation.plan.not_before_ms, operation.updated_at_ms)"
-        ) ||
-        !content.includes("intent.dispatch_started_at_ms >= operation.plan.expires_at_ms") ||
+        !content.includes('window_class: "cleanup"') ||
+        !content.includes("readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyV1") ||
+        !content.includes("matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1") ||
+        !content.includes("cleanupObligation?.cleanup_grace.automatic_cleanup_not_before_ms") ||
+        !content.includes("cleanupObligation?.cleanup_grace.automatic_cleanup_expires_at_ms") ||
+        !content.includes("cleanupObligation?.obligation_digest ?? null") ||
+        !content.includes("await reassertCleanupObligation()") ||
+        !content.includes("snapshot.claim_cleanup_obligation_digest === claim.cleanup_obligation_digest") ||
         !content.includes("before.claim_journal_revision <= 252") ||
         !content.includes("createWithDependencies(input, fixedDependencies)") ||
         !content.includes("caller_mutation_authority: false") ||
@@ -1349,7 +1388,6 @@ function checkD1ProbeCanaryDispatchClaimsBoundary(file, content, imports) {
         !content.includes("eligible_for_attestation: false") ||
         !content.includes("lifecycle_advance_allowed: false") ||
         !content.includes("gate_promotion_allowed: false") ||
-        content.includes('window_class: "cleanup"') ||
         /\b(?:fetch|FormData|WebSocket|EventSource|XMLHttpRequest|child_process|spawn|execFile|process|Authorization|Bearer|api_token|hmac_key_base64url|TestOnlyStore)\b/u.test(
             content
         ) ||
@@ -1358,7 +1396,7 @@ function checkD1ProbeCanaryDispatchClaimsBoundary(file, content, imports) {
         )
     ) {
         errors.push(
-            `${file}: the dispatch-claim adapter must remain forward-only, lease/head fenced, one-use, unwired, and non-authoritative`
+            `${file}: the dispatch-claim adapter must remain obligation-bound, lease/head fenced, one-use, unwired, and non-authoritative`
         );
     }
 }
@@ -1387,6 +1425,7 @@ function checkD1ProbeCanaryResponseClaimsBoundary(file, content, imports) {
     if (file !== source) return;
     const allowedImports = new Set([
         "node:crypto",
+        "./cloudflare-worker-canary-cleanup-obligation.js",
         "./cloudflare-worker-canary-consistency.js",
         "./cloudflare-worker-canary-dispatch-claims.js",
         "./cloudflare-worker-canary-driver-lease.js",
@@ -1422,12 +1461,15 @@ function checkD1ProbeCanaryResponseClaimsBoundary(file, content, imports) {
         !content.includes("clearBytes(localKey)") ||
         !content.includes("clearBytes(responseBytes)") ||
         !content.includes("claim.journal_revision < 255") ||
-        !content.includes(
-            "claim.intent_observed_at_ms >= Math.max(operation.plan.not_before_ms, operation.updated_at_ms)"
-        ) ||
-        !content.includes("claim.dispatch_started_at_ms < operation.plan.expires_at_ms") ||
+        !content.includes("claim.cleanup_obligation_digest === (cleanupObligation?.obligation_digest ?? null)") ||
+        !content.includes("cleanupObligation?.cleanup_grace.automatic_cleanup_not_before_ms") ||
+        !content.includes("cleanupObligation?.cleanup_grace.automatic_cleanup_expires_at_ms") ||
+        !content.includes("readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyV1") ||
+        !content.includes("matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1") ||
+        !content.includes("await reassertCleanupObligation()") ||
+        !content.includes("cleanup_obligation_digest: claim.cleanup_obligation_digest") ||
+        !content.includes("result.receipt.cleanup_obligation_digest === claim.cleanup_obligation_digest") ||
         !content.includes("context.caller_asserted_response_observed_at_ms >= intent.dispatch_started_at_ms") ||
-        !content.includes("context.caller_asserted_response_observed_at_ms < operation.plan.expires_at_ms") ||
         !content.includes('consistency.classification === "ambiguous_dispatch"') ||
         !content.includes('consistency.classification === "exact_sync"') ||
         !content.includes("createWithDependencies(input, fixedDependencies)") ||
@@ -1479,6 +1521,7 @@ function checkD1ProbeCanaryBaseRecoveryBoundary(file, content, imports) {
     }
     if (file !== source) return;
     const allowedImports = new Set([
+        "./cloudflare-worker-canary-cleanup-obligation.js",
         "./cloudflare-worker-canary-consistency.js",
         "./cloudflare-worker-canary-response-archive.js",
     ]);
@@ -1489,6 +1532,10 @@ function checkD1ProbeCanaryBaseRecoveryBoundary(file, content, imports) {
         consistencyReads !== 2 ||
         archiveReads !== 2 ||
         !content.includes("exactArchiveBinding(binding, record)") ||
+        !content.includes("binding.cleanup_obligation_digest === record.cleanup_obligation_digest") ||
+        !content.includes("ahead.cleanup_obligation_digest === consistency.claim_cleanup_obligation_digest") ||
+        !content.includes("claim_cleanup_obligation_digest: consistency?.claim_cleanup_obligation_digest ?? null") ||
+        !content.includes("archive_head_cleanup_obligation_digest: archiveHead?.cleanup_obligation_digest ?? null") ||
         !content.includes('consistency.claim_effect_phase === "dispatch_started"') ||
         !content.includes('consistency.claim_effect_phase === "dispatch_ambiguous"') ||
         !content.includes('"archive_ahead_requires_keyed_reconciliation"') ||
@@ -1544,6 +1591,7 @@ function checkD1ProbeCanaryArchiveReconciliationBoundary(file, content, imports)
     }
     if (file !== source) return;
     const allowedImports = new Set([
+        "./cloudflare-worker-canary-cleanup-obligation.js",
         "./cloudflare-worker-canary-consistency.js",
         "./cloudflare-worker-canary-driver-lease.js",
         "./cloudflare-worker-canary-effect-journal.js",
@@ -1567,11 +1615,15 @@ function checkD1ProbeCanaryArchiveReconciliationBoundary(file, content, imports)
         !content.includes('head.effect_phase === "dispatch_started"') ||
         !content.includes("consistency.claim_lease_generation === head.lease_generation") ||
         !content.includes("consistency.claim_lease_record_digest === head.lease_record_digest") ||
+        !content.includes("consistency.claim_cleanup_obligation_digest === head.cleanup_obligation_digest") ||
+        !content.includes("readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyV1") ||
+        !content.includes("matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1") ||
+        !content.includes("archiveRecord.cleanup_obligation_digest !== head.cleanup_obligation_digest") ||
+        !content.includes("resolved.receipt.cleanup_obligation_digest !== head.cleanup_obligation_digest") ||
         !content.includes("head.journal_revision < 255") ||
-        !content.includes(
-            "head.intent_observed_at_ms >= Math.max(operation.plan.not_before_ms, operation.updated_at_ms)"
-        ) ||
-        !content.includes("head.dispatch_started_at_ms < operation.plan.expires_at_ms") ||
+        !content.includes("cleanupObligation?.cleanup_grace.automatic_cleanup_not_before_ms") ||
+        !content.includes("cleanupObligation?.cleanup_grace.automatic_cleanup_expires_at_ms") ||
+        !content.includes("await cleanupObligationIsCurrent()") ||
         !content.includes("ahead.length !== 1") ||
         !content.includes("archiveRecord.journal_revision !== head.journal_revision + 1") ||
         !content.includes("stableSignature(first) !== stableSignature(second)") ||
@@ -2188,6 +2240,7 @@ const schema = {
     operation_record_digest: DigestV1Schema,
     lease_generation: LeaseGenerationV1Schema,
     lease_record_digest: DigestV1Schema,
+    cleanup_obligation_digest: DigestV1Schema.nullable(),
     request_method: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestMethodV1Schema,
     intent_observed_at_ms: SafeTimeV1Schema,
     dispatch_started_at_ms: SafeTimeV1Schema.nullable(),
@@ -2202,6 +2255,10 @@ claim.dispatch_started_at_ms < claim.intent_observed_at_ms;
 left.intent_observed_at_ms === right.intent_observed_at_ms;
 left.lease_generation === right.lease_generation;
 left.lease_record_digest === right.lease_record_digest;
+cleanupWorkflowSteps.has(claim.workflow_step) !== (claim.cleanup_obligation_digest !== null);
+left.cleanup_obligation_digest === right.cleanup_obligation_digest;
+current.cleanup_obligation_digest !== null;
+next.cleanup_obligation_digest !== current.cleanup_obligation_digest;
 next.lease_generation < current.lease_generation;
 next.dispatch_started_at_ms !== current.dispatch_started_at_ms;
 next.intent_observed_at_ms < current.dispatch_started_at_ms;
@@ -2228,6 +2285,17 @@ checkD1ProbeCanaryEffectJournalBoundary(
 if (errors.length !== beforeCanaryEffectJournalPositiveSelfTest) {
     errors.push("Worker API canary effect journal self-test rejected its fixed bounded contract");
 }
+
+const beforeCanaryEffectJournalCleanupBindingSelfTest = errors.length;
+checkD1ProbeCanaryEffectJournalBoundary(
+    "packages/d1-probe-operator/src/cloudflare-worker-canary-effect-journal.ts",
+    canaryEffectJournalBoundaryFixture.replace("cleanup_obligation_digest: DigestV1Schema.nullable(),", ""),
+    ["node:fs/promises"]
+);
+if (errors.length !== beforeCanaryEffectJournalCleanupBindingSelfTest + 1) {
+    errors.push("Worker API canary effect journal self-test did not pin cleanup obligation digests");
+}
+errors.splice(beforeCanaryEffectJournalCleanupBindingSelfTest, 1);
 
 const beforeCanaryEffectJournalTimingSelfTest = errors.length;
 checkD1ProbeCanaryEffectJournalBoundary(
@@ -2381,11 +2449,13 @@ leaseDigests[claim.lease_generation] !== claim.lease_record_digest;
 driver_lease_generation: lease?.generation ?? null;
 driver_lease_record_digest: lease?.record_digest ?? null;
 driver_lease_state: lease?.state ?? null;
+claim_cleanup_obligation_digest: claim?.cleanup_obligation_digest ?? null;
 response_claim_bindings: Object.freeze([...responseClaimBindings]);
 claim.effect_phase === "response_observed";
 transcript_sequence: claim.transcript_sequence;
 response_status: claim.response_status;
 response_digest: claim.response_digest;
+cleanup_obligation_digest: claim.cleanup_obligation_digest;
 claimHead.effect_phase !== "response_observed";
 claimHead.effect_phase !== "dispatch_ambiguous";
 const report = {
@@ -2578,6 +2648,17 @@ if (errors.length !== beforeCanaryDispatchClaimsCapacitySelfTest + 1) {
     errors.push("Worker API canary dispatch-claim self-test did not reserve terminal journal capacity");
 }
 errors.splice(beforeCanaryDispatchClaimsCapacitySelfTest, 1);
+
+const beforeCanaryDispatchCleanupBindingSelfTest = errors.length;
+checkD1ProbeCanaryDispatchClaimsBoundary(
+    canaryDispatchClaimsSourcePath,
+    canaryDispatchClaimsSource.replace("cleanupObligation?.obligation_digest ?? null", "null"),
+    canaryDispatchClaimsImports
+);
+if (errors.length !== beforeCanaryDispatchCleanupBindingSelfTest + 1) {
+    errors.push("Worker API canary dispatch-claim self-test did not pin cleanup obligation binding");
+}
+errors.splice(beforeCanaryDispatchCleanupBindingSelfTest, 1);
 
 for (const specifier of [
     "./cloudflare-worker-canary-dispatch-claims.js",

@@ -26,6 +26,7 @@ export interface D1ProbeCloudflareWorkerCanaryResponseClaimBindingV1 {
     readonly transcript_sequence: number;
     readonly response_status: number;
     readonly response_digest: string;
+    readonly cleanup_obligation_digest: string | null;
 }
 
 export interface D1ProbeCloudflareWorkerCanaryConsistencyV1 {
@@ -50,6 +51,7 @@ export interface D1ProbeCloudflareWorkerCanaryConsistencyV1 {
     readonly claim_execution_nonce_commitment: string | null;
     readonly claim_lease_generation: number | null;
     readonly claim_lease_record_digest: string | null;
+    readonly claim_cleanup_obligation_digest: string | null;
     readonly claim_workflow_step: string | null;
     readonly claim_effect_phase: string | null;
     readonly claim_ambiguity_classification: string | null;
@@ -79,6 +81,7 @@ interface ClaimProjectionV1 {
     readonly nonce_commitment: string;
     readonly lease_generation: number;
     readonly lease_record_digest: string;
+    readonly cleanup_obligation_digest: string | null;
     readonly workflow_step: string;
     readonly effect_phase: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1["effect_phase"];
     readonly ambiguity_classification: string;
@@ -151,6 +154,7 @@ const report = (
     claim_execution_nonce_commitment: claim?.nonce_commitment ?? null,
     claim_lease_generation: claim?.lease_generation ?? null,
     claim_lease_record_digest: claim?.lease_record_digest ?? null,
+    claim_cleanup_obligation_digest: claim?.cleanup_obligation_digest ?? null,
     claim_workflow_step: claim?.workflow_step ?? null,
     claim_effect_phase: claim?.effect_phase ?? null,
     claim_ambiguity_classification: claim?.ambiguity_classification ?? null,
@@ -193,6 +197,7 @@ const projectClaim = (claim: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1
     nonce_commitment: claim.execution_nonce_commitment,
     lease_generation: claim.lease_generation,
     lease_record_digest: claim.lease_record_digest,
+    cleanup_obligation_digest: claim.cleanup_obligation_digest,
     workflow_step: claim.workflow_step,
     effect_phase: claim.effect_phase,
     ambiguity_classification: claim.ambiguity_classification,
@@ -350,6 +355,7 @@ const classifyStableSnapshot = async (
                     transcript_sequence: claim.transcript_sequence,
                     response_status: claim.response_status,
                     response_digest: claim.response_digest,
+                    cleanup_obligation_digest: claim.cleanup_obligation_digest,
                 })
             );
         }

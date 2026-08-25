@@ -53,6 +53,7 @@ const draft = (
     execution_nonce_commitment: randomDigest(),
     lease_generation: 0,
     lease_record_digest: randomDigest(),
+    cleanup_obligation_digest: null,
     workflow_step: "prepared_worker_list",
     request_kind: "inspect_worker",
     request_method: "GET",
@@ -108,6 +109,16 @@ const nextRecord = async (
                       (current.dispatch_started_at_ms ?? current.intent_observed_at_ms) + 1,
                   dispatch_started_at_ms: null,
               }
+            : {}),
+        ...([
+            "cleanup_worker_readback",
+            "cleanup_worker_list",
+            "delete_worker",
+            "deleted_worker_readback",
+            "deleted_worker_list",
+        ].includes(overrides.workflow_step ?? current.workflow_step) &&
+        overrides.cleanup_obligation_digest === undefined
+            ? { cleanup_obligation_digest: current.cleanup_obligation_digest ?? randomDigest() }
             : {}),
         ...overrides,
     } as Partial<D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimDraftV1>);
@@ -271,6 +282,34 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
                 })
             )
         ).resolves.toBeNull();
+    });
+
+    it("binds cleanup workflow claims to exactly one non-null cleanup obligation digest", async () => {
+        await expect(
+            buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(
+                draft({ cleanup_obligation_digest: randomDigest() })
+            )
+        ).resolves.toBeNull();
+        await expect(
+            buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(
+                draft({
+                    operation_state: "cleanup_reconciling",
+                    workflow_step: "cleanup_worker_readback",
+                    request_kind: "inspect_cleanup",
+                    cleanup_obligation_digest: null,
+                })
+            )
+        ).resolves.toBeNull();
+        await expect(
+            buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(
+                draft({
+                    operation_state: "cleanup_reconciling",
+                    workflow_step: "cleanup_worker_readback",
+                    request_kind: "inspect_cleanup",
+                    cleanup_obligation_digest: randomDigest(),
+                })
+            )
+        ).resolves.not.toBeNull();
     });
 
     it("commits the execution nonce without retaining the nonce", async () => {
@@ -638,7 +677,29 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
             request_kind: "inspect_cleanup",
             request_method: "GET",
         });
-        const cleanupRead = await appendTerminalRequest(cleanupReadback);
+        expect((await appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(cleanupReadback)).success).toBe(true);
+        const substitutedCleanupObligation = await nextRecord(cleanupReadback, {
+            effect_phase: "dispatch_started",
+            dispatch_started_at_ms: cleanupReadback.intent_observed_at_ms + 1,
+            cleanup_obligation_digest: randomDigest(),
+            ambiguity_classification: "may_have_dispatched",
+        });
+        await expect(appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(substitutedCleanupObligation)).resolves.toEqual(
+            { success: false, code: "journal_transition_denied" }
+        );
+        const cleanupStarted = await nextRecord(cleanupReadback, {
+            effect_phase: "dispatch_started",
+            dispatch_started_at_ms: cleanupReadback.intent_observed_at_ms + 1,
+            ambiguity_classification: "may_have_dispatched",
+        });
+        expect((await appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(cleanupStarted)).success).toBe(true);
+        const cleanupRead = await nextRecord(cleanupStarted, {
+            effect_phase: "response_observed",
+            response_status: 200,
+            response_digest: randomDigest(),
+            ambiguity_classification: "none",
+        });
+        expect((await appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(cleanupRead)).success).toBe(true);
         const deleteWorker = await nextIntent(cleanupRead, {
             operation_revision: 8,
             operation_state: "delete_dispatching",

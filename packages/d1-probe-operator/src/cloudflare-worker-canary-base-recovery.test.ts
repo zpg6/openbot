@@ -37,6 +37,7 @@ const consistency = (
     claim_execution_nonce_commitment: digest("c"),
     claim_lease_generation: 0,
     claim_lease_record_digest: digest("d"),
+    claim_cleanup_obligation_digest: null,
     claim_workflow_step: "prepared_worker_list",
     claim_effect_phase: "response_observed",
     claim_ambiguity_classification: "none",
@@ -47,6 +48,7 @@ const consistency = (
             transcript_sequence: 1,
             response_status: 200,
             response_digest: digest("f"),
+            cleanup_obligation_digest: null,
         },
     ],
     effect_claims_authenticated: false,
@@ -64,6 +66,7 @@ const archiveRecord = (
 ): D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryRecordV1 => ({
     schema_version: 1,
     kind: "d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory_record",
+    cleanup_obligation_digest: null,
     claim_digest: digest("e"),
     journal_revision: 2,
     transcript_sequence: 1,
@@ -264,6 +267,7 @@ describe("Cloudflare Worker canary base recovery classification", () => {
     it("rejects substituted archive fields, extra archive records, and authority drift", async () => {
         const substitutions = [
             archive([archiveRecord({ response_status: 201 })]),
+            archive([archiveRecord({ cleanup_obligation_digest: digest("8") })]),
             archive([
                 archiveRecord(),
                 archiveRecord({ claim_digest: digest("9"), journal_revision: 5, transcript_sequence: 2 }),

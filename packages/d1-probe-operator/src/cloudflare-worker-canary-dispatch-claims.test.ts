@@ -6,6 +6,8 @@ import {
     digestD1ProbeCloudflareWorkerCanaryOperationRecordV1,
     type D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
 } from "./cloudflare-worker-canary-effect-journal.js";
+import { compileD1ProbeCloudflareWorkerCanaryCleanupCommandV1 } from "./cloudflare-worker-canary-cleanup-grace.js";
+import { compileD1ProbeCloudflareWorkerCanaryCleanupObligationV1 } from "./cloudflare-worker-canary-cleanup-obligation.js";
 import {
     createD1ProbeCloudflareWorkerCanaryDispatchClaimsWithDependenciesTestOnlyV1,
     type D1ProbeCloudflareWorkerCanaryDispatchClaimsTestOnlyDependenciesV1,
@@ -132,6 +134,7 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
         claim_execution_nonce_commitment: null,
         claim_lease_generation: null,
         claim_lease_record_digest: null,
+        claim_cleanup_obligation_digest: null,
         claim_workflow_step: null,
         claim_effect_phase: null,
         claim_ambiguity_classification: null,
@@ -152,6 +155,7 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
         claim_execution_nonce_commitment: claim.execution_nonce_commitment,
         claim_lease_generation: claim.lease_generation,
         claim_lease_record_digest: claim.lease_record_digest,
+        claim_cleanup_obligation_digest: claim.cleanup_obligation_digest,
         claim_workflow_step: claim.workflow_step,
         claim_effect_phase: claim.effect_phase,
         claim_ambiguity_classification: claim.ambiguity_classification,
@@ -208,6 +212,7 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
             }
             return { success: true, claim };
         },
+        read_cleanup_obligation: async () => ({ success: false, code: "obligation_not_found" }),
     };
     return {
         dependencies,
@@ -530,6 +535,71 @@ describe("Cloudflare Worker canary dispatch claims", () => {
             )
         ).resolves.toMatchObject({ success: false, authoritative: false });
         expect(harness.events).toEqual([]);
+    });
+
+    it("binds cleanup claims to one reasserted obligation and its separate grace window", async () => {
+        const preparedOperation = await prepared();
+        const compiledGrace = await compileD1ProbeCloudflareWorkerCanaryCleanupCommandV1(preparedOperation.plan, {
+            worker_id: null,
+            worker_id_commitment: null,
+            attempt_tag_commitment: digest("4"),
+        });
+        if (!compiledGrace.success) throw new Error(compiledGrace.code);
+        const compiledObligation = await compileD1ProbeCloudflareWorkerCanaryCleanupObligationV1(
+            preparedOperation,
+            compiledGrace.command.cleanup_grace
+        );
+        if (!compiledObligation.success) throw new Error(compiledObligation.code);
+        const cleanupOperation = {
+            ...preparedOperation,
+            revision: 1,
+            state: "cleanup_reconciling" as const,
+            updated_at_ms: 10_002,
+        };
+        const harness = await harnessFor(cleanupOperation);
+        harness.setAfterIntent({
+            ...harness.missing,
+            classification: "state_ahead",
+            missing_component: null,
+            claim_journal_revision: 2,
+            claim_digest: digest("6"),
+            claim_operation_revision: 0,
+            claim_operation_state: "prepared",
+            claim_operation_record_digest: compiledObligation.obligation.operation_record_digest,
+            claim_execution_nonce_commitment: compiledObligation.obligation.execution_nonce_commitment,
+            claim_lease_generation: ownerFor(cleanupOperation).generation,
+            claim_lease_record_digest: digest("5"),
+            claim_cleanup_obligation_digest: null,
+            claim_workflow_step: "shell_create",
+            claim_effect_phase: "response_observed",
+            claim_ambiguity_classification: "none",
+        });
+        let reads = 0;
+        const dependencies = {
+            ...harness.dependencies,
+            read_cleanup_obligation: async () => {
+                reads += 1;
+                return { success: true as const, obligation: compiledObligation.obligation };
+            },
+        };
+        const adapter = await makeAdapter(cleanupOperation, dependencies, "cleanup_worker_readback");
+        await expect(
+            adapter.record_dispatch(
+                canaryIntent({
+                    sequence: 2,
+                    window_class: "cleanup",
+                    intent_observed_at_ms: cleanupOperation.plan.expires_at_ms,
+                    dispatch_started_at_ms: cleanupOperation.plan.expires_at_ms,
+                })
+            )
+        ).resolves.toBeUndefined();
+        expect(reads).toBe(3);
+        expect(harness.claims).toHaveLength(2);
+        expect(
+            harness.claims.every(
+                claim => claim.cleanup_obligation_digest === compiledObligation.obligation.obligation_digest
+            )
+        ).toBe(true);
     });
 
     it("prevents fetch when durable recording rejects", async () => {

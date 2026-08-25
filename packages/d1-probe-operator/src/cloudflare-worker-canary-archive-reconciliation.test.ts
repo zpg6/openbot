@@ -147,6 +147,7 @@ const harness = async (takeover = false): Promise<HarnessV1> => {
         execution_nonce_commitment: nonceCommitment,
         lease_generation: dispatchLease.generation,
         lease_record_digest: dispatchLeaseDigest,
+        cleanup_obligation_digest: null,
         workflow_step: "prepared_worker_list",
         request_kind: "inspect_worker",
         request_method: "GET",
@@ -191,6 +192,7 @@ const harness = async (takeover = false): Promise<HarnessV1> => {
     const archiveRecord: D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryRecordV1 = {
         schema_version: 1,
         kind: "d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory_record",
+        cleanup_obligation_digest: observed.cleanup_obligation_digest,
         claim_digest: observed.claim_digest,
         journal_revision: observed.journal_revision,
         transcript_sequence: observed.transcript_sequence,
@@ -236,6 +238,7 @@ const harness = async (takeover = false): Promise<HarnessV1> => {
         claim_execution_nonce_commitment: nonceCommitment,
         claim_lease_generation: dispatchLease.generation,
         claim_lease_record_digest: dispatchLeaseDigest,
+        claim_cleanup_obligation_digest: null,
         claim_workflow_step: "prepared_worker_list",
         claim_effect_phase: phase === "started" ? "dispatch_started" : "response_observed",
         claim_ambiguity_classification: phase === "started" ? "may_have_dispatched" : "none",
@@ -249,6 +252,7 @@ const harness = async (takeover = false): Promise<HarnessV1> => {
                           transcript_sequence: observed.transcript_sequence,
                           response_status: 200,
                           response_digest: responseDigest,
+                          cleanup_obligation_digest: null,
                       },
                   ],
         effect_claims_authenticated: false,
@@ -316,6 +320,7 @@ const harness = async (takeover = false): Promise<HarnessV1> => {
                     schema_version: 1,
                     kind: "untrusted_d1_probe_cloudflare_worker_api_canary_keyed_archive_resolution_receipt",
                     plan_digest: observed.plan_digest,
+                    cleanup_obligation_digest: observed.cleanup_obligation_digest,
                     claim_digest: observed.claim_digest,
                     journal_revision: observed.journal_revision,
                     transcript_sequence: observed.transcript_sequence,
@@ -345,6 +350,7 @@ const harness = async (takeover = false): Promise<HarnessV1> => {
             appended = true;
             return { success: true, claim };
         },
+        read_cleanup_obligation: async () => ({ success: false, code: "obligation_not_found" }),
     };
     return {
         input: { operation: currentOperation, driver_lease_owner: owner, archive_key: new Uint8Array(32).fill(7) },
@@ -424,6 +430,33 @@ describe("Cloudflare Worker canary archive-ahead reconciliation", () => {
             remote_request_dispatched: false,
             mutation_replay_allowed: false,
         });
+    });
+
+    it("rejects an archive-ahead record with a substituted cleanup obligation digest", async () => {
+        const test = await harness();
+        const readArchive = test.dependencies.read_archive_inventory;
+        const dependencies: D1ProbeCloudflareWorkerCanaryArchiveAheadReconciliationTestOnlyDependenciesV1 = {
+            ...test.dependencies,
+            read_archive_inventory: async planDigest => {
+                const result = await readArchive(planDigest);
+                if (!result.success) return result;
+                return {
+                    success: true,
+                    inventory: {
+                        ...result.inventory,
+                        records: result.inventory.records.map(record => ({
+                            ...record,
+                            cleanup_obligation_digest: digest("8"),
+                        })),
+                    },
+                };
+            },
+        };
+        const append = vi.spyOn(dependencies, "append_effect_claim");
+        await expect(
+            reconcileD1ProbeCloudflareWorkerCanaryArchiveAheadWithDependenciesTestOnlyV1(test.input, dependencies)
+        ).resolves.toMatchObject({ success: false, remote_request_dispatched: false });
+        expect(append).not.toHaveBeenCalled();
     });
 
     it("denies a lease loss or local-head race before append", async () => {

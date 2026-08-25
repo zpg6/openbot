@@ -93,6 +93,31 @@ export type D1ProbeCloudflareWorkerCanaryCleanupObligationResultV1 =
     | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryCleanupObligationDenialV1 }
     | { readonly success: true; readonly obligation: D1ProbeCloudflareWorkerCanaryCleanupObligationV1 };
 
+export const matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1 = (
+    obligation: D1ProbeCloudflareWorkerCanaryCleanupObligationV1,
+    operation: z.infer<typeof D1ProbeCloudflareWorkerCanaryOperationV1Schema>,
+    executionNonceCommitment: string
+): boolean =>
+    obligation.plan_digest === operation.plan.plan_digest &&
+    obligation.execution_nonce_commitment === executionNonceCommitment &&
+    obligation.operation.revision === 0 &&
+    obligation.operation.state === "prepared" &&
+    obligation.operation.plan.plan_digest === operation.plan.plan_digest &&
+    obligation.operation.script_name === operation.script_name &&
+    obligation.operation.ownership_tag === operation.ownership_tag &&
+    obligation.operation.attempt_tag === operation.attempt_tag &&
+    obligation.operation.execution_nonce === operation.execution_nonce &&
+    obligation.cleanup_grace.plan_digest === operation.plan.plan_digest &&
+    obligation.cleanup_grace.worker_id === null &&
+    obligation.cleanup_grace.worker_id_commitment === null &&
+    obligation.cleanup_execution_authorized === false &&
+    obligation.caller_mutation_authority === false &&
+    obligation.authoritative === false &&
+    obligation.eligible_for_upload === false &&
+    obligation.eligible_for_attestation === false &&
+    obligation.lifecycle_advance_allowed === false &&
+    obligation.gate_promotion_allowed === false;
+
 const errorCode = (error: unknown): string | null =>
     typeof error === "object" && error !== null && "code" in error && typeof error.code === "string"
         ? error.code

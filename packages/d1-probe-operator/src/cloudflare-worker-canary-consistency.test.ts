@@ -152,6 +152,7 @@ const claimFor = async (
         execution_nonce_commitment: nonceCommitment,
         lease_generation: lease.generation,
         lease_record_digest: leaseRecordDigest,
+        cleanup_obligation_digest: null,
         workflow_step: "prepared_worker_list",
         request_kind: "inspect_worker",
         request_method: "GET",

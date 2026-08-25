@@ -30,6 +30,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.unregistered_runner_uses_shared_bounded_transport === true &&
             fixture.implementation?.caller_controlled_pre_dispatch_ordering_seam_implemented === true &&
             fixture.implementation?.durable_forward_dispatch_claim_adapter_implemented === true &&
+            fixture.implementation?.durable_cleanup_dispatch_claim_adapter_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_durable_dispatch_claim_adapter === false &&
             fixture.implementation?.credentialed_runner_persists_pre_dispatch_claims === false &&
             fixture.implementation?.canonical_plan_generator_implemented === true &&
@@ -59,9 +60,11 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.bounded_response_preimage_capture_hook_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_response_preimage_capture_hook === false &&
             fixture.implementation?.joined_response_claim_adapter_implemented === true &&
+            fixture.implementation?.cleanup_bound_response_claim_adapter_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_joined_response_claim_adapter === false &&
             fixture.implementation?.credentialed_runner_writes_encrypted_response_preimages === false &&
             fixture.implementation?.read_only_response_archive_inventory_implemented === true &&
+            fixture.implementation?.cleanup_obligation_digest_archive_binding_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_response_archive_inventory === false &&
             fixture.implementation?.tri_store_consistency_implemented === true &&
             fixture.implementation?.untrusted_base_recovery_classifier_implemented === true &&
@@ -85,6 +88,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             baseLayer.tri_store_consistency_required === true &&
             baseLayer.recovery_reducers_required === true &&
             baseLayer.cleanup_obligations_required === true &&
+            baseLayer.cleanup_obligation_digest_end_to_end_binding_required === true &&
             baseLayer.authority_separation_required === true &&
             baseLayer.product_facing_work_may_precede_base_layer === false,
         "the canary base-layer-first priority drifted"
@@ -104,7 +108,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.authority?.archive_ahead_reducer_authenticates_cloudflare_effects === false &&
             fixture.authority?.archive_ahead_reducer_authorizes_remote_mutation_cleanup_lifecycle_or_gate === false &&
             fixture.authority?.cleanup_obligation_record_authenticates_remote_effects === false &&
-            fixture.authority?.cleanup_obligation_record_authorizes_cleanup_or_mutation === false,
+            fixture.authority?.cleanup_obligation_record_authorizes_cleanup_or_mutation === false &&
+            fixture.authority?.cleanup_obligation_digest_authenticates_obligation_or_effect === false,
         "the isolated canary must grant no evidence, upload, lifecycle, attestation, or gate authority"
     );
     check(
@@ -153,15 +158,16 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             same(workflow.consistency_snapshot_stores, ["operation_state", "effect_journal", "driver_lease"]) &&
             workflow.consistency_reader_filesystem_writes === false &&
             workflow.pre_dispatch_ordering_scope === "caller_controlled_one_use_hook_no_persistence_proof" &&
-            workflow.durable_dispatch_claim_adapter_scope === "forward_only_intent_then_started_non_atomic_unwired" &&
-            workflow.durable_dispatch_claim_adapter_binds_cleanup_grace === false &&
+            workflow.durable_dispatch_claim_adapter_scope ===
+                "forward_and_cleanup_obligation_bound_intent_then_started_non_atomic_unwired" &&
+            workflow.durable_dispatch_claim_adapter_binds_cleanup_grace === true &&
             workflow.durable_dispatch_claim_adapter_writes_terminal_claims === false &&
             workflow.started_claim_may_remain_ambiguous_after_local_failure === true &&
             workflow.response_capture_scope === "caller_controlled_bounded_byte_copy_no_archive_or_claim_proof" &&
             workflow.response_capture_caller_can_retain_plaintext === true &&
             workflow.archive_before_response_observed_enforced === false &&
             workflow.joined_response_claim_adapter_scope ===
-                "forward_only_started_bound_archive_before_append_unwired" &&
+                "forward_and_cleanup_obligation_bound_started_archive_before_append_unwired" &&
             workflow.joined_response_claim_adapter_archive_before_append === true &&
             workflow.direct_public_effect_journal_append_remains_caller_constructible === true &&
             workflow.archive_ahead_of_effect_journal_requires_recovery === true &&
@@ -193,7 +199,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
                 "immutable_private_caller_constructible_pre_effect_plan_execution_operation_and_grace_binding_only" &&
             workflow.cleanup_obligation_read_only_verification_implemented === true &&
             workflow.cleanup_obligation_record_filesystem_writes_during_read === false &&
-            workflow.cleanup_effect_claims_bind_obligation_digest === false &&
+            workflow.cleanup_effect_claims_bind_obligation_digest === true &&
+            workflow.cleanup_response_claims_bind_obligation_digest === true &&
+            workflow.response_archive_inventory_carries_cleanup_obligation_digest === true &&
+            workflow.base_recovery_matches_cleanup_obligation_digest === true &&
             workflow.manual_cleanup_after_grace_implemented === false &&
             workflow.complete_pagination_metadata_required_for_absence === true &&
             workflow.optional_response_projection_contract_implemented === true &&

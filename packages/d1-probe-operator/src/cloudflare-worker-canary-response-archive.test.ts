@@ -59,6 +59,7 @@ const observedClaim = async (
         execution_nonce_commitment: randomDigest(),
         lease_generation: 0,
         lease_record_digest: randomDigest(),
+        cleanup_obligation_digest: null,
         workflow_step: "prepared_worker_list",
         request_kind: "inspect_worker",
         request_method: "GET",
@@ -86,12 +87,13 @@ const observedClaim = async (
 };
 
 const startedAndObservedClaims = async (
-    responseBytes: Uint8Array
+    responseBytes: Uint8Array,
+    overrides: Partial<D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimDraftV1> = {}
 ): Promise<{
     readonly started: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1;
     readonly observed: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1;
 }> => {
-    const base = await observedClaim(responseBytes);
+    const base = await observedClaim(responseBytes, overrides);
     const { claim_digest: _baseDigest, ...baseDraft } = base;
     const started = await buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1({
         ...baseDraft,
@@ -130,6 +132,7 @@ const contextFor = (
         operation_revision: claim.operation_revision,
         operation_state: claim.operation_state,
         operation_record_digest: claim.operation_record_digest,
+        cleanup_obligation_digest: claim.cleanup_obligation_digest,
         claim_digest: claim.claim_digest,
         journal_revision: claim.journal_revision,
         transcript_sequence: claim.transcript_sequence,
@@ -379,6 +382,7 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
             operation_revision: 1,
             operation_state: "shell_dispatching",
             operation_record_digest: randomDigest(),
+            cleanup_obligation_digest: randomDigest(),
             claim_digest: randomDigest(),
             journal_revision: 3,
             transcript_sequence: 2,
@@ -409,6 +413,41 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
                 randomBytes(32)
             )
         ).resolves.toEqual({ success: false, code: "invalid_expected_context" });
+    });
+
+    it("binds cleanup response archives and inventory records to the cleanup obligation digest", async () => {
+        const response = new TextEncoder().encode('{"cleanup":true}');
+        const cleanupObligationDigest = randomDigest();
+        const { started, observed } = await startedAndObservedClaims(response, {
+            operation_revision: 1,
+            operation_state: "cleanup_reconciling",
+            cleanup_obligation_digest: cleanupObligationDigest,
+            workflow_step: "cleanup_worker_readback",
+            request_kind: "inspect_cleanup",
+        });
+        const key = randomBytes(32);
+        const archived = await archive(observed, response, key);
+        expect(archived).toMatchObject({
+            success: true,
+            receipt: { cleanup_obligation_digest: cleanupObligationDigest },
+        });
+        const inventory = await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(
+            observed.plan_digest
+        );
+        expect(inventory).toMatchObject({
+            success: true,
+            inventory: { records: [{ cleanup_obligation_digest: cleanupObligationDigest }] },
+        });
+        if (!inventory.success) throw new Error(inventory.code);
+        const record = inventory.inventory.records[0];
+        if (record === undefined) throw new Error("cleanup archive inventory record unavailable");
+        await expect(
+            resolveD1ProbeCloudflareWorkerCanaryResponseArchiveAheadV1(started, record, 1_786_000_000_001, key)
+        ).resolves.toMatchObject({
+            success: true,
+            claim: { cleanup_obligation_digest: cleanupObligationDigest },
+            receipt: { cleanup_obligation_digest: cleanupObligationDigest },
+        });
     });
 
     it("checks the exact raw bytes, size limit, and 32-byte binary key", async () => {

@@ -200,6 +200,14 @@ const operationStateTransitions = {
     manual_required: [],
 } as const;
 
+const cleanupWorkflowSteps = new Set<string>([
+    "cleanup_worker_readback",
+    "cleanup_worker_list",
+    "delete_worker",
+    "deleted_worker_readback",
+    "deleted_worker_list",
+]);
+
 const UntrustedEffectClaimDraftV1Schema = z
     .object({
         schema_version: z.literal(1),
@@ -213,6 +221,7 @@ const UntrustedEffectClaimDraftV1Schema = z
         execution_nonce_commitment: DigestV1Schema,
         lease_generation: LeaseGenerationV1Schema,
         lease_record_digest: DigestV1Schema,
+        cleanup_obligation_digest: DigestV1Schema.nullable(),
         workflow_step: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimWorkflowStepV1Schema,
         request_kind: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestKindV1Schema,
         request_method: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestMethodV1Schema,
@@ -241,6 +250,9 @@ const UntrustedEffectClaimDraftV1Schema = z
             claim.operation_state !== binding.operation_state
         ) {
             context.addIssue({ code: "custom", message: "workflow step binding does not match" });
+        }
+        if (cleanupWorkflowSteps.has(claim.workflow_step) !== (claim.cleanup_obligation_digest !== null)) {
+            context.addIssue({ code: "custom", message: "cleanup workflow must bind one cleanup obligation" });
         }
         if (claim.journal_revision === 0 && claim.previous_claim_digest !== null) {
             context.addIssue({ code: "custom", message: "revision zero must start the digest chain" });
@@ -607,7 +619,8 @@ const sameRequest = (
     left.operation_state === right.operation_state &&
     left.operation_record_digest === right.operation_record_digest &&
     left.lease_generation === right.lease_generation &&
-    left.lease_record_digest === right.lease_record_digest;
+    left.lease_record_digest === right.lease_record_digest &&
+    left.cleanup_obligation_digest === right.cleanup_obligation_digest;
 
 const terminalPhase = (phase: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1["effect_phase"]): boolean =>
     phase === "response_observed" || phase === "dispatch_ambiguous";
@@ -628,6 +641,8 @@ const transitionCode = (
     if (
         next.plan_digest !== current.plan_digest ||
         next.execution_nonce_commitment !== current.execution_nonce_commitment ||
+        (current.cleanup_obligation_digest !== null &&
+            next.cleanup_obligation_digest !== current.cleanup_obligation_digest) ||
         next.lease_generation < current.lease_generation ||
         (next.lease_generation === current.lease_generation &&
             next.lease_record_digest !== current.lease_record_digest) ||

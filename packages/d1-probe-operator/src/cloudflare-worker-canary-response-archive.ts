@@ -61,6 +61,7 @@ export const D1ProbeCloudflareWorkerCanaryResponseArchiveExpectedContextV1Schema
         operation_revision: SafeRevisionV1Schema,
         operation_state: D1ProbeCloudflareWorkerCanaryOperationStateV1Schema,
         operation_record_digest: DigestV1Schema,
+        cleanup_obligation_digest: DigestV1Schema.nullable(),
         claim_digest: DigestV1Schema,
         journal_revision: SafeRevisionV1Schema,
         transcript_sequence: z.number().int().safe().positive(),
@@ -125,6 +126,7 @@ export interface D1ProbeCloudflareWorkerCanaryResponseArchiveReceiptV1 {
     readonly schema_version: 1;
     readonly kind: "untrusted_d1_probe_cloudflare_worker_api_canary_response_archive_receipt";
     readonly plan_digest: string;
+    readonly cleanup_obligation_digest: string | null;
     readonly claim_digest: string;
     readonly journal_revision: number;
     readonly transcript_sequence: number;
@@ -167,6 +169,7 @@ export type D1ProbeCloudflareWorkerCanaryResponseArchiveResultV1 =
 export interface D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryRecordV1 {
     readonly schema_version: 1;
     readonly kind: "d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory_record";
+    readonly cleanup_obligation_digest: string | null;
     readonly claim_digest: string;
     readonly journal_revision: number;
     readonly transcript_sequence: number;
@@ -229,6 +232,7 @@ export interface D1ProbeCloudflareWorkerCanaryKeyedArchiveResolutionReceiptV1 {
     readonly schema_version: 1;
     readonly kind: "untrusted_d1_probe_cloudflare_worker_api_canary_keyed_archive_resolution_receipt";
     readonly plan_digest: string;
+    readonly cleanup_obligation_digest: string | null;
     readonly claim_digest: string;
     readonly journal_revision: number;
     readonly transcript_sequence: number;
@@ -280,6 +284,7 @@ const KeyedResolutionInventoryRecordV1Schema = z
     .object({
         schema_version: z.literal(1),
         kind: z.literal("d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory_record"),
+        cleanup_obligation_digest: DigestV1Schema.nullable(),
         claim_digest: DigestV1Schema,
         journal_revision: SafeRevisionV1Schema,
         transcript_sequence: z.number().int().safe().positive(),
@@ -459,6 +464,7 @@ const contextMatchesClaim = (
     context.operation_revision === claim.operation_revision &&
     context.operation_state === claim.operation_state &&
     context.operation_record_digest === claim.operation_record_digest &&
+    context.cleanup_obligation_digest === claim.cleanup_obligation_digest &&
     context.claim_digest === claim.claim_digest &&
     context.journal_revision === claim.journal_revision &&
     context.transcript_sequence === claim.transcript_sequence &&
@@ -519,6 +525,7 @@ const receiptFor = (
     schema_version: 1,
     kind: "untrusted_d1_probe_cloudflare_worker_api_canary_response_archive_receipt",
     plan_digest: envelope.plan_digest,
+    cleanup_obligation_digest: envelope.cleanup_obligation_digest,
     claim_digest: envelope.claim_digest,
     journal_revision: envelope.journal_revision,
     transcript_sequence: envelope.transcript_sequence,
@@ -786,6 +793,7 @@ const archiveContextForEnvelope = (
     operation_revision: envelope.operation_revision,
     operation_state: envelope.operation_state,
     operation_record_digest: envelope.operation_record_digest,
+    cleanup_obligation_digest: envelope.cleanup_obligation_digest,
     claim_digest: envelope.claim_digest,
     journal_revision: envelope.journal_revision,
     transcript_sequence: envelope.transcript_sequence,
@@ -817,6 +825,7 @@ const responseClaimDraftFromArchive = (
     execution_nonce_commitment: started.execution_nonce_commitment,
     lease_generation: started.lease_generation,
     lease_record_digest: started.lease_record_digest,
+    cleanup_obligation_digest: started.cleanup_obligation_digest,
     workflow_step: started.workflow_step,
     request_kind: started.request_kind,
     request_method: started.request_method,
@@ -850,6 +859,8 @@ const envelopeMatchesStartedAndInventory = (
     envelope.operation_revision === started.operation_revision &&
     envelope.operation_state === started.operation_state &&
     envelope.operation_record_digest === started.operation_record_digest &&
+    envelope.cleanup_obligation_digest === started.cleanup_obligation_digest &&
+    envelope.cleanup_obligation_digest === record.cleanup_obligation_digest &&
     envelope.claim_digest === record.claim_digest &&
     envelope.journal_revision === started.journal_revision + 1 &&
     envelope.journal_revision === record.journal_revision &&
@@ -968,6 +979,7 @@ export const resolveD1ProbeCloudflareWorkerCanaryResponseArchiveAheadV1 = async 
                 schema_version: 1,
                 kind: "untrusted_d1_probe_cloudflare_worker_api_canary_keyed_archive_resolution_receipt",
                 plan_digest: envelope.plan_digest,
+                cleanup_obligation_digest: envelope.cleanup_obligation_digest,
                 claim_digest: envelope.claim_digest,
                 journal_revision: envelope.journal_revision,
                 transcript_sequence: envelope.transcript_sequence,
@@ -1055,6 +1067,7 @@ const inventoryRecordFor = (
     Object.freeze({
         schema_version: 1,
         kind: "d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory_record",
+        cleanup_obligation_digest: envelope.cleanup_obligation_digest,
         claim_digest: envelope.claim_digest,
         journal_revision: envelope.journal_revision,
         transcript_sequence: envelope.transcript_sequence,

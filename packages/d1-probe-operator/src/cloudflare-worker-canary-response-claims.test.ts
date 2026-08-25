@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { compileD1ProbeCloudflareWorkerCanaryCleanupCommandV1 } from "./cloudflare-worker-canary-cleanup-grace.js";
+import { compileD1ProbeCloudflareWorkerCanaryCleanupObligationV1 } from "./cloudflare-worker-canary-cleanup-obligation.js";
 import {
     buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
     commitD1ProbeCloudflareWorkerCanaryExecutionNonceV1,
@@ -15,7 +17,9 @@ import {
 } from "./cloudflare-worker-canary-driver-lease.js";
 import type { D1ProbeCloudflareWorkerCanaryConsistencyV1 } from "./cloudflare-worker-canary-consistency.js";
 import {
+    buildNextD1ProbeCloudflareWorkerCanaryOperationV1,
     prepareD1ProbeCloudflareWorkerCanaryOperationV1,
+    transitionD1ProbeCloudflareWorkerCanaryOperationV1,
     type D1ProbeCloudflareWorkerCanaryOperationV1,
 } from "./cloudflare-worker-canary-operation.js";
 import { generateD1ProbeCloudflareWorkerApiCanaryCommandV1 } from "./cloudflare-worker-canary-plan.js";
@@ -84,7 +88,17 @@ const context = (
         ...overrides,
     });
 
-const dispatchIntent = () =>
+const dispatchIntent = (
+    overrides: Partial<{
+        readonly sequence: number;
+        readonly method: "GET" | "POST" | "DELETE";
+        readonly path_digest: string;
+        readonly request_digest: string;
+        readonly window_class: "forward" | "cleanup";
+        readonly intent_observed_at_ms: number;
+        readonly dispatch_started_at_ms: number;
+    }> = {}
+) =>
     Object.freeze({
         sequence: 1,
         method: "GET" as const,
@@ -93,6 +107,7 @@ const dispatchIntent = () =>
         window_class: "forward" as const,
         intent_observed_at_ms: 10_010,
         dispatch_started_at_ms: 10_011,
+        ...overrides,
     });
 
 const authority = {
@@ -118,7 +133,25 @@ interface HarnessV1 {
     readonly capturedArrays: () => { readonly key: Uint8Array | null; readonly response: Uint8Array | null };
 }
 
-const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): Promise<HarnessV1> => {
+interface HarnessOptionsV1 {
+    readonly workflow_step?: "prepared_worker_list" | "cleanup_worker_readback";
+    readonly request_kind?: "inspect_worker" | "inspect_cleanup";
+    readonly window_class?: "forward" | "cleanup";
+    readonly cleanup_obligation_digest?: string | null;
+    readonly intent_observed_at_ms?: number;
+    readonly dispatch_started_at_ms?: number;
+}
+
+const harnessFor = async (
+    operation: D1ProbeCloudflareWorkerCanaryOperationV1,
+    options: HarnessOptionsV1 = {}
+): Promise<HarnessV1> => {
+    const workflowStep = options.workflow_step ?? "prepared_worker_list";
+    const requestKind = options.request_kind ?? "inspect_worker";
+    const windowClass = options.window_class ?? "forward";
+    const cleanupObligationDigest = options.cleanup_obligation_digest ?? null;
+    const intentObservedAtMs = options.intent_observed_at_ms ?? 10_010;
+    const dispatchStartedAtMs = options.dispatch_started_at_ms ?? 10_011;
     const owner = ownerFor(operation);
     const lease: D1ProbeCloudflareWorkerCanaryDriverLeaseV1 = {
         schema_version: 1,
@@ -162,12 +195,13 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
         execution_nonce_commitment: nonceCommitment,
         lease_generation: owner.generation,
         lease_record_digest: leaseRecordDigest,
-        workflow_step: "prepared_worker_list",
-        request_kind: "inspect_worker",
+        cleanup_obligation_digest: cleanupObligationDigest,
+        workflow_step: workflowStep,
+        request_kind: requestKind,
         request_method: "GET",
         transcript_sequence: 1,
         effect_phase: "dispatch_intent",
-        intent_observed_at_ms: 10_010,
+        intent_observed_at_ms: intentObservedAtMs,
         dispatch_started_at_ms: null,
         request_digest: digest("c"),
         request_path_digest: digest("b"),
@@ -188,7 +222,7 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
         journal_revision: 1,
         previous_claim_digest: intent.claim_digest,
         effect_phase: "dispatch_started",
-        dispatch_started_at_ms: 10_011,
+        dispatch_started_at_ms: dispatchStartedAtMs,
         ambiguity_classification: "may_have_dispatched",
     });
     if (started === null) throw new Error("started fixture unavailable");
@@ -234,6 +268,7 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
         claim_execution_nonce_commitment: claim.execution_nonce_commitment,
         claim_lease_generation: claim.lease_generation,
         claim_lease_record_digest: claim.lease_record_digest,
+        claim_cleanup_obligation_digest: claim.cleanup_obligation_digest,
         claim_workflow_step: claim.workflow_step,
         claim_effect_phase: claim.effect_phase,
         claim_ambiguity_classification: claim.ambiguity_classification,
@@ -248,6 +283,7 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
                           transcript_sequence: claim.transcript_sequence,
                           response_status: claim.response_status,
                           response_digest: claim.response_digest,
+                          cleanup_obligation_digest: claim.cleanup_obligation_digest,
                       },
                   ]
                 : [],
@@ -264,9 +300,9 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
                         method: "GET",
                         path_digest: digest("b"),
                         request_digest: digest("c"),
-                        window_class: "forward",
-                        intent_observed_at_ms: 10_010,
-                        dispatch_started_at_ms: 10_011,
+                        window_class: windowClass,
+                        intent_observed_at_ms: intentObservedAtMs,
+                        dispatch_started_at_ms: dispatchStartedAtMs,
                     })
                 );
             },
@@ -316,6 +352,7 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
                     schema_version: 1,
                     kind: "untrusted_d1_probe_cloudflare_worker_api_canary_response_archive_receipt",
                     plan_digest: claim.plan_digest,
+                    cleanup_obligation_digest: claim.cleanup_obligation_digest,
                     claim_digest: claim.claim_digest,
                     journal_revision: claim.journal_revision,
                     transcript_sequence: claim.transcript_sequence,
@@ -342,6 +379,7 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
                 ? { success: true, claim: { ...claim, claim_digest: digest("7") } }
                 : { success: true, claim };
         },
+        read_cleanup_obligation: async () => ({ success: false, code: "obligation_not_found" }),
     };
     return {
         dependencies,
@@ -371,13 +409,14 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
 
 const adapterFor = async (
     operation: D1ProbeCloudflareWorkerCanaryOperationV1,
-    dependencies: D1ProbeCloudflareWorkerCanaryResponseClaimsTestOnlyDependenciesV1
+    dependencies: D1ProbeCloudflareWorkerCanaryResponseClaimsTestOnlyDependenciesV1,
+    workflowStep: "prepared_worker_list" | "cleanup_worker_readback" = "prepared_worker_list"
 ) => {
     const result = await createD1ProbeCloudflareWorkerCanaryResponseClaimsWithDependenciesTestOnlyV1(
         {
             operation,
             driver_lease_owner: ownerFor(operation),
-            workflow_step: "prepared_worker_list",
+            workflow_step: workflowStep,
             archive_key: new Uint8Array(32).fill(41),
         },
         dependencies
@@ -393,6 +432,74 @@ const bind = async (adapter: Awaited<ReturnType<typeof adapterFor>>): Promise<vo
 afterEach(() => vi.restoreAllMocks());
 
 describe("Cloudflare Worker canary response claims", () => {
+    it("carries the immutable cleanup obligation through dispatch, archive, and response claim", async () => {
+        const preparedOperation = await prepared();
+        const cleanupCommand = await compileD1ProbeCloudflareWorkerCanaryCleanupCommandV1(preparedOperation.plan, {
+            worker_id: null,
+            worker_id_commitment: null,
+            attempt_tag_commitment: digest("a"),
+        });
+        if (!cleanupCommand.success) throw new Error(cleanupCommand.code);
+        const compiledObligation = await compileD1ProbeCloudflareWorkerCanaryCleanupObligationV1(
+            preparedOperation,
+            cleanupCommand.command.cleanup_grace
+        );
+        if (!compiledObligation.success) throw new Error(compiledObligation.code);
+        const shell = await transitionD1ProbeCloudflareWorkerCanaryOperationV1(
+            preparedOperation,
+            buildNextD1ProbeCloudflareWorkerCanaryOperationV1(
+                preparedOperation,
+                "shell_dispatching",
+                preparedOperation.updated_at_ms + 1
+            )
+        );
+        if (!shell.success) throw new Error(shell.code);
+        const cleanup = await transitionD1ProbeCloudflareWorkerCanaryOperationV1(
+            shell.operation,
+            buildNextD1ProbeCloudflareWorkerCanaryOperationV1(
+                shell.operation,
+                "cleanup_reconciling",
+                shell.operation.updated_at_ms + 1
+            )
+        );
+        if (!cleanup.success) throw new Error(cleanup.code);
+        const intentObservedAtMs = cleanup.operation.plan.expires_at_ms;
+        const dispatchStartedAtMs = intentObservedAtMs + 1;
+        const harness = await harnessFor(cleanup.operation, {
+            workflow_step: "cleanup_worker_readback",
+            request_kind: "inspect_cleanup",
+            window_class: "cleanup",
+            cleanup_obligation_digest: compiledObligation.obligation.obligation_digest,
+            intent_observed_at_ms: intentObservedAtMs,
+            dispatch_started_at_ms: dispatchStartedAtMs,
+        });
+        let obligationReads = 0;
+        const dependencies: D1ProbeCloudflareWorkerCanaryResponseClaimsTestOnlyDependenciesV1 = {
+            ...harness.dependencies,
+            read_cleanup_obligation: async () => {
+                obligationReads += 1;
+                return { success: true, obligation: compiledObligation.obligation };
+            },
+        };
+        const adapter = await adapterFor(cleanup.operation, dependencies, "cleanup_worker_readback");
+        await adapter.record_dispatch_and_bind(
+            dispatchIntent({
+                window_class: "cleanup",
+                intent_observed_at_ms: intentObservedAtMs,
+                dispatch_started_at_ms: dispatchStartedAtMs,
+            })
+        );
+        await expect(
+            adapter.capture_response_preimage(
+                context({ caller_asserted_response_observed_at_ms: dispatchStartedAtMs + 1 }),
+                bytes
+            )
+        ).resolves.toBeUndefined();
+        expect(obligationReads).toBeGreaterThanOrEqual(6);
+        expect(harness.events).toContain("archive");
+        expect(harness.events).toContain("append");
+    });
+
     it("archives before append and ends on the exact response head", async () => {
         const operation = await prepared();
         const harness = await harnessFor(operation);
