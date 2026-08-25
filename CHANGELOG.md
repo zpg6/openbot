@@ -6,6 +6,7 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 
 ### Added
 
+- Added a configurable local base-layer E2E benchmark over the public operation, lease, effect, cleanup-obligation, response-archive, and recovery APIs. It records correctness counts, throughput, latency percentiles, and same-plan revision-zero CAS contention without credentials or remote requests. Archive inventory snapshots are now plan-scoped, so unrelated concurrent operations do not cause false instability.
 - Made base-layer completion the explicit prerequisite for product-facing work: durable identities, append-only state, effect, and archive histories, lease epochs, composed dispatch-response sessions, tri-store consistency, recovery reducers, cleanup obligations, and authority separation.
 - Pure offline helpers generate canonical Cloudflare Worker API canary plans and check a returned transcript's caller-claim shape against retained operator context. They perform no network or filesystem work, do not resolve response digests, and grant no mutation, adjudication, lifecycle, or gate authority.
 - Added a non-mutating Worker API canary plan CLI, a strict response projection, a checkout-local canonical operation store with a durable delete-dispatch fence, and an unwired automatic-cleanup core. The credentialed runner does not use them yet, and no live run, cleanup CLI, secure launcher, manual authority, or observation promotion is enabled.

@@ -1023,12 +1023,23 @@ interface ArchiveSnapshotV1 {
 const statIdentity = (stat: Awaited<ReturnType<typeof lstat>>): string =>
     [stat.dev, stat.ino, stat.mode, stat.nlink, stat.size, stat.mtimeMs, stat.ctimeMs].join(":" as const);
 
-const readArchiveSnapshot = async (root: string): Promise<ArchiveSnapshotV1> => {
+const directoryIdentity = (stat: Awaited<ReturnType<typeof lstat>>): string =>
+    [stat.dev, stat.ino, stat.mode].join(":" as const);
+
+const readArchiveSnapshot = async (root: string, planDigest: string): Promise<ArchiveSnapshotV1> => {
+    const planPrefix = `${planDigest}.`;
     const before = await lstat(root);
-    const names = (await readdir(root)).sort();
+    const names = (await readdir(root)).filter(name => name.startsWith(planPrefix)).sort();
+    const repeatedNames = (await readdir(root)).filter(name => name.startsWith(planPrefix)).sort();
     const after = await lstat(root);
-    if (statIdentity(before) !== statIdentity(after)) throw new Error("unstable archive directory");
-    return Object.freeze({ names: Object.freeze(names), directory_identity: statIdentity(after) });
+    if (
+        directoryIdentity(before) !== directoryIdentity(after) ||
+        names.length !== repeatedNames.length ||
+        names.some((name, index) => name !== repeatedNames[index])
+    ) {
+        throw new Error("unstable archive directory");
+    }
+    return Object.freeze({ names: Object.freeze(names), directory_identity: directoryIdentity(after) });
 };
 
 const sameArchiveSnapshot = (first: ArchiveSnapshotV1, second: ArchiveSnapshotV1): boolean =>
@@ -1109,14 +1120,13 @@ const readResponseArchiveInventory = async (
     if (!root.success) return root;
     let firstSnapshot: ArchiveSnapshotV1;
     try {
-        firstSnapshot = await readArchiveSnapshot(root.root);
+        firstSnapshot = await readArchiveSnapshot(root.root, planDigest);
         await afterFirstSnapshot?.();
     } catch {
         return { success: false, code: "archive_snapshot_unstable" };
     }
-    const planPrefix = `${planDigest}.`;
     const finalPattern = new RegExp(`^${planDigest}\\.([0-9a-f]{64})\\.response-preimage\\.json$`, "u");
-    const planNames = firstSnapshot.names.filter(name => name.startsWith(planPrefix));
+    const planNames = firstSnapshot.names;
     if (planNames.length > MAX_INVENTORY_RECORDS_V1) {
         return { success: false, code: "archive_inventory_too_large" };
     }
@@ -1146,7 +1156,7 @@ const readResponseArchiveInventory = async (
         const read = await readEnvelope(root.root, planDigest, claimDigest, false, before);
         if (!read.success) {
             try {
-                const changed = !sameArchiveSnapshot(firstSnapshot, await readArchiveSnapshot(root.root));
+                const changed = !sameArchiveSnapshot(firstSnapshot, await readArchiveSnapshot(root.root, planDigest));
                 return {
                     success: false,
                     code: changed ? "archive_snapshot_unstable" : inventoryReadDenial(read.code),
@@ -1185,7 +1195,7 @@ const readResponseArchiveInventory = async (
     }
     let finalSnapshot: ArchiveSnapshotV1;
     try {
-        finalSnapshot = await readArchiveSnapshot(root.root);
+        finalSnapshot = await readArchiveSnapshot(root.root, planDigest);
     } catch {
         return { success: false, code: "archive_snapshot_unstable" };
     }

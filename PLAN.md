@@ -33,6 +33,27 @@ The Worker canary now uses one execution-nonce commitment across operation, leas
 
 Before any remote effect, a separate immutable private cleanup-obligation record can bind the prepared operation, execution commitment, and independently digested cleanup grace. Its read-only verifier changes no file. Cleanup dispatch, response, encrypted archive, inventory, consistency, and recovery contracts now carry and reassert that exact obligation digest; forward claims must keep it null. The record and claims remain caller-constructible, the runner does not write or consume them, and the digest authenticates neither the obligation nor a remote effect, so it authorizes no cleanup.
 
+### Base-layer exit criteria
+
+The base layer has an explicit exit list. "Implemented" means the local contract and its hostile tests exist. It does not mean the credentialed runner uses that contract.
+
+| Capability | Current proof | Work before a live canary |
+|---|---|---|
+| Durable identity and state | Operation, lease, effect, cleanup-obligation, and archive records share exact plan and execution bindings | Wire the credentialed driver to publish the prepared operation before any remote request |
+| Dispatch and response recording | The composed session records intent and start, captures bounded bytes, publishes the encrypted archive, then appends the terminal claim | Make the durable driver the only credentialed consumer and preserve its exact session across restart |
+| Recovery | Read-only consistency, base classification, and keyed archive-ahead reconciliation cover exact, ambiguous, missing-archive, and archive-ahead histories | Add driver takeover rules, post-crash cleanup resumption, and terminal state transitions for every request step |
+| Cleanup | An immutable pre-effect obligation binds the prepared operation and cleanup grace. Cleanup claims and archives carry its digest | Wire automatic cleanup under the durable delete fence, then add a separate reviewed post-grace manual command |
+| Secret handling | Plan generation uses file descriptor 3 and the live canary CLI is disabled | Add a fixed child launcher with bounded file descriptors, result capture, timeout, signal handling, and zeroization |
+| Local scale evidence | `pnpm test:base-layer:e2e` runs the public local storage and claim APIs. `pnpm bench:base-layer` emits one JSON benchmark line | Keep the benchmark green under the reviewed maximums. Do not turn its timing data into an authority or a flaky CI threshold |
+| Remote evidence | No credential, Cloudflare response, or live observation is checked in | Run once in a reviewed disposable account only after every prior row is wired and independently reviewed |
+| Authority | Every local result keeps mutation, upload, attestation, lifecycle, and gate authority false | Add a separate reviewed evidence consumer only after the live observation and cleanup review |
+
+The local E2E workload defaults to three operations at concurrency two. Each operation writes four state revisions, nine effect claims, three encrypted response archives, and one cleanup obligation, then reaches the durable `delete_dispatching` fence without issuing a DELETE. `OPENBOT_BASE_E2E_OPERATIONS`, `OPENBOT_BASE_E2E_CONCURRENCY`, and `OPENBOT_BASE_E2E_RESPONSE_BYTES` raise the workload to 128 operations, concurrency 16, and 256 KiB per synthetic response. A second workload races up to 64 writers for the same revision-zero state path and requires one winner. The benchmark reports throughput and latency percentiles, but CI asserts record counts, bindings, recovery classification, and CAS outcomes rather than wall-clock limits.
+
+The first scaled run found a real false-contention bug. Archive inventory snapshots included directory timestamps and link counts, so another plan publishing an unrelated archive could make a valid read unstable. Inventory now snapshots only names with the requested plan prefix, double-reads that set, rechecks every selected file, and compares the directory's device, inode, and mode. An unrelated plan no longer invalidates the read; a same-plan change still fails closed.
+
+Base-layer work is complete only when the credentialed driver, restart recovery, automatic cleanup, secure launcher, and disposable-account observation rows are finished. Until then the registered commands remain non-mutating and product work stays blocked.
+
 ## Product model and navigation
 
 Grok Bot leads with a roster of named Bots, then opens one message workspace for each Bot. The transcript mixes user instructions, work status, connection requests, approvals, and results. Bot details hold the profile and recurring work. Task entry stays primary while access administration remains one link away.

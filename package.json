@@ -14,6 +14,8 @@
         "typecheck": "tsc -b --pretty false",
         "test": "vitest run --config vitest.config.ts",
         "test:d1-probes": "corepack pnpm --dir packages/d1-probes test",
+        "test:base-layer:e2e": "corepack pnpm --dir packages/d1-probe-operator test:base-layer:e2e",
+        "bench:base-layer": "corepack pnpm --dir packages/d1-probe-operator bench:base-layer",
         "test:integration": "vitest run --config vitest.workers.config.ts && vitest run --config vitest.sandbox.workers.config.ts && vitest run --config vitest.d1-probe-writer.config.ts && corepack pnpm test:d1-probes",
         "format": "prettier --write .",
         "format:check": "prettier --check .",
@@ -34,7 +36,7 @@
         "deploy:d1:production": "node scripts/workers.mjs deploy production",
         "tail:preview": "wrangler tail --config apps/control-plane/wrangler.d1.jsonc --env preview",
         "tail:production": "wrangler tail --config apps/control-plane/wrangler.d1.jsonc --env production",
-        "verify": "corepack pnpm format:check && corepack pnpm check:dependencies && corepack pnpm check:secrets && corepack pnpm check:fixtures && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build",
+        "verify": "corepack pnpm format:check && corepack pnpm check:dependencies && corepack pnpm check:secrets && corepack pnpm check:fixtures && corepack pnpm typecheck && corepack pnpm test && corepack pnpm test:base-layer:e2e && corepack pnpm build",
         "verify:integration": "corepack pnpm verify && corepack pnpm test:integration",
         "verify:preview": "node scripts/verify-preview.mjs"
     },

@@ -72,6 +72,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.keyed_archive_integrity_resolver_implemented === true &&
             fixture.implementation?.archive_ahead_recovery_reducer_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_archive_ahead_recovery_reducer === false &&
+            fixture.implementation?.local_base_layer_e2e_benchmark_implemented === true &&
+            fixture.implementation?.local_base_layer_e2e_uses_public_storage_and_claim_apis === true &&
+            fixture.implementation?.local_base_layer_e2e_remote_network_requests === false &&
+            fixture.implementation?.credentialed_runner_covered_by_local_base_layer_e2e === false &&
             fixture.implementation?.response_preimage_capture_implemented === false &&
             fixture.implementation?.reviewed_observation_fixture_transition_implemented === false &&
             fixture.implementation?.credentials_recorded === false &&
@@ -89,6 +93,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             baseLayer.recovery_reducers_required === true &&
             baseLayer.cleanup_obligations_required === true &&
             baseLayer.cleanup_obligation_digest_end_to_end_binding_required === true &&
+            baseLayer.scalable_local_e2e_required === true &&
             baseLayer.authority_separation_required === true &&
             baseLayer.product_facing_work_may_precede_base_layer === false,
         "the canary base-layer-first priority drifted"
@@ -179,6 +184,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
                 "read_only_redacted_local_encrypted_envelope_shape_non_authenticating" &&
             workflow.response_archive_inventory_filesystem_writes === false &&
             workflow.response_archive_inventory_returns_plaintext_ciphertext_nonce_or_tag === false &&
+            workflow.response_archive_inventory_snapshots_are_plan_scoped === true &&
+            workflow.unrelated_plan_archive_publication_destabilizes_inventory === false &&
             workflow.base_recovery_classifier_scope ===
                 "read_only_stable_state_effect_lease_archive_shape_classification_only" &&
             workflow.base_recovery_classifier_allows_mutation_replay === false &&
@@ -206,6 +213,14 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.manual_cleanup_after_grace_implemented === false &&
             workflow.complete_pagination_metadata_required_for_absence === true &&
             workflow.optional_response_projection_contract_implemented === true &&
+            workflow.local_base_layer_e2e_workload_scope ===
+                "public_local_state_lease_effect_archive_obligation_and_recovery_apis_only" &&
+            workflow.local_base_layer_e2e_default_operations === 3 &&
+            workflow.local_base_layer_e2e_max_operations === 128 &&
+            workflow.local_base_layer_e2e_max_concurrency === 16 &&
+            workflow.local_base_layer_e2e_max_response_bytes === 256 * 1024 &&
+            workflow.local_base_layer_e2e_same_plan_state_cas_contention === true &&
+            workflow.local_base_layer_e2e_latency_threshold_enforced === false &&
             workflow.recovery_inspector?.command === "d1-probe:inspect-worker-api-canary-recovery" &&
             workflow.recovery_inspector?.canonical_stdin_required === true &&
             same(workflow.recovery_inspector?.credential_inputs, []) &&
@@ -369,10 +384,12 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
 };
 
 export const readAndCheckCloudflareWorkerApiCanaryFixture = async () => {
-    const [fixture, rootManifest, operatorManifest] = await Promise.all([
+    const [fixture, rootManifest, operatorManifest, unitConfig, baseE2EConfig] = await Promise.all([
         readFile(fixturePath, "utf8").then(JSON.parse),
         readFile("package.json", "utf8").then(JSON.parse),
         readFile("packages/d1-probe-operator/package.json", "utf8").then(JSON.parse),
+        readFile("vitest.config.ts", "utf8"),
+        readFile("vitest.base-layer.e2e.config.ts", "utf8"),
     ]);
     const errors = checkCloudflareWorkerApiCanaryFixture(fixture);
     const forbiddenLiveCommandRegistered = [rootManifest.scripts ?? {}, operatorManifest.scripts ?? {}].some(scripts =>
@@ -392,11 +409,29 @@ export const readAndCheckCloudflareWorkerApiCanaryFixture = async () => {
             "corepack pnpm --dir packages/d1-probe-operator inspect-worker-api-canary-recovery" ||
         operatorManifest.scripts?.["inspect-worker-api-canary-recovery"] !==
             "node --import tsx src/cloudflare-worker-canary-recovery-inspect-cli.ts" ||
+        rootManifest.scripts?.["test:base-layer:e2e"] !==
+            "corepack pnpm --dir packages/d1-probe-operator test:base-layer:e2e" ||
+        rootManifest.scripts?.["bench:base-layer"] !==
+            "corepack pnpm --dir packages/d1-probe-operator bench:base-layer" ||
+        typeof rootManifest.scripts?.verify !== "string" ||
+        !rootManifest.scripts.verify.includes("corepack pnpm test:base-layer:e2e") ||
+        operatorManifest.scripts?.["test:base-layer:e2e"] !==
+            "vitest run --config ../../vitest.base-layer.e2e.config.ts" ||
+        operatorManifest.scripts?.["bench:base-layer"] !==
+            "OPENBOT_BASE_E2E_REPORT=1 vitest run --config ../../vitest.base-layer.e2e.config.ts --reporter=verbose" ||
+        !unitConfig.includes('exclude: [...configDefaults.exclude, "packages/**/*.e2e.test.ts"]') ||
+        !baseE2EConfig.includes(
+            'include: ["packages/d1-probe-operator/src/cloudflare-worker-canary-base.e2e.test.ts"]'
+        ) ||
+        !baseE2EConfig.includes("fileParallelism: false") ||
+        !baseE2EConfig.includes("maxWorkers: 1") ||
         rootManifest.scripts?.["d1-probe:canary-worker-api"] !== undefined ||
         operatorManifest.scripts?.["canary-worker-api"] !== undefined ||
         forbiddenLiveCommandRegistered
     ) {
-        errors.push("the Worker API canary may register only its plan and read-only recovery inspector commands");
+        errors.push(
+            "the Worker API canary may register only its plan, read-only recovery inspector, and local base-layer test commands"
+        );
     }
     return errors;
 };

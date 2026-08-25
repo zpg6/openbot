@@ -8,6 +8,8 @@
         "plan-worker-api-canary": "node --import tsx src/cloudflare-worker-canary-plan-cli.ts",
         "inspect-worker-api-canary-recovery": "node --import tsx src/cloudflare-worker-canary-recovery-inspect-cli.ts",
         "check-route": "node --import tsx src/route-cli.ts",
+        "test:base-layer:e2e": "vitest run --config ../../vitest.base-layer.e2e.config.ts",
+        "bench:base-layer": "OPENBOT_BASE_E2E_REPORT=1 vitest run --config ../../vitest.base-layer.e2e.config.ts --reporter=verbose",
         "typecheck": "tsc -b --pretty false",
         "test": "vitest run --root ../.. packages/d1-probe-operator/src"
     },

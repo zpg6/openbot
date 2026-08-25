@@ -1029,6 +1029,30 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
         ).resolves.toEqual({ success: false, code: "archive_snapshot_unstable" });
     });
 
+    it("ignores concurrent archive publication for another plan", async () => {
+        const planDigest = randomDigest();
+        const otherPlanDigest = randomDigest();
+        const response = new Uint8Array([1, 2, 3, 4]);
+        const claim = await observedClaim(response, { plan_digest: planDigest });
+        expect((await archive(claim, response)).success).toBe(true);
+        const unrelatedPath = d1ProbeCloudflareWorkerCanaryResponseArchivePathTestOnlyV1(
+            otherPlanDigest,
+            randomDigest()
+        );
+        if (unrelatedPath === null) throw new Error("unrelated archive path unavailable");
+        cleanupPaths.add(unrelatedPath);
+        const result = await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyTestOnlyV1(
+            planDigest,
+            async () => {
+                await writeFile(unrelatedPath, "unrelated concurrent archive", { mode: 0o600 });
+            }
+        );
+        expect(result.success ? "ok" : result.code).toBe("ok");
+        if (result.success) {
+            expect(result.inventory).toMatchObject({ plan_digest: planDigest, record_count: 1 });
+        }
+    });
+
     it("rejects an earlier record rewritten while a later record is pending", async () => {
         const planDigest = randomDigest();
         const response = new Uint8Array([1, 3, 3, 7]);
