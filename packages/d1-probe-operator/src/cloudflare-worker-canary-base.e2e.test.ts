@@ -8,7 +8,10 @@ import { readD1ProbeCloudflareWorkerCanaryBaseRecoveryV1 } from "./cloudflare-wo
 import { compileD1ProbeCloudflareWorkerCanaryCleanupCommandV1 } from "./cloudflare-worker-canary-cleanup-grace.js";
 import { D1_PROBE_CLOUDFLARE_WORKER_CANARY_CLEANUP_OBLIGATION_ROOT_V1 } from "./cloudflare-worker-canary-cleanup-obligation.js";
 import { D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1 } from "./cloudflare-worker-canary-driver-lease.js";
-import { bootstrapD1ProbeCloudflareWorkerCanaryDriverV1 } from "./cloudflare-worker-canary-driver-bootstrap.js";
+import {
+    createD1ProbeCloudflareWorkerCanaryDurableDriverV1,
+    type D1ProbeCloudflareWorkerCanaryDurableDriverSessionV1,
+} from "./cloudflare-worker-canary-durable-driver.js";
 import { readD1ProbeCloudflareWorkerCanaryDurableTranscriptV1 } from "./cloudflare-worker-canary-durable-transcript.js";
 import {
     D1_PROBE_CLOUDFLARE_WORKER_CANARY_EFFECT_JOURNAL_ROOT_V1,
@@ -24,7 +27,6 @@ import {
     D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1,
     readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1,
 } from "./cloudflare-worker-canary-response-archive.js";
-import { createD1ProbeCloudflareWorkerCanaryResponseClaimsV1 } from "./cloudflare-worker-canary-response-claims.js";
 import {
     D1_PROBE_CLOUDFLARE_WORKER_CANARY_STATE_ROOT_V1,
     createD1ProbeCloudflareWorkerCanaryStateV1,
@@ -191,16 +193,15 @@ const transition = async (
 
 const dispatch = async (
     transport: D1ProbeCloudflareWorkerCanaryTransportV1,
+    driver: D1ProbeCloudflareWorkerCanaryDurableDriverSessionV1,
     operation: D1ProbeCloudflareWorkerCanaryOperationV1,
-    owner: unknown,
     workflowStep: "prepared_worker_list" | "shell_create" | "cleanup_worker_readback",
     prepared: D1ProbeCloudflareWorkerCanaryPreparedDispatchV1 | null,
     archiveKey: Uint8Array
 ): Promise<void> => {
     if (prepared === null) throw new Error("request preparation failed");
-    const claims = await createD1ProbeCloudflareWorkerCanaryResponseClaimsV1({
+    const claims = await driver.create_request_session({
         operation,
-        driver_lease_owner: owner,
         workflow_step: workflowStep,
         archive_key: archiveKey,
     });
@@ -249,15 +250,13 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             attempt_tag_commitment: attemptTagCommitment(attemptTag),
         });
         if (!cleanupCommand.success) throw new Error(`cleanup grace compilation failed: ${cleanupCommand.code}`);
-        const bootstrap = await bootstrapD1ProbeCloudflareWorkerCanaryDriverV1({
+        const durableDriver = await createD1ProbeCloudflareWorkerCanaryDurableDriverV1({
             operation,
             cleanup_grace: cleanupCommand.command.cleanup_grace,
             lease_duration_ms: 300_000,
         });
-        if (!bootstrap.success) throw new Error(`driver bootstrap failed: ${bootstrap.code}`);
-        operation = bootstrap.session.operation;
-        const cleanupObligation = bootstrap.session.cleanup_obligation;
-        const leaseOwner = bootstrap.session.driver_lease_owner;
+        if (!durableDriver.success) throw new Error(`durable driver failed: ${durableDriver.code}`);
+        const cleanupObligationDigest = durableDriver.session.cleanup_obligation_digest;
         const body = responseBody(targetResponseBytes);
         const transport = createD1ProbeCloudflareWorkerCanaryTransportV1({
             api_token: SYNTHETIC_API_TOKEN,
@@ -290,8 +289,8 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
         const preparedReadStarted = performance.now();
         await dispatch(
             transport,
+            durableDriver.session,
             operation,
-            leaseOwner,
             "prepared_worker_list",
             await transport.prepare.forward.get(`/accounts/${PLAN_ACCOUNT_ID}/workers/workers?page=1&per_page=100`),
             archiveKeyFor(operationIndex)
@@ -302,8 +301,8 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
         const shellCreateStarted = performance.now();
         await dispatch(
             transport,
+            durableDriver.session,
             operation,
-            leaseOwner,
             "shell_create",
             await transport.prepare.forward.post(
                 `/accounts/${PLAN_ACCOUNT_ID}/workers/workers`,
@@ -318,8 +317,8 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
         const cleanupReadStarted = performance.now();
         await dispatch(
             transport,
+            durableDriver.session,
             operation,
-            leaseOwner,
             "cleanup_worker_readback",
             await transport.prepare.cleanup.get(`/accounts/${PLAN_ACCOUNT_ID}/workers/workers/benchmark-worker`),
             archiveKeyFor(operationIndex)
@@ -340,8 +339,8 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             recovery.classification !== "local_histories_aligned" ||
             recovery.recovery_requirement !== "none" ||
             recovery.archive_record_count !== 3 ||
-            recovery.claim_cleanup_obligation_digest !== cleanupObligation.obligation_digest ||
-            recovery.archive_head_cleanup_obligation_digest !== cleanupObligation.obligation_digest ||
+            recovery.claim_cleanup_obligation_digest !== cleanupObligationDigest ||
+            recovery.archive_head_cleanup_obligation_digest !== cleanupObligationDigest ||
             recovery.mutation_replay_allowed !== false ||
             recovery.cleanup_authorized !== false ||
             recovery.recovery_action_authorized !== false ||
@@ -369,14 +368,12 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             !journal.success ||
             journal.claims.length !== 9 ||
             journal.claims.slice(0, 6).some(claim => claim.cleanup_obligation_digest !== null) ||
-            journal.claims
-                .slice(6)
-                .some(claim => claim.cleanup_obligation_digest !== cleanupObligation.obligation_digest) ||
+            journal.claims.slice(6).some(claim => claim.cleanup_obligation_digest !== cleanupObligationDigest) ||
             !archive.success ||
             archive.inventory.records.length !== 3 ||
             archive.inventory.records[0]?.cleanup_obligation_digest !== null ||
             archive.inventory.records[1]?.cleanup_obligation_digest !== null ||
-            archive.inventory.records[2]?.cleanup_obligation_digest !== cleanupObligation.obligation_digest ||
+            archive.inventory.records[2]?.cleanup_obligation_digest !== cleanupObligationDigest ||
             transport.transcript.length !== 3 ||
             transport.transcript.some(entry => entry.status !== 200 || entry.response_digest === null)
         ) {
