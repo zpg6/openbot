@@ -451,6 +451,7 @@ const runPool = async (operations: number, concurrency: number, targetResponseBy
 
 let throughputReport: Record<string, unknown> | null = null;
 let contentionReport: Record<string, unknown> | null = null;
+let durableSessionContentionReport: Record<string, unknown> | null = null;
 
 describe("Cloudflare Worker canary base-layer E2E benchmark", () => {
     it("runs the durable state, lease, effect, archive, obligation, and recovery path at configurable scale", async () => {
@@ -546,6 +547,150 @@ describe("Cloudflare Worker canary base-layer E2E benchmark", () => {
             benchmarkPlanDigests.delete(planDigest);
         }
     }, 120_000);
+
+    it("opens exact request sessions and rejects identity substitutions under parallel load", async () => {
+        const operationIndex = 910_000;
+        const generated = await generateD1ProbeCloudflareWorkerApiCanaryCommandV1(
+            {
+                schema_version: 1,
+                kind: "d1_probe_cloudflare_worker_api_canary_plan_request",
+                account_id: PLAN_ACCOUNT_ID,
+            },
+            { hmac_key_base64url: HMAC_KEY_BASE64URL },
+            { now: Date.now, randomBytes: deterministicRandom(operationIndex) }
+        );
+        expect(generated.success).toBe(true);
+        if (!generated.success) return;
+        const prepared = await prepareD1ProbeCloudflareWorkerCanaryOperationV1(
+            generated.command.plan,
+            attemptTagFor(operationIndex),
+            generated.command.plan.not_before_ms
+        );
+        expect(prepared.success).toBe(true);
+        if (!prepared.success) return;
+        const operation = prepared.operation;
+        const planDigest = operation.plan.plan_digest;
+        benchmarkPlanDigests.add(planDigest);
+        try {
+            const cleanupCommand = await compileD1ProbeCloudflareWorkerCanaryCleanupCommandV1(operation.plan, {
+                worker_id: null,
+                worker_id_commitment: null,
+                attempt_tag_commitment: attemptTagCommitment(operation.attempt_tag),
+            });
+            expect(cleanupCommand.success).toBe(true);
+            if (!cleanupCommand.success) return;
+            const durableDriver = await createD1ProbeCloudflareWorkerCanaryDurableDriverV1({
+                operation,
+                cleanup_grace: cleanupCommand.command.cleanup_grace,
+                lease_duration_ms: 300_000,
+            });
+            expect(durableDriver.success).toBe(true);
+            if (!durableDriver.success) return;
+
+            const exactContenders = Math.min(256, Math.max(16, scale.operations * 2, scale.concurrency * 8));
+            const identitySubstitutions = [
+                {
+                    field: "plan_digest",
+                    operation: {
+                        ...operation,
+                        plan: { ...operation.plan, plan_digest: "f".repeat(64) },
+                    },
+                },
+                { field: "execution_nonce", operation: { ...operation, execution_nonce: "f".repeat(32) } },
+                { field: "script_name", operation: { ...operation, script_name: `${operation.script_name}-foreign` } },
+                {
+                    field: "ownership_tag",
+                    operation: { ...operation, ownership_tag: `${operation.ownership_tag}-foreign` },
+                },
+                {
+                    field: "attempt_tag",
+                    operation: { ...operation, attempt_tag: `openbot-canary-attempt-${"f".repeat(32)}` },
+                },
+            ] as const;
+            const adversarialContenders = exactContenders;
+            const started = performance.now();
+            const [exactResults, adversarialResults] = await Promise.all([
+                Promise.all(
+                    Array.from({ length: exactContenders }, (_, index) =>
+                        durableDriver.session.create_request_session({
+                            operation,
+                            workflow_step: "prepared_worker_list",
+                            archive_key: archiveKeyFor(operationIndex + index),
+                        })
+                    )
+                ),
+                Promise.all(
+                    Array.from({ length: adversarialContenders }, (_, index) =>
+                        durableDriver.session.create_request_session({
+                            operation: identitySubstitutions[index % identitySubstitutions.length]?.operation,
+                            workflow_step: "prepared_worker_list",
+                            archive_key: archiveKeyFor(operationIndex + exactContenders + index),
+                        })
+                    )
+                ),
+            ]);
+            const durationMs = performance.now() - started;
+            expect(
+                exactResults.every(
+                    result =>
+                        result.success &&
+                        result.durable_claim_recording_ready === true &&
+                        result.remote_dispatch_authorized === false &&
+                        result.cleanup_authorized === false &&
+                        result.caller_mutation_authority === false &&
+                        result.authoritative === false &&
+                        result.eligible_for_upload === false &&
+                        result.eligible_for_attestation === false &&
+                        result.lifecycle_advance_allowed === false &&
+                        result.gate_promotion_allowed === false
+                )
+            ).toBe(true);
+            expect(
+                adversarialResults.every(
+                    result =>
+                        !result.success &&
+                        result.code === "invalid_request_session" &&
+                        result.remote_dispatch_authorized === false &&
+                        result.cleanup_authorized === false &&
+                        result.caller_mutation_authority === false &&
+                        result.authoritative === false &&
+                        result.eligible_for_upload === false &&
+                        result.eligible_for_attestation === false &&
+                        result.lifecycle_advance_allowed === false &&
+                        result.gate_promotion_allowed === false
+                )
+            ).toBe(true);
+            for (const result of exactResults) if (result.success) result.discard();
+
+            const [state, journal, archive] = await Promise.all([
+                readD1ProbeCloudflareWorkerCanaryStateReadOnlyV1(planDigest),
+                readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1(planDigest),
+                readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(planDigest),
+            ]);
+            expect(state.success).toBe(true);
+            expect(state.success ? [state.operation.revision, state.operation.state] : null).toEqual([0, "prepared"]);
+            expect(journal).toMatchObject({ success: false, code: "journal_not_found" });
+            expect(archive).toMatchObject({ success: true, inventory: { record_count: 0, records: [] } });
+            durableSessionContentionReport = {
+                workload: "worker_canary_durable_session_identity_contention_v1",
+                concurrency: exactContenders + adversarialContenders,
+                exact_identity_attempts: exactContenders,
+                exact_identity_sessions_created: exactResults.filter(result => result.success).length,
+                identity_substitution_attempts: adversarialContenders,
+                identity_substitution_safe_denials: adversarialResults.filter(result => !result.success).length,
+                immutable_identity_fields_challenged: identitySubstitutions.map(substitution => substitution.field),
+                sessions_discarded_without_hook_execution: exactResults.filter(result => result.success).length,
+                effect_claims_written: 0,
+                response_archives_written: 0,
+                state_revision_after_contention: state.success ? state.operation.revision : null,
+                duration_ms: round(durationMs),
+                attempts_per_second: round(((exactContenders + adversarialContenders) * 1_000) / durationMs),
+            };
+        } finally {
+            await removePlanRecords(planDigest);
+            benchmarkPlanDigests.delete(planDigest);
+        }
+    }, 120_000);
 });
 
 afterAll(async () => {
@@ -559,6 +704,7 @@ afterAll(async () => {
                 authority: false,
                 throughput: throughputReport,
                 contention: contentionReport,
+                durable_session_contention: durableSessionContentionReport,
             })}`
         );
     }
