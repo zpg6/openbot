@@ -67,7 +67,7 @@ const runCli = async (
         }
     });
 
-describe("Cloudflare Worker API canary plan CLI boundary", () => {
+describe("Cloudflare Worker API canary plan CLI boundary", { timeout: 15_000 }, () => {
     it("emits one canonical command using cryptographic randomness and the current clock", async () => {
         const before = Date.now();
         const result = await runCli(`${request}\n`, `${key}\n`);

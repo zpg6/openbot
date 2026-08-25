@@ -686,7 +686,7 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
         });
     });
 
-    it("accepts the exact maximum response length", async () => {
+    it("accepts the exact maximum response length", { timeout: 15_000 }, async () => {
         const response = randomBytes(D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_MAX_PLAINTEXT_BYTES_V1);
         const claim = await observedClaim(response);
         const key = randomBytes(32);

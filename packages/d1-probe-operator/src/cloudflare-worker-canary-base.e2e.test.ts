@@ -15,6 +15,7 @@ import {
     D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1,
     acquireD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
 } from "./cloudflare-worker-canary-driver-lease.js";
+import { readD1ProbeCloudflareWorkerCanaryDurableTranscriptV1 } from "./cloudflare-worker-canary-durable-transcript.js";
 import {
     D1_PROBE_CLOUDFLARE_WORKER_CANARY_EFFECT_JOURNAL_ROOT_V1,
     readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1,
@@ -339,8 +340,9 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
         operation = await transition(operation, "delete_dispatching");
 
         const recoveryStarted = performance.now();
-        const [recovery, state, journal, archive] = await Promise.all([
+        const [recovery, durableTranscript, state, journal, archive] = await Promise.all([
             readD1ProbeCloudflareWorkerCanaryBaseRecoveryV1(planDigest),
+            readD1ProbeCloudflareWorkerCanaryDurableTranscriptV1(planDigest),
             readD1ProbeCloudflareWorkerCanaryStateReadOnlyV1(planDigest),
             readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1(planDigest),
             readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(planDigest),
@@ -355,6 +357,24 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             recovery.mutation_replay_allowed !== false ||
             recovery.cleanup_authorized !== false ||
             recovery.recovery_action_authorized !== false ||
+            durableTranscript.classification !== "durable_prefix_complete" ||
+            durableTranscript.entry_count !== 3 ||
+            durableTranscript.complete_response_archive_count !== 3 ||
+            durableTranscript.transcript_digest === null ||
+            durableTranscript.mutation_replay_allowed !== false ||
+            durableTranscript.cleanup_authorized !== false ||
+            durableTranscript.entries.some((entry, index) => {
+                const volatileEntry = transport.transcript[index];
+                return (
+                    volatileEntry === undefined ||
+                    entry.sequence !== volatileEntry.sequence ||
+                    entry.method !== volatileEntry.method ||
+                    entry.request_digest !== volatileEntry.request_digest ||
+                    entry.request_path_digest !== volatileEntry.path_digest ||
+                    entry.response_status !== volatileEntry.status ||
+                    entry.response_digest !== volatileEntry.response_digest
+                );
+            }) ||
             !state.success ||
             state.operation.revision !== 3 ||
             state.operation.state !== "delete_dispatching" ||
@@ -375,6 +395,11 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             throw new Error(
                 `base-layer convergence failed: ${JSON.stringify({
                     recovery: [recovery.classification, recovery.recovery_requirement, recovery.archive_record_count],
+                    durable_transcript: [
+                        durableTranscript.classification,
+                        durableTranscript.entry_count,
+                        durableTranscript.complete_response_archive_count,
+                    ],
                     state: state.success ? [state.operation.revision, state.operation.state] : state.code,
                     journal: journal.success
                         ? journal.claims.map(claim => [
@@ -457,6 +482,7 @@ describe("Cloudflare Worker canary base-layer E2E benchmark", () => {
             state_records: scale.operations * 4,
             effect_claims: scale.operations * 9,
             encrypted_response_archives: scale.operations * 3,
+            durable_transcripts_reconstructed: scale.operations,
             cleanup_obligations: scale.operations,
             response_body_bytes_per_request: scale.response_bytes,
             duration_ms: round(durationMs),

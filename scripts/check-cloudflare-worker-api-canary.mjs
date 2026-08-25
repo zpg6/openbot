@@ -72,8 +72,11 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.keyed_archive_integrity_resolver_implemented === true &&
             fixture.implementation?.archive_ahead_recovery_reducer_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_archive_ahead_recovery_reducer === false &&
+            fixture.implementation?.read_only_durable_transcript_reconstruction_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_durable_transcript_reconstruction === false &&
             fixture.implementation?.local_base_layer_e2e_benchmark_implemented === true &&
             fixture.implementation?.local_base_layer_e2e_uses_public_storage_and_claim_apis === true &&
+            fixture.implementation?.local_base_layer_e2e_reconstructs_durable_transcript === true &&
             fixture.implementation?.local_base_layer_e2e_remote_network_requests === false &&
             fixture.implementation?.credentialed_runner_covered_by_local_base_layer_e2e === false &&
             fixture.implementation?.response_preimage_capture_implemented === false &&
@@ -90,6 +93,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             baseLayer.effect_claim_lease_epoch_binding_required === true &&
             baseLayer.composed_dispatch_response_sessions_required === true &&
             baseLayer.tri_store_consistency_required === true &&
+            baseLayer.restart_transcript_reconstruction_required === true &&
             baseLayer.recovery_reducers_required === true &&
             baseLayer.cleanup_obligations_required === true &&
             baseLayer.cleanup_obligation_digest_end_to_end_binding_required === true &&
@@ -110,6 +114,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.authority?.response_archive_inventory_authorizes_recovery_or_actions === false &&
             fixture.authority?.base_recovery_classifier_authenticates_local_or_remote_effects === false &&
             fixture.authority?.base_recovery_classifier_authorizes_actions === false &&
+            fixture.authority?.durable_transcript_authenticates_local_or_remote_effects === false &&
+            fixture.authority?.durable_transcript_authorizes_replay_cleanup_lifecycle_or_gate === false &&
             fixture.authority?.archive_ahead_reducer_authenticates_cloudflare_effects === false &&
             fixture.authority?.archive_ahead_reducer_authorizes_remote_mutation_cleanup_lifecycle_or_gate === false &&
             fixture.authority?.cleanup_obligation_record_authenticates_remote_effects === false &&
@@ -189,6 +195,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.base_recovery_classifier_scope ===
                 "read_only_stable_state_effect_lease_archive_shape_classification_only" &&
             workflow.base_recovery_classifier_allows_mutation_replay === false &&
+            workflow.durable_transcript_scope ===
+                "read_only_double_sampled_effect_archive_join_with_redacted_request_history" &&
+            workflow.durable_transcript_reconstructs_raw_paths_or_response_bodies === false &&
+            workflow.durable_transcript_allows_mutation_replay_or_cleanup === false &&
             workflow.archive_ahead_reducer_scope ===
                 "exact_started_head_current_lease_keyed_local_claim_append_only_unwired" &&
             workflow.archive_ahead_reducer_preserves_dispatch_lease_epoch_under_takeover === true &&
@@ -214,7 +224,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.complete_pagination_metadata_required_for_absence === true &&
             workflow.optional_response_projection_contract_implemented === true &&
             workflow.local_base_layer_e2e_workload_scope ===
-                "public_local_state_lease_effect_archive_obligation_and_recovery_apis_only" &&
+                "public_local_state_lease_effect_archive_obligation_recovery_and_durable_transcript_apis_only" &&
             workflow.local_base_layer_e2e_default_operations === 3 &&
             workflow.local_base_layer_e2e_max_operations === 128 &&
             workflow.local_base_layer_e2e_max_concurrency === 16 &&
