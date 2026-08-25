@@ -47,6 +47,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.credentialed_runner_uses_state_effect_consistency === false &&
             fixture.implementation?.automatic_cleanup_core_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_automatic_cleanup_core === false &&
+            fixture.implementation?.durable_cleanup_obligation_record_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_durable_cleanup_obligation_record === false &&
             fixture.implementation?.cleanup_cli_registered === false &&
             fixture.implementation?.manual_cleanup_authority_implemented === false &&
             fixture.implementation?.response_projection_contract_implemented === true &&
@@ -100,7 +102,9 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.authority?.base_recovery_classifier_authenticates_local_or_remote_effects === false &&
             fixture.authority?.base_recovery_classifier_authorizes_actions === false &&
             fixture.authority?.archive_ahead_reducer_authenticates_cloudflare_effects === false &&
-            fixture.authority?.archive_ahead_reducer_authorizes_remote_mutation_cleanup_lifecycle_or_gate === false,
+            fixture.authority?.archive_ahead_reducer_authorizes_remote_mutation_cleanup_lifecycle_or_gate === false &&
+            fixture.authority?.cleanup_obligation_record_authenticates_remote_effects === false &&
+            fixture.authority?.cleanup_obligation_record_authorizes_cleanup_or_mutation === false,
         "the isolated canary must grant no evidence, upload, lifecycle, attestation, or gate authority"
     );
     check(
@@ -185,6 +189,11 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.credentialed_runner_uses_durable_delete_dispatch_fence === false &&
             workflow.automatic_cleanup_grace_contract_implemented === true &&
             workflow.credentialed_runner_uses_automatic_cleanup_grace === false &&
+            workflow.cleanup_obligation_record_scope ===
+                "immutable_private_caller_constructible_pre_effect_plan_execution_operation_and_grace_binding_only" &&
+            workflow.cleanup_obligation_read_only_verification_implemented === true &&
+            workflow.cleanup_obligation_record_filesystem_writes_during_read === false &&
+            workflow.cleanup_effect_claims_bind_obligation_digest === false &&
             workflow.manual_cleanup_after_grace_implemented === false &&
             workflow.complete_pagination_metadata_required_for_absence === true &&
             workflow.optional_response_projection_contract_implemented === true &&

@@ -29,6 +29,8 @@
         "credentialed_runner_uses_state_effect_consistency": false,
         "automatic_cleanup_core_implemented": true,
         "credentialed_runner_uses_automatic_cleanup_core": false,
+        "durable_cleanup_obligation_record_implemented": true,
+        "credentialed_runner_uses_durable_cleanup_obligation_record": false,
         "cleanup_cli_registered": false,
         "manual_cleanup_authority_implemented": false,
         "response_projection_contract_implemented": true,
@@ -80,7 +82,9 @@
         "base_recovery_classifier_authenticates_local_or_remote_effects": false,
         "base_recovery_classifier_authorizes_actions": false,
         "archive_ahead_reducer_authenticates_cloudflare_effects": false,
-        "archive_ahead_reducer_authorizes_remote_mutation_cleanup_lifecycle_or_gate": false
+        "archive_ahead_reducer_authorizes_remote_mutation_cleanup_lifecycle_or_gate": false,
+        "cleanup_obligation_record_authenticates_remote_effects": false,
+        "cleanup_obligation_record_authorizes_cleanup_or_mutation": false
     },
     "base_layer_priority": {
         "priority": "base_layer_before_product_facing_work",
@@ -169,6 +173,10 @@
         "credentialed_runner_uses_durable_delete_dispatch_fence": false,
         "automatic_cleanup_grace_contract_implemented": true,
         "credentialed_runner_uses_automatic_cleanup_grace": false,
+        "cleanup_obligation_record_scope": "immutable_private_caller_constructible_pre_effect_plan_execution_operation_and_grace_binding_only",
+        "cleanup_obligation_read_only_verification_implemented": true,
+        "cleanup_obligation_record_filesystem_writes_during_read": false,
+        "cleanup_effect_claims_bind_obligation_digest": false,
         "manual_cleanup_after_grace_implemented": false,
         "complete_pagination_metadata_required_for_absence": true,
         "optional_response_projection_contract_implemented": true,
