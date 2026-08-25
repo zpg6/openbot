@@ -19,7 +19,8 @@ const OwnerPidV1Schema = z.number().int().positive().max(2_147_483_647);
 const LeaseDurationV1Schema = z.number().int().positive().max(300_000);
 const MAX_LEASE_BYTES_V1 = 16 * 1024;
 const MAX_GENERATIONS_V1 = 1_024;
-const EXECUTION_NONCE_COMMITMENT_DOMAIN_V1 = "openbot.d1-probe.cloudflare-worker-canary.execution-nonce.v1";
+const EXECUTION_NONCE_COMMITMENT_DOMAIN_V1 =
+    "openbot.d1-probe.cloudflare-worker-api-canary-execution-nonce-commitment.v1";
 const OWNER_NONCE_COMMITMENT_DOMAIN_V1 = "openbot.d1-probe.cloudflare-worker-canary.driver-owner-nonce.v1";
 const LEASE_RECORD_DIGEST_DOMAIN_V1 = "openbot.d1-probe.cloudflare-worker-canary.driver-lease-record.v1";
 
@@ -116,6 +117,10 @@ export type D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1 =
     | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryDriverLeaseDenialV1 }
     | { readonly success: true; readonly lease: D1ProbeCloudflareWorkerCanaryDriverLeaseV1 };
 
+export type D1ProbeCloudflareWorkerCanaryDriverLeaseHistoryResultV1 =
+    | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryDriverLeaseDenialV1 }
+    | { readonly success: true; readonly leases: readonly D1ProbeCloudflareWorkerCanaryDriverLeaseV1[] };
+
 export type D1ProbeCloudflareWorkerCanaryDriverLeaseOwnedResultV1 =
     | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryDriverLeaseDenialV1 }
     | {
@@ -159,7 +164,7 @@ const defaultDependencies: D1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyDepen
 type LeaseRootResultV1 =
     | {
           readonly success: false;
-          readonly code: "unsafe_lease_path" | "unsafe_lease_permissions" | "lease_io_unavailable";
+          readonly code: "lease_not_found" | "unsafe_lease_path" | "unsafe_lease_permissions" | "lease_io_unavailable";
       }
     | { readonly success: true; readonly root: string };
 
@@ -177,7 +182,7 @@ const isContainedPath = (parent: string, child: string): boolean => {
     return pathFromParent !== ".." && !pathFromParent.startsWith(`..${sep}`);
 };
 
-const ensureLeaseRoot = async (): Promise<LeaseRootResultV1> => {
+const ensureLeaseRoot = async (createIfMissing = true): Promise<LeaseRootResultV1> => {
     try {
         const repositoryStat = await lstat(repositoryRoot);
         if (!repositoryStat.isDirectory() || repositoryStat.isSymbolicLink()) {
@@ -186,6 +191,7 @@ const ensureLeaseRoot = async (): Promise<LeaseRootResultV1> => {
         const realRepositoryRoot = await realpath(repositoryRoot);
         let buildStat = await lstatOrNull(buildRoot);
         if (buildStat === null) {
+            if (!createIfMissing) return { success: false, code: "lease_not_found" };
             await mkdir(buildRoot, { mode: 0o700 });
             buildStat = await lstat(buildRoot);
         }
@@ -194,6 +200,7 @@ const ensureLeaseRoot = async (): Promise<LeaseRootResultV1> => {
         }
         let leaseRootStat = await lstatOrNull(D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1);
         if (leaseRootStat === null) {
+            if (!createIfMissing) return { success: false, code: "lease_not_found" };
             await mkdir(D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1, { mode: 0o700 });
             leaseRootStat = await lstat(D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1);
         }
@@ -264,13 +271,18 @@ const reconcilePublishedGeneration = async (
 const readGeneration = async (
     root: string,
     planDigest: string,
-    generation: number
+    generation: number,
+    reconcilePublishedLink = true
 ): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1> => {
     const path = generationPathFor(root, planDigest, generation);
     try {
         let pathStat = await lstatOrNull(path);
         if (pathStat === null) return { success: false, code: "lease_not_found" };
-        if (pathStat.nlink === 2 && (await reconcilePublishedGeneration(root, planDigest, generation, pathStat))) {
+        if (
+            reconcilePublishedLink &&
+            pathStat.nlink === 2 &&
+            (await reconcilePublishedGeneration(root, planDigest, generation, pathStat))
+        ) {
             pathStat = await lstat(path);
         }
         if (pathStat.isSymbolicLink() || !pathStat.isFile() || pathStat.nlink !== 1) {
@@ -327,6 +339,17 @@ const requiredDigest = async (domain: string, value: CanonicalJsonValueV1): Prom
 
 const recordDigest = async (lease: D1ProbeCloudflareWorkerCanaryDriverLeaseV1): Promise<string> =>
     await requiredDigest(LEASE_RECORD_DIGEST_DOMAIN_V1, lease as CanonicalJsonValueV1);
+
+export const digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1 = async (
+    leaseInput: unknown
+): Promise<string | null> => {
+    try {
+        const lease = safeParse(LeaseRecordV1Schema, leaseInput);
+        return lease === null ? null : await recordDigest(lease);
+    } catch {
+        return null;
+    }
+};
 
 const validInitialRecord = (lease: D1ProbeCloudflareWorkerCanaryDriverLeaseV1): boolean =>
     lease.generation === 0 &&
@@ -507,7 +530,7 @@ const readLatest = async (
 ): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1> => {
     try {
         const prefix = `${planDigest}.`;
-        const entries = (await readdir(root)).filter(name => name.startsWith(prefix));
+        const entries = (await readdir(root)).filter(name => name.startsWith(prefix)).sort();
         const finalPattern = new RegExp(`^${planDigest}\\.(\\d+)\\.driver-lease\\.json$`, "u");
         const generations = entries
             .map(name => finalPattern.exec(name))
@@ -548,6 +571,48 @@ const readLatest = async (
                 : { success: false, code: "lease_corrupt" };
         }
         return latest === null ? { success: false, code: "lease_not_found" } : { success: true, lease: latest };
+    } catch {
+        return { success: false, code: "lease_io_unavailable" };
+    }
+};
+
+const readHistoryReadOnly = async (
+    root: string,
+    planDigest: string
+): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseHistoryResultV1> => {
+    try {
+        const prefix = `${planDigest}.`;
+        const entries = (await readdir(root)).filter(name => name.startsWith(prefix)).sort();
+        const finalPattern = new RegExp(`^${planDigest}\\.(\\d+)\\.driver-lease\\.json$`, "u");
+        if (entries.length === 0) return { success: false, code: "lease_not_found" };
+        if (entries.some(name => !finalPattern.test(name))) return { success: false, code: "lease_corrupt" };
+        const generations = entries
+            .map(name => finalPattern.exec(name))
+            .filter((match): match is RegExpExecArray => match !== null)
+            .map(match => Number(match[1]))
+            .sort((left, right) => left - right);
+        if (
+            generations.length === 0 ||
+            generations.length > MAX_GENERATIONS_V1 ||
+            generations.some((generation, index) => generation !== index)
+        ) {
+            return { success: false, code: "lease_corrupt" };
+        }
+        const leases: D1ProbeCloudflareWorkerCanaryDriverLeaseV1[] = [];
+        for (const generation of generations) {
+            const read = await readGeneration(root, planDigest, generation, false);
+            if (!read.success) return read;
+            const previous = leases.at(-1) ?? null;
+            if (previous === null ? !validInitialRecord(read.lease) : !(await validTransition(previous, read.lease))) {
+                return { success: false, code: "lease_corrupt" };
+            }
+            leases.push(read.lease);
+        }
+        const finalEntries = (await readdir(root)).filter(name => name.startsWith(prefix)).sort();
+        if (finalEntries.length !== entries.length || finalEntries.some((name, index) => name !== entries[index])) {
+            return { success: false, code: "concurrent_lease_write" };
+        }
+        return { success: true, leases: Object.freeze(leases) };
     } catch {
         return { success: false, code: "lease_io_unavailable" };
     }
@@ -680,6 +745,20 @@ export const readD1ProbeCloudflareWorkerCanaryDriverLeaseV1 = async (
         const leaseRoot = await ensureLeaseRoot();
         if (!leaseRoot.success) return leaseRoot;
         return await readLatest(leaseRoot.root, planDigest);
+    } catch {
+        return { success: false, code: "lease_io_unavailable" };
+    }
+};
+
+export const readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1 = async (
+    planDigestInput: unknown
+): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseHistoryResultV1> => {
+    const planDigest = safeParse(DigestV1Schema, planDigestInput);
+    if (planDigest === null) return { success: false, code: "invalid_lease_request" };
+    try {
+        const leaseRoot = await ensureLeaseRoot(false);
+        if (!leaseRoot.success) return leaseRoot;
+        return await readHistoryReadOnly(leaseRoot.root, planDigest);
     } catch {
         return { success: false, code: "lease_io_unavailable" };
     }

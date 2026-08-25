@@ -22,6 +22,7 @@ const EXECUTION_NONCE_COMMITMENT_DOMAIN_V1 =
 const OPERATION_RECORD_DIGEST_DOMAIN_V1 = "openbot.d1-probe.cloudflare-worker-api-canary-operation-record.v1";
 const DigestV1Schema = z.string().regex(/^[0-9a-f]{64}$/u);
 const SafeRevisionV1Schema = z.number().int().safe().nonnegative();
+const LeaseGenerationV1Schema = z.number().int().nonnegative().max(1_023);
 const TranscriptSequenceV1Schema = z.number().int().safe().positive();
 const SafeTimeV1Schema = z.number().int().safe().nonnegative();
 const ResponseStatusV1Schema = z.number().int().min(100).max(599).nullable();
@@ -210,6 +211,8 @@ const UntrustedEffectClaimDraftV1Schema = z
         operation_state: D1ProbeCloudflareWorkerCanaryOperationStateV1Schema,
         operation_record_digest: DigestV1Schema,
         execution_nonce_commitment: DigestV1Schema,
+        lease_generation: LeaseGenerationV1Schema,
+        lease_record_digest: DigestV1Schema,
         workflow_step: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimWorkflowStepV1Schema,
         request_kind: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestKindV1Schema,
         request_method: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestMethodV1Schema,
@@ -602,7 +605,9 @@ const sameRequest = (
     left.request_path_digest === right.request_path_digest &&
     left.operation_revision === right.operation_revision &&
     left.operation_state === right.operation_state &&
-    left.operation_record_digest === right.operation_record_digest;
+    left.operation_record_digest === right.operation_record_digest &&
+    left.lease_generation === right.lease_generation &&
+    left.lease_record_digest === right.lease_record_digest;
 
 const terminalPhase = (phase: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1["effect_phase"]): boolean =>
     phase === "response_observed" || phase === "dispatch_ambiguous";
@@ -622,7 +627,11 @@ const transitionCode = (
     if (next.previous_claim_digest !== current.claim_digest) return "journal_chain_mismatch";
     if (
         next.plan_digest !== current.plan_digest ||
-        next.execution_nonce_commitment !== current.execution_nonce_commitment
+        next.execution_nonce_commitment !== current.execution_nonce_commitment ||
+        next.lease_generation < current.lease_generation ||
+        (next.lease_generation === current.lease_generation &&
+            next.lease_record_digest !== current.lease_record_digest) ||
+        (next.lease_generation > current.lease_generation && next.lease_record_digest === current.lease_record_digest)
     ) {
         return "journal_transition_denied";
     }

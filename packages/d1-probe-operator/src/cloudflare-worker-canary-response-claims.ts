@@ -14,6 +14,7 @@ import {
 } from "./cloudflare-worker-canary-effect-journal.js";
 import {
     assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
+    digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1,
     type D1ProbeCloudflareWorkerCanaryDriverLeaseOwnerV1,
     type D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1,
 } from "./cloudflare-worker-canary-driver-lease.js";
@@ -314,6 +315,8 @@ const exactClaimHead = (
     snapshot.claim_operation_state === claim.operation_state &&
     snapshot.claim_operation_record_digest === claim.operation_record_digest &&
     snapshot.claim_execution_nonce_commitment === claim.execution_nonce_commitment &&
+    snapshot.claim_lease_generation === claim.lease_generation &&
+    snapshot.claim_lease_record_digest === claim.lease_record_digest &&
     snapshot.claim_workflow_step === claim.workflow_step &&
     snapshot.claim_effect_phase === claim.effect_phase &&
     snapshot.claim_ambiguity_classification === claim.ambiguity_classification;
@@ -369,15 +372,23 @@ const contextMatchesBinding = (
 const assertLease = async (
     dependencies: D1ProbeCloudflareWorkerCanaryResponseClaimsTestOnlyDependenciesV1,
     owner: D1ProbeCloudflareWorkerCanaryDriverLeaseOwnerV1
-): Promise<boolean> => {
+): Promise<{ readonly generation: number; readonly record_digest: string } | null> => {
     const result = await dependencies.assert_current_driver_lease(owner);
-    return (
-        result.success &&
-        result.lease.state === "active" &&
-        result.lease.plan_digest === owner.plan_digest &&
-        result.lease.generation === owner.generation &&
-        result.lease.owner_pid === owner.owner_pid
-    );
+    if (
+        !result.success ||
+        !(
+            result.lease.state === "active" &&
+            result.lease.plan_digest === owner.plan_digest &&
+            result.lease.generation === owner.generation &&
+            result.lease.owner_pid === owner.owner_pid
+        )
+    ) {
+        return null;
+    }
+    const recordDigest = await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(result.lease);
+    return recordDigest === null
+        ? null
+        : Object.freeze({ generation: result.lease.generation, record_digest: recordDigest });
 };
 
 const readValidatedHead = async (
@@ -399,12 +410,16 @@ const readExactStartedHead = async (
     nonceCommitment: string,
     workflowStep: WorkflowStepV1,
     intent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1,
-    expectedClaimDigest?: string
+    expectedClaimDigest?: string,
+    expectedLeaseEpoch?: { readonly generation: number; readonly record_digest: string }
 ): Promise<D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1 | null> => {
     const head = await readValidatedHead(dependencies, operation.plan.plan_digest);
     if (
         head === null ||
         (expectedClaimDigest !== undefined && head.claim_digest !== expectedClaimDigest) ||
+        (expectedLeaseEpoch !== undefined &&
+            (head.lease_generation !== expectedLeaseEpoch.generation ||
+                head.lease_record_digest !== expectedLeaseEpoch.record_digest)) ||
         !exactStartedForIntent(head, operation, operationDigest, nonceCommitment, workflowStep, intent)
     ) {
         return null;
@@ -432,6 +447,8 @@ const makeResponseDraft = (
     operation_state: started.operation_state,
     operation_record_digest: started.operation_record_digest,
     execution_nonce_commitment: started.execution_nonce_commitment,
+    lease_generation: started.lease_generation,
+    lease_record_digest: started.lease_record_digest,
     workflow_step: started.workflow_step,
     request_kind: started.request_kind,
     request_method: started.request_method,
@@ -582,6 +599,7 @@ const createWithDependencies = async (
         let privateKey: Uint8Array | null = key;
         let boundIntent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1 | null = null;
         let boundStartedDigest: string | null = null;
+        let boundLeaseEpoch: { readonly generation: number; readonly record_digest: string } | null = null;
         let discardRequested = false;
         const requireCaptureActive = (): void => {
             if (discardRequested) failCapture();
@@ -594,6 +612,7 @@ const createWithDependencies = async (
             privateKey = null;
             boundIntent = null;
             boundStartedDigest = null;
+            boundLeaseEpoch = null;
             if (state !== "recording" && state !== "capturing") state = "discarded";
         };
         const recordDispatchAndBind: D1ProbeCloudflareWorkerCanaryRecordDispatchV1 = async intentInput => {
@@ -604,25 +623,37 @@ const createWithDependencies = async (
                 if (intent === null) return failCapture();
                 await dispatchClaims.record_dispatch(intent);
                 if (discardRequested || privateKey === null) return failCapture();
-                if (!(await assertLease(dependencies, owner))) failCapture();
+                const leaseEpoch = await assertLease(dependencies, owner);
+                if (leaseEpoch === null) return failCapture();
                 const started = await readExactStartedHead(
                     dependencies,
                     operation,
                     operationDigest,
                     nonceCommitment,
                     workflowStep,
-                    intent
+                    intent,
+                    undefined,
+                    leaseEpoch
                 );
                 if (started === null) return failCapture();
-                if (!(await assertLease(dependencies, owner))) failCapture();
+                const reboundLeaseEpoch = await assertLease(dependencies, owner);
+                if (
+                    reboundLeaseEpoch === null ||
+                    reboundLeaseEpoch.generation !== leaseEpoch.generation ||
+                    reboundLeaseEpoch.record_digest !== leaseEpoch.record_digest
+                ) {
+                    failCapture();
+                }
                 boundIntent = intent;
                 boundStartedDigest = started.claim_digest;
+                boundLeaseEpoch = leaseEpoch;
                 state = "bound";
             } catch {
                 clearBytes(privateKey);
                 privateKey = null;
                 boundIntent = null;
                 boundStartedDigest = null;
+                boundLeaseEpoch = null;
                 state = "discarded";
                 failCapture();
             }
@@ -631,19 +662,22 @@ const createWithDependencies = async (
             contextInput,
             responseBytesInput
         ) => {
-            if (state !== "bound" || boundIntent === null || boundStartedDigest === null) {
+            if (state !== "bound" || boundIntent === null || boundStartedDigest === null || boundLeaseEpoch === null) {
                 discardRequested = true;
                 clearBytes(privateKey);
                 privateKey = null;
                 boundIntent = null;
                 boundStartedDigest = null;
+                boundLeaseEpoch = null;
                 if (state !== "recording" && state !== "capturing") state = "discarded";
                 return failCapture();
             }
             const intent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1 = boundIntent;
             const startedDigest: string = boundStartedDigest;
+            const leaseEpoch = boundLeaseEpoch;
             boundIntent = null;
             boundStartedDigest = null;
+            boundLeaseEpoch = null;
             state = "capturing";
             const localKey = privateKey;
             privateKey = null;
@@ -673,7 +707,8 @@ const createWithDependencies = async (
                     nonceCommitment,
                     workflowStep,
                     intent,
-                    startedDigest
+                    startedDigest,
+                    leaseEpoch
                 );
                 if (started === null) return failCapture();
                 requireCaptureActive();
@@ -705,7 +740,8 @@ const createWithDependencies = async (
                     nonceCommitment,
                     workflowStep,
                     intent,
-                    started.claim_digest
+                    started.claim_digest,
+                    leaseEpoch
                 );
                 if (unchangedStarted === null) return failCapture();
                 requireCaptureActive();

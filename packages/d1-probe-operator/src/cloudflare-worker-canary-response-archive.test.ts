@@ -56,6 +56,8 @@ const observedClaim = async (
         operation_state: "prepared",
         operation_record_digest: randomDigest(),
         execution_nonce_commitment: randomDigest(),
+        lease_generation: 0,
+        lease_record_digest: randomDigest(),
         workflow_step: "prepared_worker_list",
         request_kind: "inspect_worker",
         request_method: "GET",

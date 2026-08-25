@@ -9,6 +9,8 @@ import {
 } from "./cloudflare-worker-canary-effect-journal.js";
 import {
     assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
+    digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1,
+    type D1ProbeCloudflareWorkerCanaryDriverLeaseV1,
     type D1ProbeCloudflareWorkerCanaryDriverLeaseOwnerV1,
     type D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1,
 } from "./cloudflare-worker-canary-driver-lease.js";
@@ -247,6 +249,8 @@ const exactClaimHead = (
     snapshot.claim_operation_state === claim.operation_state &&
     snapshot.claim_operation_record_digest === claim.operation_record_digest &&
     snapshot.claim_execution_nonce_commitment === claim.execution_nonce_commitment &&
+    snapshot.claim_lease_generation === claim.lease_generation &&
+    snapshot.claim_lease_record_digest === claim.lease_record_digest &&
     snapshot.claim_workflow_step === claim.workflow_step &&
     snapshot.claim_effect_phase === claim.effect_phase &&
     snapshot.claim_ambiguity_classification === claim.ambiguity_classification;
@@ -254,21 +258,23 @@ const exactClaimHead = (
 const assertLease = async (
     dependencies: D1ProbeCloudflareWorkerCanaryDispatchClaimsTestOnlyDependenciesV1,
     owner: D1ProbeCloudflareWorkerCanaryDriverLeaseOwnerV1
-): Promise<boolean> => {
+): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseV1 | null> => {
     const result = await dependencies.assert_current_driver_lease(owner);
-    return (
-        result.success &&
+    return result.success &&
         result.lease.state === "active" &&
         result.lease.plan_digest === owner.plan_digest &&
         result.lease.generation === owner.generation &&
         result.lease.owner_pid === owner.owner_pid
-    );
+        ? result.lease
+        : null;
 };
 
 const makeDraft = (
     operation: D1ProbeCloudflareWorkerCanaryOperationV1,
     operationDigest: string,
     nonceCommitment: string,
+    leaseGeneration: number,
+    leaseRecordDigest: string,
     workflowStep: WorkflowStepV1,
     intent: D1ProbeCloudflareWorkerCanaryDispatchIntentV1,
     journalRevision: number,
@@ -284,6 +290,8 @@ const makeDraft = (
     operation_state: operation.state,
     operation_record_digest: operationDigest,
     execution_nonce_commitment: nonceCommitment,
+    lease_generation: leaseGeneration,
+    lease_record_digest: leaseRecordDigest,
     workflow_step: workflowStep,
     request_kind: workflowBindings[workflowStep].request_kind,
     request_method: workflowBindings[workflowStep].request_method,
@@ -351,11 +359,14 @@ const createWithDependencies = async (
                 intent.method !== binding.request_method ||
                 intent.window_class !== binding.window_class ||
                 intent.intent_observed_at_ms < Math.max(operation.plan.not_before_ms, operation.updated_at_ms) ||
-                intent.dispatch_started_at_ms >= operation.plan.expires_at_ms ||
-                !(await assertLease(dependencies, owner))
+                intent.dispatch_started_at_ms >= operation.plan.expires_at_ms
             ) {
                 failDispatch();
             }
+            const ownedLease = await assertLease(dependencies, owner);
+            const leaseRecordDigest =
+                ownedLease === null ? null : await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(ownedLease);
+            if (ownedLease === null || leaseRecordDigest === null) return failDispatch();
             const before = await dependencies.read_consistency(operation.plan.plan_digest);
             if (!exactOperationHead(before, operation, operationDigest, nonceCommitment)) failDispatch();
             const journalMissing =
@@ -383,6 +394,8 @@ const createWithDependencies = async (
                     operation,
                     operationDigest,
                     nonceCommitment,
+                    ownedLease.generation,
+                    leaseRecordDigest,
                     workflowStep,
                     intent,
                     intentRevision,
@@ -393,7 +406,13 @@ const createWithDependencies = async (
             if (intentClaim === null) throw new Error("invalid intent claim");
             const intentAppend = await dependencies.append_effect_claim(intentClaim);
             if (!intentAppend.success || intentAppend.claim.claim_digest !== intentClaim.claim_digest) failDispatch();
-            if (!(await assertLease(dependencies, owner))) failDispatch();
+            const leaseAfterIntent = await assertLease(dependencies, owner);
+            if (
+                leaseAfterIntent === null ||
+                (await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(leaseAfterIntent)) !== leaseRecordDigest
+            ) {
+                failDispatch();
+            }
             const afterIntent = await dependencies.read_consistency(operation.plan.plan_digest);
             if (
                 afterIntent.classification !== "claim_behind" ||
@@ -409,6 +428,8 @@ const createWithDependencies = async (
                     operation,
                     operationDigest,
                     nonceCommitment,
+                    ownedLease.generation,
+                    leaseRecordDigest,
                     workflowStep,
                     intent,
                     intentClaim.journal_revision + 1,
@@ -421,7 +442,13 @@ const createWithDependencies = async (
             if (!startedAppend.success || startedAppend.claim.claim_digest !== startedClaim.claim_digest) {
                 failDispatch();
             }
-            if (!(await assertLease(dependencies, owner))) failDispatch();
+            const leaseAfterStarted = await assertLease(dependencies, owner);
+            if (
+                leaseAfterStarted === null ||
+                (await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(leaseAfterStarted)) !== leaseRecordDigest
+            ) {
+                failDispatch();
+            }
             const afterStarted = await dependencies.read_consistency(operation.plan.plan_digest);
             if (
                 afterStarted.classification !== "ambiguous_dispatch" ||
@@ -432,7 +459,13 @@ const createWithDependencies = async (
             ) {
                 failDispatch();
             }
-            if (!(await assertLease(dependencies, owner))) failDispatch();
+            const finalLease = await assertLease(dependencies, owner);
+            if (
+                finalLease === null ||
+                (await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(finalLease)) !== leaseRecordDigest
+            ) {
+                failDispatch();
+            }
         } catch {
             failDispatch();
         }

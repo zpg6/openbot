@@ -51,6 +51,8 @@ const draft = (
     operation_state: "prepared",
     operation_record_digest: randomDigest(),
     execution_nonce_commitment: randomDigest(),
+    lease_generation: 0,
+    lease_record_digest: randomDigest(),
     workflow_step: "prepared_worker_list",
     request_kind: "inspect_worker",
     request_method: "GET",
@@ -315,6 +317,17 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
             ambiguity_classification: "may_have_dispatched",
         });
         await expect(appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(changedIntentTime)).resolves.toEqual({
+            success: false,
+            code: "journal_transition_denied",
+        });
+
+        const changedLeaseEpoch = await nextRecord(intent, {
+            effect_phase: "dispatch_started",
+            dispatch_started_at_ms: 1_001,
+            lease_record_digest: randomDigest(),
+            ambiguity_classification: "may_have_dispatched",
+        });
+        await expect(appendD1ProbeCloudflareWorkerCanaryEffectJournalV1(changedLeaseEpoch)).resolves.toEqual({
             success: false,
             code: "journal_transition_denied",
         });

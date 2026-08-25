@@ -29,6 +29,12 @@ import {
     d1ProbeCloudflareWorkerCanaryStatePathV1,
     transitionD1ProbeCloudflareWorkerCanaryStateV1,
 } from "./cloudflare-worker-canary-state.js";
+import {
+    D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1,
+    acquireD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
+    digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1,
+    type D1ProbeCloudflareWorkerCanaryDriverLeaseV1,
+} from "./cloudflare-worker-canary-driver-lease.js";
 
 const hmacKey = globalThis
     .btoa(String.fromCharCode(...new Uint8Array(32).fill(19)))
@@ -38,6 +44,7 @@ const hmacKey = globalThis
 const cleanupStatePrefixes = new Set<string>();
 const cleanupJournalPrefixes = new Set<string>();
 const cleanupPaths = new Set<string>();
+const leaseByPlan = new Map<string, D1ProbeCloudflareWorkerCanaryDriverLeaseV1>();
 
 afterEach(async () => {
     for (const path of cleanupPaths) await unlink(path).catch(() => undefined);
@@ -59,15 +66,27 @@ afterEach(async () => {
             }
         }
     }
+    const leaseNames = await readdir(D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1).catch(() => []);
+    for (const prefix of cleanupStatePrefixes) {
+        for (const name of leaseNames) {
+            if (name.startsWith(prefix)) {
+                await unlink(`${D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1}/${name}`).catch(
+                    () => undefined
+                );
+            }
+        }
+    }
     cleanupStatePrefixes.clear();
     cleanupJournalPrefixes.clear();
     cleanupPaths.clear();
+    leaseByPlan.clear();
 });
 
 const randomDigest = (): string =>
     Array.from(crypto.getRandomValues(new Uint8Array(32)), byte => byte.toString(16).padStart(2, "0")).join("");
 
 const prepared = async (): Promise<D1ProbeCloudflareWorkerCanaryOperationV1> => {
+    const startedAt = Date.now();
     const entropy = crypto.getRandomValues(new Uint8Array(16));
     let batch = 0;
     const generated = await generateD1ProbeCloudflareWorkerApiCanaryCommandV1(
@@ -78,7 +97,7 @@ const prepared = async (): Promise<D1ProbeCloudflareWorkerCanaryOperationV1> => 
         },
         { hmac_key_base64url: hmacKey },
         {
-            now: () => 5_000,
+            now: () => startedAt,
             randomBytes: byteLength => {
                 batch += 1;
                 return new Uint8Array(byteLength).map(
@@ -93,11 +112,18 @@ const prepared = async (): Promise<D1ProbeCloudflareWorkerCanaryOperationV1> => 
         `openbot-canary-attempt-${Array.from(crypto.getRandomValues(new Uint8Array(16)), byte =>
             byte.toString(16).padStart(2, "0")
         ).join("")}`,
-        5_001
+        startedAt + 1
     );
     if (!operation.success) throw new Error(operation.code);
     cleanupStatePrefixes.add(operation.operation.plan.plan_digest);
     cleanupJournalPrefixes.add(operation.operation.plan.plan_digest);
+    const acquired = await acquireD1ProbeCloudflareWorkerCanaryDriverLeaseV1({
+        plan_digest: operation.operation.plan.plan_digest,
+        execution_nonce: operation.operation.execution_nonce,
+        lease_duration_ms: 300_000,
+    });
+    if (!acquired.success) throw new Error(acquired.code);
+    leaseByPlan.set(operation.operation.plan.plan_digest, acquired.lease);
     return operation.operation;
 };
 
@@ -110,6 +136,10 @@ const claimFor = async (
         commitD1ProbeCloudflareWorkerCanaryExecutionNonceV1(operation.execution_nonce),
     ]);
     if (operationDigest === null || nonceCommitment === null) throw new Error("commitment unavailable");
+    const lease = leaseByPlan.get(operation.plan.plan_digest);
+    const leaseRecordDigest =
+        lease === undefined ? null : await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(lease);
+    if (lease === undefined || leaseRecordDigest === null) throw new Error("lease commitment unavailable");
     const claim = await buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1({
         schema_version: 1,
         kind: "d1_probe_cloudflare_worker_api_canary_untrusted_effect_claim",
@@ -120,12 +150,14 @@ const claimFor = async (
         operation_state: operation.state,
         operation_record_digest: operationDigest,
         execution_nonce_commitment: nonceCommitment,
+        lease_generation: lease.generation,
+        lease_record_digest: leaseRecordDigest,
         workflow_step: "prepared_worker_list",
         request_kind: "inspect_worker",
         request_method: "GET",
         transcript_sequence: 1,
         effect_phase: "dispatch_intent",
-        intent_observed_at_ms: 5_010,
+        intent_observed_at_ms: Math.max(operation.updated_at_ms + 1, lease.heartbeat_at_ms),
         dispatch_started_at_ms: null,
         request_digest: randomDigest(),
         request_path_digest: randomDigest(),
@@ -200,11 +232,16 @@ describe("Cloudflare Worker canary read-only consistency", () => {
         await appendClaims(claims);
 
         const result = await readD1ProbeCloudflareWorkerCanaryConsistencyV1(operation.plan.plan_digest);
+        const lease = leaseByPlan.get(operation.plan.plan_digest);
+        const leaseRecordDigest = await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(lease);
         expect(result).toMatchObject({
             classification: "exact_sync",
             plan_digest: operation.plan.plan_digest,
             state_operation_revision: 0,
             state_operation_state: "prepared",
+            driver_lease_generation: lease?.generation,
+            driver_lease_record_digest: leaseRecordDigest,
+            driver_lease_state: "active",
             claim_journal_revision: 2,
             claim_operation_revision: 0,
             claim_operation_state: "prepared",
@@ -272,7 +309,7 @@ describe("Cloudflare Worker canary read-only consistency", () => {
         ).resolves.toMatchObject({ classification: "missing", missing_component: "effect_journal" });
         await expect(readD1ProbeCloudflareWorkerCanaryConsistencyV1(randomDigest())).resolves.toMatchObject({
             classification: "missing",
-            missing_component: "both",
+            missing_component: "multiple",
         });
     });
 
@@ -386,13 +423,15 @@ describe("Cloudflare Worker canary read-only consistency", () => {
         }
     });
 
-    it("rejects forged historical operation digests and nonce commitments", async () => {
-        for (const mismatch of ["operation_digest", "nonce_commitment"] as const) {
+    it("rejects forged historical operation, nonce, and lease bindings", async () => {
+        for (const mismatch of ["operation_digest", "nonce_commitment", "lease_digest", "lease_generation"] as const) {
             const operation = await prepared();
             expect((await createD1ProbeCloudflareWorkerCanaryStateV1(operation)).success).toBe(true);
             const intent = await claimFor(operation, {
                 ...(mismatch === "operation_digest" ? { operation_record_digest: randomDigest() } : {}),
                 ...(mismatch === "nonce_commitment" ? { execution_nonce_commitment: randomDigest() } : {}),
+                ...(mismatch === "lease_digest" ? { lease_record_digest: randomDigest() } : {}),
+                ...(mismatch === "lease_generation" ? { lease_generation: 1 } : {}),
             });
             await appendClaims(await terminalClaims(intent));
             await expect(
@@ -495,9 +534,6 @@ describe("Cloudflare Worker canary read-only consistency", () => {
         const gap = await claimFor(gapOperation, {
             journal_revision: 1,
             previous_claim_digest: randomDigest(),
-            effect_phase: "dispatch_started",
-            dispatch_started_at_ms: 5_011,
-            ambiguity_classification: "may_have_dispatched",
         });
         const gapPath = d1ProbeCloudflareWorkerCanaryEffectJournalPathV1(gapOperation.plan.plan_digest, 1);
         if (gapPath === null) throw new Error("path unavailable");
@@ -640,6 +676,10 @@ describe("Cloudflare Worker canary read-only consistency", () => {
                     journalRead += 1;
                     return { success: true, claims: journalRead === 1 ? [intent] : claims };
                 },
+                read_driver_lease_history: async () => ({
+                    success: true,
+                    leases: [leaseByPlan.get(operation.plan.plan_digest)!],
+                }),
             })
         ).resolves.toMatchObject({ classification: "unstable" });
     });

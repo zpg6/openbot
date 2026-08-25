@@ -8,7 +8,11 @@ import {
     digestD1ProbeCloudflareWorkerCanaryOperationRecordV1,
     type D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
 } from "./cloudflare-worker-canary-effect-journal.js";
-import type { D1ProbeCloudflareWorkerCanaryDriverLeaseOwnerV1 } from "./cloudflare-worker-canary-driver-lease.js";
+import {
+    digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1,
+    type D1ProbeCloudflareWorkerCanaryDriverLeaseOwnerV1,
+    type D1ProbeCloudflareWorkerCanaryDriverLeaseV1,
+} from "./cloudflare-worker-canary-driver-lease.js";
 import type { D1ProbeCloudflareWorkerCanaryConsistencyV1 } from "./cloudflare-worker-canary-consistency.js";
 import {
     prepareD1ProbeCloudflareWorkerCanaryOperationV1,
@@ -116,6 +120,31 @@ interface HarnessV1 {
 
 const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): Promise<HarnessV1> => {
     const owner = ownerFor(operation);
+    const lease: D1ProbeCloudflareWorkerCanaryDriverLeaseV1 = {
+        schema_version: 1,
+        kind: "d1_probe_cloudflare_worker_api_canary_driver_lease",
+        transition: "renewed",
+        state: "active",
+        plan_digest: operation.plan.plan_digest,
+        execution_nonce_commitment: digest("d"),
+        generation: owner.generation,
+        previous_record_digest: digest("e"),
+        owner_pid: owner.owner_pid,
+        owner_nonce_commitment: digest("f"),
+        prior_owner_liveness: "not_checked",
+        issued_at_ms: 10_000,
+        heartbeat_at_ms: 10_009,
+        expires_at_ms: 20_000,
+        caller_mutation_authority: false,
+        authoritative: false,
+        eligible_for_upload: false,
+        eligible_for_attestation: false,
+        lifecycle_advance_allowed: false,
+        gate_promotion_allowed: false,
+        mutation_authority: false,
+    };
+    const leaseRecordDigest = await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(lease);
+    if (leaseRecordDigest === null) throw new Error("lease digest unavailable");
     const [operationDigest, nonceCommitment] = await Promise.all([
         digestD1ProbeCloudflareWorkerCanaryOperationRecordV1(operation),
         commitD1ProbeCloudflareWorkerCanaryExecutionNonceV1(operation.execution_nonce),
@@ -131,6 +160,8 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
         operation_state: operation.state,
         operation_record_digest: operationDigest,
         execution_nonce_commitment: nonceCommitment,
+        lease_generation: owner.generation,
+        lease_record_digest: leaseRecordDigest,
         workflow_step: "prepared_worker_list",
         request_kind: "inspect_worker",
         request_method: "GET",
@@ -192,15 +223,34 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
         state_operation_state: operation.state,
         state_operation_record_digest: operationDigest,
         state_execution_nonce_commitment: nonceCommitment,
+        driver_lease_generation: lease.generation,
+        driver_lease_record_digest: leaseRecordDigest,
+        driver_lease_state: lease.state,
         claim_journal_revision: claim.journal_revision,
         claim_digest: claim.claim_digest,
         claim_operation_revision: claim.operation_revision,
         claim_operation_state: claim.operation_state,
         claim_operation_record_digest: claim.operation_record_digest,
         claim_execution_nonce_commitment: claim.execution_nonce_commitment,
+        claim_lease_generation: claim.lease_generation,
+        claim_lease_record_digest: claim.lease_record_digest,
         claim_workflow_step: claim.workflow_step,
         claim_effect_phase: claim.effect_phase,
         claim_ambiguity_classification: claim.ambiguity_classification,
+        response_claim_bindings:
+            claim.effect_phase === "response_observed" &&
+            claim.response_status !== null &&
+            claim.response_digest !== null
+                ? [
+                      {
+                          journal_revision: claim.journal_revision,
+                          claim_digest: claim.claim_digest,
+                          transcript_sequence: claim.transcript_sequence,
+                          response_status: claim.response_status,
+                          response_digest: claim.response_digest,
+                      },
+                  ]
+                : [],
         ...authority,
     });
     const dependencies: D1ProbeCloudflareWorkerCanaryResponseClaimsTestOnlyDependenciesV1 = {
@@ -233,29 +283,7 @@ const harnessFor = async (operation: D1ProbeCloudflareWorkerCanaryOperationV1): 
             if (leaseCalls === leaseFailureAt) return { success: false, code: "lease_expired" };
             return {
                 success: true,
-                lease: {
-                    schema_version: 1,
-                    kind: "d1_probe_cloudflare_worker_api_canary_driver_lease",
-                    transition: "renewed",
-                    state: "active",
-                    plan_digest: operation.plan.plan_digest,
-                    execution_nonce_commitment: digest("d"),
-                    generation: owner.generation,
-                    previous_record_digest: digest("e"),
-                    owner_pid: owner.owner_pid,
-                    owner_nonce_commitment: digest("f"),
-                    prior_owner_liveness: "not_checked",
-                    issued_at_ms: 10_000,
-                    heartbeat_at_ms: 10_009,
-                    expires_at_ms: 20_000,
-                    caller_mutation_authority: false,
-                    authoritative: false,
-                    eligible_for_upload: false,
-                    eligible_for_attestation: false,
-                    lifecycle_advance_allowed: false,
-                    gate_promotion_allowed: false,
-                    mutation_authority: false,
-                },
+                lease,
             };
         },
         read_effect_journal: async () => {

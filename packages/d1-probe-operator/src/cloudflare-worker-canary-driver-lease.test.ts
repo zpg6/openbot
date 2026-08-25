@@ -9,6 +9,8 @@ import {
     assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
     createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1,
     d1ProbeCloudflareWorkerCanaryDriverLeasePathV1,
+    digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1,
+    readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1,
     readD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
     releaseD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
     type D1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyDependenciesV1,
@@ -76,6 +78,24 @@ afterEach(async () => {
 });
 
 describe("Cloudflare Worker canary driver lease", () => {
+    it("reads a stable lease history without reconciling or writing", async () => {
+        const digest = planDigest();
+        const acquired = await acquire(digest, 40_001, 1_000, 9);
+        if (!acquired.success) throw new Error(acquired.code);
+        const path = d1ProbeCloudflareWorkerCanaryDriverLeasePathV1(digest, 0);
+        if (path === null) throw new Error("lease path unavailable");
+        const before = await Promise.all([lstat(path), readFile(path)]);
+        const history = await readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1(digest);
+        expect(history).toEqual({ success: true, leases: [acquired.lease] });
+        await expect(digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(acquired.lease)).resolves.toMatch(
+            /^[0-9a-f]{64}$/u
+        );
+        const after = await Promise.all([lstat(path), readFile(path)]);
+        expect(after[0].mtimeMs).toBe(before[0].mtimeMs);
+        expect(after[0].nlink).toBe(1);
+        expect(after[1]).toEqual(before[1]);
+    });
+
     it("derives the production owner PID and checks it again before use", async () => {
         await expect(
             acquireD1ProbeCloudflareWorkerCanaryDriverLeaseV1({
@@ -398,6 +418,15 @@ describe("Cloudflare Worker canary driver lease", () => {
         const tempPath = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1}/${digest}.0.11111111-1111-4111-8111-111111111111.driver-lease.tmp`;
         cleanupPaths.add(tempPath);
         await link(finalPath, tempPath);
+
+        await expect(readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1(digest)).resolves.toEqual({
+            success: false,
+            code: "lease_corrupt",
+        });
+        await expect(Promise.all([lstat(finalPath), lstat(tempPath)])).resolves.toEqual([
+            expect.objectContaining({ nlink: 2 }),
+            expect.objectContaining({ nlink: 2 }),
+        ]);
 
         await expect(readD1ProbeCloudflareWorkerCanaryDriverLeaseV1(digest)).resolves.toEqual({
             success: true,

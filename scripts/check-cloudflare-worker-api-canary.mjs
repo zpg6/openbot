@@ -40,7 +40,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.credentialed_runner_uses_driver_lease === false &&
             fixture.implementation?.untrusted_effect_claim_journal_implemented === true &&
             fixture.implementation?.credentialed_runner_writes_effect_claim_journal === false &&
+            fixture.implementation?.shared_execution_nonce_commitment_domain_implemented === true &&
+            fixture.implementation?.effect_claim_lease_epoch_binding_implemented === true &&
             fixture.implementation?.read_only_state_effect_consistency_implemented === true &&
+            fixture.implementation?.read_only_state_effect_lease_consistency_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_state_effect_consistency === false &&
             fixture.implementation?.automatic_cleanup_core_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_automatic_cleanup_core === false &&
@@ -58,7 +61,9 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.credentialed_runner_writes_encrypted_response_preimages === false &&
             fixture.implementation?.read_only_response_archive_inventory_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_response_archive_inventory === false &&
-            fixture.implementation?.tri_store_consistency_implemented === false &&
+            fixture.implementation?.tri_store_consistency_implemented === true &&
+            fixture.implementation?.untrusted_base_recovery_classifier_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_base_recovery_classifier === false &&
             fixture.implementation?.archive_ahead_recovery_reducer_implemented === false &&
             fixture.implementation?.response_preimage_capture_implemented === false &&
             fixture.implementation?.reviewed_observation_fixture_transition_implemented === false &&
@@ -71,6 +76,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             baseLayer.durable_identities_required === true &&
             baseLayer.append_only_state_effect_archive_histories_required === true &&
             baseLayer.lease_epochs_required === true &&
+            baseLayer.effect_claim_lease_epoch_binding_required === true &&
             baseLayer.composed_dispatch_response_sessions_required === true &&
             baseLayer.tri_store_consistency_required === true &&
             baseLayer.recovery_reducers_required === true &&
@@ -82,12 +88,15 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
     check(
         Object.values(fixture.authority ?? {}).every(value => value === false) &&
             fixture.authority?.dispatch_claim_adapter_authenticates_transport === false &&
+            fixture.authority?.effect_claim_lease_epoch_authenticates_process_ownership === false &&
             fixture.authority?.response_capture_hook_proves_archive_publication === false &&
             fixture.authority?.response_capture_hook_prevents_plaintext_retention === false &&
             fixture.authority?.response_claim_adapter_authenticates_cloudflare_effects === false &&
             fixture.authority?.response_archive_inventory_authenticates_envelopes_or_responses === false &&
             fixture.authority?.response_archive_inventory_proves_key_possession_or_decryptability === false &&
-            fixture.authority?.response_archive_inventory_authorizes_recovery_or_actions === false,
+            fixture.authority?.response_archive_inventory_authorizes_recovery_or_actions === false &&
+            fixture.authority?.base_recovery_classifier_authenticates_local_or_remote_effects === false &&
+            fixture.authority?.base_recovery_classifier_authorizes_actions === false,
         "the isolated canary must grant no evidence, upload, lifecycle, attestation, or gate authority"
     );
     check(
@@ -130,7 +139,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.distributed_plan_reservation === false &&
             workflow.driver_lease_scope === "cooperative_single_checkout_only" &&
             workflow.effect_claim_journal_scope === "caller_constructible_redacted_hash_chain_only" &&
+            workflow.effect_claim_lease_epoch_scope ===
+                "exact_generation_and_canonical_lease_record_digest_non_authenticating" &&
             workflow.consistency_snapshot_scope === "locally_forgeable_may_stale_reassert_heads_before_effect" &&
+            same(workflow.consistency_snapshot_stores, ["operation_state", "effect_journal", "driver_lease"]) &&
             workflow.consistency_reader_filesystem_writes === false &&
             workflow.pre_dispatch_ordering_scope === "caller_controlled_one_use_hook_no_persistence_proof" &&
             workflow.durable_dispatch_claim_adapter_scope === "forward_only_intent_then_started_non_atomic_unwired" &&
@@ -152,6 +164,9 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
                 "read_only_redacted_local_encrypted_envelope_shape_non_authenticating" &&
             workflow.response_archive_inventory_filesystem_writes === false &&
             workflow.response_archive_inventory_returns_plaintext_ciphertext_nonce_or_tag === false &&
+            workflow.base_recovery_classifier_scope ===
+                "read_only_stable_state_effect_lease_archive_shape_classification_only" &&
+            workflow.base_recovery_classifier_allows_mutation_replay === false &&
             workflow.fresh_execution_ownership_tag_required === true &&
             workflow.durable_private_attempt_record_implemented === true &&
             workflow.credentialed_runner_records_raw_execution_ownership_tag === false &&
