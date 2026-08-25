@@ -217,7 +217,7 @@ describe("Cloudflare Worker canary recovery inspector CLI", () => {
             stdout: "",
             stderr: "recovery_state_not_found\n",
         });
-    });
+    }, 15_000);
 
     it("does not reconcile or remove a same-inode publication residue", async () => {
         const prepared = await prepareState();

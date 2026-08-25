@@ -16,6 +16,7 @@ import {
     d1ProbeCloudflareWorkerCanaryResponseArchivePathTestOnlyV1,
     readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyTestOnlyV1,
     readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1,
+    resolveD1ProbeCloudflareWorkerCanaryResponseArchiveAheadV1,
     type D1ProbeCloudflareWorkerCanaryEncryptedResponsePreimageV1,
     type D1ProbeCloudflareWorkerCanaryResponseArchiveExpectedContextV1,
 } from "./cloudflare-worker-canary-response-archive.js";
@@ -82,6 +83,33 @@ const observedClaim = async (
     if (claim === null) throw new Error("test claim did not validate");
     cleanupPrefixes.add(claim.plan_digest);
     return claim;
+};
+
+const startedAndObservedClaims = async (
+    responseBytes: Uint8Array
+): Promise<{
+    readonly started: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1;
+    readonly observed: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1;
+}> => {
+    const base = await observedClaim(responseBytes);
+    const { claim_digest: _baseDigest, ...baseDraft } = base;
+    const started = await buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1({
+        ...baseDraft,
+        journal_revision: 1,
+        previous_claim_digest: randomDigest(),
+        effect_phase: "dispatch_started",
+        response_status: null,
+        response_digest: null,
+        ambiguity_classification: "may_have_dispatched",
+    });
+    if (started === null) throw new Error("test started claim did not validate");
+    const observed = await buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1({
+        ...baseDraft,
+        journal_revision: 2,
+        previous_claim_digest: started.claim_digest,
+    });
+    if (observed === null) throw new Error("test observed claim did not validate");
+    return { started, observed };
 };
 
 const contextFor = (
@@ -196,6 +224,78 @@ const decryptD1ProbeCloudflareWorkerCanaryResponsePreimageTestOnlyV1 = async (
 };
 
 describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
+    it("resolves one archive-ahead response claim with a key without exporting plaintext", async () => {
+        const response = new TextEncoder().encode('{"id":"private-worker-id","ok":true}');
+        const { started, observed } = await startedAndObservedClaims(response);
+        const key = randomBytes(32);
+        expect(await archive(observed, response, key)).toMatchObject({ success: true });
+        const inventory = await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(
+            observed.plan_digest
+        );
+        if (!inventory.success) throw new Error(inventory.code);
+        const record = inventory.inventory.records[0];
+        if (record === undefined) throw new Error("archive inventory record unavailable");
+
+        const result = await resolveD1ProbeCloudflareWorkerCanaryResponseArchiveAheadV1(
+            started,
+            record,
+            1_786_000_000_001,
+            key
+        );
+
+        expect(result).toMatchObject({
+            success: true,
+            claim: { claim_digest: observed.claim_digest, effect_phase: "response_observed" },
+            receipt: {
+                claim_digest: observed.claim_digest,
+                local_archive_key_matched: true,
+                local_ciphertext_integrity_matched: true,
+                local_plaintext_digest_matched: true,
+                plaintext_exported: false,
+                cloudflare_origin_authenticated: false,
+                effect_claim_authenticated: false,
+                caller_mutation_authority: false,
+                authoritative: false,
+            },
+        });
+        expect(JSON.stringify(result)).not.toContain("private-worker-id");
+        expect(JSON.stringify(result)).not.toContain(Buffer.from(response).toString("base64"));
+    });
+
+    it("denies the wrong key, an expired observation, and a substituted started claim", async () => {
+        const response = new TextEncoder().encode('{"ok":true}');
+        const { started, observed } = await startedAndObservedClaims(response);
+        const key = randomBytes(32);
+        expect(await archive(observed, response, key)).toMatchObject({ success: true });
+        const inventory = await readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(
+            observed.plan_digest
+        );
+        if (!inventory.success) throw new Error(inventory.code);
+        const record = inventory.inventory.records[0];
+        if (record === undefined) throw new Error("archive inventory record unavailable");
+        const { claim_digest: _startedDigest, ...startedDraft } = started;
+        const substituted = await buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1({
+            ...startedDraft,
+            request_digest: randomDigest(),
+        });
+        if (substituted === null) throw new Error("substituted started claim unavailable");
+
+        await expect(
+            resolveD1ProbeCloudflareWorkerCanaryResponseArchiveAheadV1(
+                started,
+                record,
+                1_786_000_000_001,
+                randomBytes(32)
+            )
+        ).resolves.toEqual({ success: false, code: "archive_key_mismatch" });
+        await expect(
+            resolveD1ProbeCloudflareWorkerCanaryResponseArchiveAheadV1(started, record, 1_786_000_000_000, key)
+        ).resolves.toEqual({ success: false, code: "archive_context_mismatch" });
+        await expect(
+            resolveD1ProbeCloudflareWorkerCanaryResponseArchiveAheadV1(substituted, record, 1_786_000_000_001, key)
+        ).resolves.toEqual({ success: false, code: "archive_context_mismatch" });
+    });
+
     it("writes a canonical encrypted envelope and returns only a non-authoritative receipt", async () => {
         const response = new TextEncoder().encode('{"id":"secret-worker-id","ok":true}');
         const claim = await observedClaim(response);

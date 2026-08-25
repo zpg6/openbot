@@ -1,5 +1,13 @@
 import { constants } from "node:fs";
-import { createCipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
+import {
+    createCipheriv,
+    createDecipheriv,
+    createHash,
+    createHmac,
+    hkdfSync,
+    randomBytes,
+    randomUUID,
+} from "node:crypto";
 import { link, lstat, mkdir, open, readdir, realpath, unlink } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,10 +20,12 @@ import {
 import { z } from "zod";
 
 import {
+    buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
     D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestKindV1Schema,
     D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimRequestMethodV1Schema,
     D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimWorkflowStepV1Schema,
     validateD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
+    type D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimDraftV1,
     type D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
 } from "./cloudflare-worker-canary-effect-journal.js";
 import { D1ProbeCloudflareWorkerCanaryOperationStateV1Schema } from "./cloudflare-worker-canary-operation.js";
@@ -214,6 +224,86 @@ export type D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryDenialV1 =
 export type D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryResultV1 =
     | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryDenialV1 }
     | { readonly success: true; readonly inventory: D1ProbeCloudflareWorkerCanaryResponseArchiveInventoryV1 };
+
+export interface D1ProbeCloudflareWorkerCanaryKeyedArchiveResolutionReceiptV1 {
+    readonly schema_version: 1;
+    readonly kind: "untrusted_d1_probe_cloudflare_worker_api_canary_keyed_archive_resolution_receipt";
+    readonly plan_digest: string;
+    readonly claim_digest: string;
+    readonly journal_revision: number;
+    readonly transcript_sequence: number;
+    readonly response_status: number;
+    readonly response_digest: string;
+    readonly archive_key_identifier: string;
+    readonly archive_record_digest: string;
+    readonly plaintext_length: number;
+    readonly local_archive_key_matched: true;
+    readonly local_ciphertext_integrity_matched: true;
+    readonly local_plaintext_digest_matched: true;
+    readonly plaintext_exported: false;
+    readonly cloudflare_origin_authenticated: false;
+    readonly effect_claim_authenticated: false;
+    readonly caller_mutation_authority: false;
+    readonly authoritative: false;
+    readonly eligible_for_upload: false;
+    readonly eligible_for_attestation: false;
+    readonly lifecycle_advance_allowed: false;
+    readonly gate_promotion_allowed: false;
+}
+
+export type D1ProbeCloudflareWorkerCanaryKeyedArchiveResolutionDenialV1 =
+    | "invalid_started_claim"
+    | "invalid_archive_inventory_record"
+    | "invalid_plan_expiry"
+    | "invalid_archive_key"
+    | "archive_not_found"
+    | "unsafe_archive_path"
+    | "unsafe_archive_permissions"
+    | "archive_io_unavailable"
+    | "archive_corrupt"
+    | "archive_unreconciled"
+    | "archive_context_mismatch"
+    | "archive_key_mismatch"
+    | "archive_decryption_failed"
+    | "response_digest_mismatch"
+    | "response_claim_mismatch";
+
+export type D1ProbeCloudflareWorkerCanaryKeyedArchiveResolutionResultV1 =
+    | { readonly success: false; readonly code: D1ProbeCloudflareWorkerCanaryKeyedArchiveResolutionDenialV1 }
+    | {
+          readonly success: true;
+          readonly claim: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1;
+          readonly receipt: D1ProbeCloudflareWorkerCanaryKeyedArchiveResolutionReceiptV1;
+      };
+
+const KeyedResolutionInventoryRecordV1Schema = z
+    .object({
+        schema_version: z.literal(1),
+        kind: z.literal("d1_probe_cloudflare_worker_api_canary_local_encrypted_envelope_shape_inventory_record"),
+        claim_digest: DigestV1Schema,
+        journal_revision: SafeRevisionV1Schema,
+        transcript_sequence: z.number().int().safe().positive(),
+        response_status: z.number().int().min(100).max(599),
+        response_digest: DigestV1Schema,
+        archive_key_identifier: DigestV1Schema,
+        plaintext_length: z.number().int().nonnegative().max(MAX_RESPONSE_BYTES_V1),
+        archive_record_digest: DigestV1Schema,
+        caller_asserted_response_content_type_digest: DigestV1Schema.nullable(),
+        caller_asserted_response_content_encoding: z.literal("identity").nullable(),
+        caller_asserted_response_observed_at_ms: SafeRevisionV1Schema,
+        caller_mutation_authority: z.literal(false),
+        cloudflare_origin_authenticated: z.literal(false),
+        archive_key_possession_proven: z.literal(false),
+        archive_decryptability_proven: z.literal(false),
+        effect_claim_persistence_proven: z.literal(false),
+        response_authenticated: z.literal(false),
+        authoritative: z.literal(false),
+        eligible_for_upload: z.literal(false),
+        eligible_for_attestation: z.literal(false),
+        lifecycle_advance_allowed: z.literal(false),
+        gate_promotion_allowed: z.literal(false),
+    })
+    .strict();
 
 type ArchiveRootResultV1 =
     | {
@@ -683,6 +773,233 @@ export const archiveD1ProbeCloudflareWorkerCanaryResponsePreimageV1 = async (
     } finally {
         archiveKey?.fill(0);
         responseBytes?.fill(0);
+    }
+};
+
+const archiveContextForEnvelope = (
+    envelope: D1ProbeCloudflareWorkerCanaryEncryptedResponsePreimageV1
+): D1ProbeCloudflareWorkerCanaryResponseArchiveExpectedContextV1 => ({
+    schema_version: 1,
+    kind: "d1_probe_cloudflare_worker_api_canary_response_archive_expected_context",
+    plan_digest: envelope.plan_digest,
+    execution_nonce_commitment: envelope.execution_nonce_commitment,
+    operation_revision: envelope.operation_revision,
+    operation_state: envelope.operation_state,
+    operation_record_digest: envelope.operation_record_digest,
+    claim_digest: envelope.claim_digest,
+    journal_revision: envelope.journal_revision,
+    transcript_sequence: envelope.transcript_sequence,
+    effect_phase: "response_observed",
+    workflow_step: envelope.workflow_step,
+    request_kind: envelope.request_kind,
+    request_method: envelope.request_method,
+    request_digest: envelope.request_digest,
+    request_path_digest: envelope.request_path_digest,
+    response_status: envelope.response_status,
+    response_digest: envelope.response_digest,
+    caller_asserted_response_content_type: envelope.caller_asserted_response_content_type,
+    caller_asserted_response_content_encoding: envelope.caller_asserted_response_content_encoding,
+    caller_asserted_response_observed_at_ms: envelope.caller_asserted_response_observed_at_ms,
+});
+
+const responseClaimDraftFromArchive = (
+    started: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
+    envelope: D1ProbeCloudflareWorkerCanaryEncryptedResponsePreimageV1
+): D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimDraftV1 => ({
+    schema_version: 1,
+    kind: "d1_probe_cloudflare_worker_api_canary_untrusted_effect_claim",
+    journal_revision: started.journal_revision + 1,
+    previous_claim_digest: started.claim_digest,
+    plan_digest: started.plan_digest,
+    operation_revision: started.operation_revision,
+    operation_state: started.operation_state,
+    operation_record_digest: started.operation_record_digest,
+    execution_nonce_commitment: started.execution_nonce_commitment,
+    lease_generation: started.lease_generation,
+    lease_record_digest: started.lease_record_digest,
+    workflow_step: started.workflow_step,
+    request_kind: started.request_kind,
+    request_method: started.request_method,
+    transcript_sequence: started.transcript_sequence,
+    effect_phase: "response_observed",
+    intent_observed_at_ms: started.intent_observed_at_ms,
+    dispatch_started_at_ms: started.dispatch_started_at_ms,
+    request_digest: started.request_digest,
+    request_path_digest: started.request_path_digest,
+    response_status: envelope.response_status,
+    response_digest: envelope.response_digest,
+    ambiguity_classification: "none",
+    caller_mutation_authority: false,
+    authoritative: false,
+    eligible_for_upload: false,
+    eligible_for_attestation: false,
+    lifecycle_advance_allowed: false,
+    gate_promotion_allowed: false,
+});
+
+const envelopeMatchesStartedAndInventory = (
+    envelope: D1ProbeCloudflareWorkerCanaryEncryptedResponsePreimageV1,
+    started: D1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1,
+    record: z.infer<typeof KeyedResolutionInventoryRecordV1Schema>,
+    planExpiresAtMs: number
+): boolean =>
+    started.effect_phase === "dispatch_started" &&
+    started.dispatch_started_at_ms !== null &&
+    envelope.plan_digest === started.plan_digest &&
+    envelope.execution_nonce_commitment === started.execution_nonce_commitment &&
+    envelope.operation_revision === started.operation_revision &&
+    envelope.operation_state === started.operation_state &&
+    envelope.operation_record_digest === started.operation_record_digest &&
+    envelope.claim_digest === record.claim_digest &&
+    envelope.journal_revision === started.journal_revision + 1 &&
+    envelope.journal_revision === record.journal_revision &&
+    envelope.transcript_sequence === started.transcript_sequence &&
+    envelope.transcript_sequence === record.transcript_sequence &&
+    envelope.workflow_step === started.workflow_step &&
+    envelope.request_kind === started.request_kind &&
+    envelope.request_method === started.request_method &&
+    envelope.request_digest === started.request_digest &&
+    envelope.request_path_digest === started.request_path_digest &&
+    envelope.response_status === record.response_status &&
+    envelope.response_digest === record.response_digest &&
+    envelope.archive_key_identifier === record.archive_key_identifier &&
+    envelope.plaintext_length === record.plaintext_length &&
+    envelope.archive_record_digest === record.archive_record_digest &&
+    contentTypeDigest(envelope.caller_asserted_response_content_type) ===
+        record.caller_asserted_response_content_type_digest &&
+    envelope.caller_asserted_response_content_encoding === record.caller_asserted_response_content_encoding &&
+    envelope.caller_asserted_response_observed_at_ms === record.caller_asserted_response_observed_at_ms &&
+    envelope.caller_asserted_response_observed_at_ms >= started.dispatch_started_at_ms &&
+    envelope.caller_asserted_response_observed_at_ms < planExpiresAtMs;
+
+export const resolveD1ProbeCloudflareWorkerCanaryResponseArchiveAheadV1 = async (
+    startedClaimInput: unknown,
+    inventoryRecordInput: unknown,
+    planExpiresAtMsInput: unknown,
+    archiveKeyInput: unknown
+): Promise<D1ProbeCloudflareWorkerCanaryKeyedArchiveResolutionResultV1> => {
+    let archiveKey: Buffer | null = null;
+    let recordKey: Buffer | null = null;
+    let nonce: Buffer | null = null;
+    let tag: Buffer | null = null;
+    let ciphertext: Buffer | null = null;
+    let aadBytes: Buffer | null = null;
+    let plaintext: Buffer | null = null;
+    try {
+        const started = await validateD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(startedClaimInput);
+        if (started === null || started.effect_phase !== "dispatch_started") {
+            return { success: false, code: "invalid_started_claim" };
+        }
+        let record: z.infer<typeof KeyedResolutionInventoryRecordV1Schema> | null = null;
+        try {
+            const parsed = KeyedResolutionInventoryRecordV1Schema.safeParse(inventoryRecordInput);
+            record = parsed.success ? parsed.data : null;
+        } catch {
+            return { success: false, code: "invalid_archive_inventory_record" };
+        }
+        if (record === null) return { success: false, code: "invalid_archive_inventory_record" };
+        if (!Number.isSafeInteger(planExpiresAtMsInput) || Number(planExpiresAtMsInput) < 0) {
+            return { success: false, code: "invalid_plan_expiry" };
+        }
+        if (!(archiveKeyInput instanceof Uint8Array) || archiveKeyInput.byteLength !== 32) {
+            return { success: false, code: "invalid_archive_key" };
+        }
+        archiveKey = Buffer.from(archiveKeyInput);
+        const root = await ensureArchiveRoot(false);
+        if (!root.success) return root;
+        const read = await readEnvelope(root.root, started.plan_digest, record.claim_digest, false);
+        if (!read.success) {
+            switch (read.code) {
+                case "archive_not_found":
+                case "unsafe_archive_path":
+                case "unsafe_archive_permissions":
+                case "archive_io_unavailable":
+                case "archive_corrupt":
+                case "archive_unreconciled":
+                    return { success: false, code: read.code };
+                default:
+                    return { success: false, code: "archive_io_unavailable" };
+            }
+        }
+        const envelope = read.envelope;
+        if (!envelopeMatchesStartedAndInventory(envelope, started, record, Number(planExpiresAtMsInput))) {
+            return { success: false, code: "archive_context_mismatch" };
+        }
+        const keyIdentifier = createHmac("sha256", archiveKey)
+            .update(ARCHIVE_KEY_IDENTIFIER_DOMAIN_V1, "utf8")
+            .digest("hex");
+        if (keyIdentifier !== envelope.archive_key_identifier) {
+            return { success: false, code: "archive_key_mismatch" };
+        }
+        nonce = decodeCanonicalBase64(envelope.nonce_base64);
+        tag = decodeCanonicalBase64(envelope.authentication_tag_base64);
+        ciphertext = decodeCanonicalBase64(envelope.ciphertext_base64);
+        if (nonce === null || tag === null || ciphertext === null) {
+            return { success: false, code: "archive_corrupt" };
+        }
+        const context = archiveContextForEnvelope(envelope);
+        const aad = archiveAad(context, envelope.plaintext_length, envelope.archive_key_identifier);
+        aadBytes = Buffer.from(canonicalizeJsonV1(aad as CanonicalJsonValueV1), "utf8");
+        recordKey = deriveRecordKey(archiveKey, envelope.claim_digest);
+        try {
+            const decipher = createDecipheriv("aes-256-gcm", recordKey, nonce);
+            decipher.setAAD(aadBytes, { plaintextLength: envelope.plaintext_length });
+            decipher.setAuthTag(tag);
+            plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+        } catch {
+            return { success: false, code: "archive_decryption_failed" };
+        }
+        if (
+            plaintext.length !== envelope.plaintext_length ||
+            createHash("sha256").update(plaintext).digest("hex") !== envelope.response_digest
+        ) {
+            return { success: false, code: "response_digest_mismatch" };
+        }
+        const claim = await buildD1ProbeCloudflareWorkerCanaryUntrustedEffectClaimV1(
+            responseClaimDraftFromArchive(started, envelope)
+        );
+        if (claim === null || claim.claim_digest !== envelope.claim_digest) {
+            return { success: false, code: "response_claim_mismatch" };
+        }
+        return {
+            success: true,
+            claim,
+            receipt: Object.freeze({
+                schema_version: 1,
+                kind: "untrusted_d1_probe_cloudflare_worker_api_canary_keyed_archive_resolution_receipt",
+                plan_digest: envelope.plan_digest,
+                claim_digest: envelope.claim_digest,
+                journal_revision: envelope.journal_revision,
+                transcript_sequence: envelope.transcript_sequence,
+                response_status: envelope.response_status,
+                response_digest: envelope.response_digest,
+                archive_key_identifier: envelope.archive_key_identifier,
+                archive_record_digest: envelope.archive_record_digest,
+                plaintext_length: envelope.plaintext_length,
+                local_archive_key_matched: true,
+                local_ciphertext_integrity_matched: true,
+                local_plaintext_digest_matched: true,
+                plaintext_exported: false,
+                cloudflare_origin_authenticated: false,
+                effect_claim_authenticated: false,
+                caller_mutation_authority: false,
+                authoritative: false,
+                eligible_for_upload: false,
+                eligible_for_attestation: false,
+                lifecycle_advance_allowed: false,
+                gate_promotion_allowed: false,
+            }),
+        };
+    } catch {
+        return { success: false, code: "archive_io_unavailable" };
+    } finally {
+        archiveKey?.fill(0);
+        recordKey?.fill(0);
+        nonce?.fill(0);
+        tag?.fill(0);
+        ciphertext?.fill(0);
+        aadBytes?.fill(0);
+        plaintext?.fill(0);
     }
 };
 
