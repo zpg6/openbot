@@ -6,15 +6,9 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { readD1ProbeCloudflareWorkerCanaryBaseRecoveryV1 } from "./cloudflare-worker-canary-base-recovery.js";
 import { compileD1ProbeCloudflareWorkerCanaryCleanupCommandV1 } from "./cloudflare-worker-canary-cleanup-grace.js";
-import {
-    D1_PROBE_CLOUDFLARE_WORKER_CANARY_CLEANUP_OBLIGATION_ROOT_V1,
-    compileD1ProbeCloudflareWorkerCanaryCleanupObligationV1,
-    publishD1ProbeCloudflareWorkerCanaryCleanupObligationV1,
-} from "./cloudflare-worker-canary-cleanup-obligation.js";
-import {
-    D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1,
-    acquireD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
-} from "./cloudflare-worker-canary-driver-lease.js";
+import { D1_PROBE_CLOUDFLARE_WORKER_CANARY_CLEANUP_OBLIGATION_ROOT_V1 } from "./cloudflare-worker-canary-cleanup-obligation.js";
+import { D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1 } from "./cloudflare-worker-canary-driver-lease.js";
+import { bootstrapD1ProbeCloudflareWorkerCanaryDriverV1 } from "./cloudflare-worker-canary-driver-bootstrap.js";
 import { readD1ProbeCloudflareWorkerCanaryDurableTranscriptV1 } from "./cloudflare-worker-canary-durable-transcript.js";
 import {
     D1_PROBE_CLOUDFLARE_WORKER_CANARY_EFFECT_JOURNAL_ROOT_V1,
@@ -255,21 +249,15 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             attempt_tag_commitment: attemptTagCommitment(attemptTag),
         });
         if (!cleanupCommand.success) throw new Error(`cleanup grace compilation failed: ${cleanupCommand.code}`);
-        const obligation = await compileD1ProbeCloudflareWorkerCanaryCleanupObligationV1(
+        const bootstrap = await bootstrapD1ProbeCloudflareWorkerCanaryDriverV1({
             operation,
-            cleanupCommand.command.cleanup_grace
-        );
-        if (!obligation.success) throw new Error(`cleanup obligation compilation failed: ${obligation.code}`);
-        const obligationWrite = await publishD1ProbeCloudflareWorkerCanaryCleanupObligationV1(obligation.obligation);
-        if (!obligationWrite.success) throw new Error(`cleanup obligation publication failed: ${obligationWrite.code}`);
-        const stateWrite = await createD1ProbeCloudflareWorkerCanaryStateV1(operation);
-        if (!stateWrite.success) throw new Error(`state publication failed: ${stateWrite.code}`);
-        const lease = await acquireD1ProbeCloudflareWorkerCanaryDriverLeaseV1({
-            plan_digest: planDigest,
-            execution_nonce: operation.execution_nonce,
+            cleanup_grace: cleanupCommand.command.cleanup_grace,
             lease_duration_ms: 300_000,
         });
-        if (!lease.success) throw new Error(`lease acquisition failed: ${lease.code}`);
+        if (!bootstrap.success) throw new Error(`driver bootstrap failed: ${bootstrap.code}`);
+        operation = bootstrap.session.operation;
+        const cleanupObligation = bootstrap.session.cleanup_obligation;
+        const leaseOwner = bootstrap.session.driver_lease_owner;
         const body = responseBody(targetResponseBytes);
         const transport = createD1ProbeCloudflareWorkerCanaryTransportV1({
             api_token: SYNTHETIC_API_TOKEN,
@@ -303,7 +291,7 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
         await dispatch(
             transport,
             operation,
-            lease.owner,
+            leaseOwner,
             "prepared_worker_list",
             await transport.prepare.forward.get(`/accounts/${PLAN_ACCOUNT_ID}/workers/workers?page=1&per_page=100`),
             archiveKeyFor(operationIndex)
@@ -315,7 +303,7 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
         await dispatch(
             transport,
             operation,
-            lease.owner,
+            leaseOwner,
             "shell_create",
             await transport.prepare.forward.post(
                 `/accounts/${PLAN_ACCOUNT_ID}/workers/workers`,
@@ -331,7 +319,7 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
         await dispatch(
             transport,
             operation,
-            lease.owner,
+            leaseOwner,
             "cleanup_worker_readback",
             await transport.prepare.cleanup.get(`/accounts/${PLAN_ACCOUNT_ID}/workers/workers/benchmark-worker`),
             archiveKeyFor(operationIndex)
@@ -352,8 +340,8 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             recovery.classification !== "local_histories_aligned" ||
             recovery.recovery_requirement !== "none" ||
             recovery.archive_record_count !== 3 ||
-            recovery.claim_cleanup_obligation_digest !== obligation.obligation.obligation_digest ||
-            recovery.archive_head_cleanup_obligation_digest !== obligation.obligation.obligation_digest ||
+            recovery.claim_cleanup_obligation_digest !== cleanupObligation.obligation_digest ||
+            recovery.archive_head_cleanup_obligation_digest !== cleanupObligation.obligation_digest ||
             recovery.mutation_replay_allowed !== false ||
             recovery.cleanup_authorized !== false ||
             recovery.recovery_action_authorized !== false ||
@@ -383,12 +371,12 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             journal.claims.slice(0, 6).some(claim => claim.cleanup_obligation_digest !== null) ||
             journal.claims
                 .slice(6)
-                .some(claim => claim.cleanup_obligation_digest !== obligation.obligation.obligation_digest) ||
+                .some(claim => claim.cleanup_obligation_digest !== cleanupObligation.obligation_digest) ||
             !archive.success ||
             archive.inventory.records.length !== 3 ||
             archive.inventory.records[0]?.cleanup_obligation_digest !== null ||
             archive.inventory.records[1]?.cleanup_obligation_digest !== null ||
-            archive.inventory.records[2]?.cleanup_obligation_digest !== obligation.obligation.obligation_digest ||
+            archive.inventory.records[2]?.cleanup_obligation_digest !== cleanupObligation.obligation_digest ||
             transport.transcript.length !== 3 ||
             transport.transcript.some(entry => entry.status !== 200 || entry.response_digest === null)
         ) {
@@ -483,6 +471,7 @@ describe("Cloudflare Worker canary base-layer E2E benchmark", () => {
             effect_claims: scale.operations * 9,
             encrypted_response_archives: scale.operations * 3,
             durable_transcripts_reconstructed: scale.operations,
+            driver_bootstraps: scale.operations,
             cleanup_obligations: scale.operations,
             response_body_bytes_per_request: scale.response_bytes,
             duration_ms: round(durationMs),

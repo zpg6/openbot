@@ -179,6 +179,7 @@ describe("Cloudflare Worker canary shared transport", () => {
         });
 
         await vi.waitFor(() => expect(order).toEqual(["record", "fetch", "capture"]));
+        await vi.waitFor(() => expect(release).toBeTypeOf("function"));
         expect(resultSettled).toBe(false);
         release!();
         await expect(result).resolves.toEqual({

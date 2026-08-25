@@ -295,7 +295,8 @@ const readObligation = async (
     root: string,
     planDigest: string,
     executionNonceCommitment: string,
-    reconcilePublication: boolean
+    reconcilePublication: boolean,
+    afterInitialSnapshot?: () => void | Promise<void>
 ): Promise<D1ProbeCloudflareWorkerCanaryCleanupObligationResultV1> => {
     const stem = fileStem(planDigest, executionNonceCommitment);
     const finalPath = obligationPath(root, planDigest, executionNonceCommitment);
@@ -303,6 +304,7 @@ const readObligation = async (
         const names = await readdir(root);
         const expectedName = `${stem}.cleanup-obligation.json`;
         const related = names.filter(name => name.startsWith(`${stem}.`));
+        await afterInitialSnapshot?.();
         const allowedTempName = tempNamePattern(stem);
         if (related.some(name => name !== expectedName && !allowedTempName.test(name))) {
             return { success: false, code: "obligation_unreconciled" };
@@ -397,8 +399,8 @@ const readObligation = async (
             ) {
                 return { success: false, code: "obligation_corrupt" };
             }
-            const finalNames = await readdir(root);
-            const initialSnapshot = [...names].sort();
+            const finalNames = (await readdir(root)).filter(name => name.startsWith(`${stem}.`));
+            const initialSnapshot = [...related].sort();
             const finalSnapshot = [...finalNames].sort();
             if (
                 initialSnapshot.length !== finalSnapshot.length ||
@@ -581,6 +583,32 @@ export const readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyV1 = asyn
         const root = await ensureRoot(false);
         if (!root.success) return root;
         return await readObligation(root.root, parsed.data.plan_digest, parsed.data.execution_nonce_commitment, false);
+    } catch {
+        return { success: false, code: "obligation_io_unavailable" };
+    }
+};
+
+/** Test-only race seam. Production callers use the fixed read-only function. */
+export const readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyTestOnlyV1 = async (
+    planDigestInput: unknown,
+    executionNonceCommitmentInput: unknown,
+    afterInitialSnapshot: () => void | Promise<void>
+): Promise<D1ProbeCloudflareWorkerCanaryCleanupObligationResultV1> => {
+    try {
+        const parsed = CleanupObligationIdentityV1Schema.safeParse({
+            plan_digest: planDigestInput,
+            execution_nonce_commitment: executionNonceCommitmentInput,
+        });
+        if (!parsed.success) return { success: false, code: "invalid_obligation_identity" };
+        const root = await ensureRoot(false);
+        if (!root.success) return root;
+        return await readObligation(
+            root.root,
+            parsed.data.plan_digest,
+            parsed.data.execution_nonce_commitment,
+            false,
+            afterInitialSnapshot
+        );
     } catch {
         return { success: false, code: "obligation_io_unavailable" };
     }

@@ -13,6 +13,7 @@ import {
     matchesD1ProbeCloudflareWorkerCanaryCleanupObligationContextV1,
     publishD1ProbeCloudflareWorkerCanaryCleanupObligationV1,
     readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyV1,
+    readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyTestOnlyV1,
 } from "./cloudflare-worker-canary-cleanup-obligation.js";
 import { compileD1ProbeCloudflareWorkerCanaryCleanupCommandV1 } from "./cloudflare-worker-canary-cleanup-grace.js";
 import {
@@ -166,6 +167,24 @@ describe("Cloudflare Worker canary cleanup obligation", () => {
             size: beforeStat.size,
             mtimeMs: beforeStat.mtimeMs,
         });
+    });
+
+    it("keeps an exact read stable while another plan publishes an unrelated entry", async () => {
+        const obligation = await makeObligation();
+        expect((await publishD1ProbeCloudflareWorkerCanaryCleanupObligationV1(obligation)).success).toBe(true);
+        const unrelatedPath = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_CLEANUP_OBLIGATION_ROOT_V1}/${"f".repeat(64)}.${"e".repeat(64)}.unrelated`;
+        try {
+            await expect(
+                readD1ProbeCloudflareWorkerCanaryCleanupObligationReadOnlyTestOnlyV1(
+                    obligation.plan_digest,
+                    obligation.execution_nonce_commitment,
+                    async () => await writeFile(unrelatedPath, "unrelated", { mode: 0o600, flag: "wx" })
+                )
+            ).resolves.toEqual({ success: true, obligation });
+            await expect(readFile(unrelatedPath, "utf8")).resolves.toBe("unrelated");
+        } finally {
+            await unlink(unrelatedPath).catch(() => undefined);
+        }
     });
 
     it("denies duplicate publication without replacing the first record", async () => {

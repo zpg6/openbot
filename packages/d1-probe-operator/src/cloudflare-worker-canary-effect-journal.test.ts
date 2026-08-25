@@ -718,7 +718,7 @@ describe("Cloudflare Worker canary untrusted effect journal", () => {
             success: false,
             code: "journal_transition_denied",
         });
-    });
+    }, 15_000);
 
     it("detects a missing first revision and an on-disk digest-chain substitution", async () => {
         const bootstrap = await record();

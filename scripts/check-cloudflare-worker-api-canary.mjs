@@ -37,6 +37,8 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.root_plan_command_registered === true &&
             fixture.implementation?.durable_operation_state_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_durable_operation_state === false &&
+            fixture.implementation?.durable_driver_bootstrap_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_durable_driver_bootstrap === false &&
             fixture.implementation?.checkout_local_driver_lease_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_driver_lease === false &&
             fixture.implementation?.untrusted_effect_claim_journal_implemented === true &&
@@ -76,6 +78,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.credentialed_runner_uses_durable_transcript_reconstruction === false &&
             fixture.implementation?.local_base_layer_e2e_benchmark_implemented === true &&
             fixture.implementation?.local_base_layer_e2e_uses_public_storage_and_claim_apis === true &&
+            fixture.implementation?.local_base_layer_e2e_uses_durable_driver_bootstrap === true &&
             fixture.implementation?.local_base_layer_e2e_reconstructs_durable_transcript === true &&
             fixture.implementation?.local_base_layer_e2e_remote_network_requests === false &&
             fixture.implementation?.credentialed_runner_covered_by_local_base_layer_e2e === false &&
@@ -97,6 +100,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             baseLayer.recovery_reducers_required === true &&
             baseLayer.cleanup_obligations_required === true &&
             baseLayer.cleanup_obligation_digest_end_to_end_binding_required === true &&
+            baseLayer.pre_dispatch_bootstrap_required === true &&
             baseLayer.scalable_local_e2e_required === true &&
             baseLayer.authority_separation_required === true &&
             baseLayer.product_facing_work_may_precede_base_layer === false,
@@ -120,7 +124,9 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.authority?.archive_ahead_reducer_authorizes_remote_mutation_cleanup_lifecycle_or_gate === false &&
             fixture.authority?.cleanup_obligation_record_authenticates_remote_effects === false &&
             fixture.authority?.cleanup_obligation_record_authorizes_cleanup_or_mutation === false &&
-            fixture.authority?.cleanup_obligation_digest_authenticates_obligation_or_effect === false,
+            fixture.authority?.cleanup_obligation_digest_authenticates_obligation_or_effect === false &&
+            fixture.authority?.driver_bootstrap_authenticates_local_or_remote_effects === false &&
+            fixture.authority?.driver_bootstrap_authorizes_remote_dispatch_or_cleanup === false,
         "the isolated canary must grant no evidence, upload, lifecycle, attestation, or gate authority"
     );
     check(
@@ -162,6 +168,12 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.checkout_local_plan_reservation === true &&
             workflow.distributed_plan_reservation === false &&
             workflow.driver_lease_scope === "cooperative_single_checkout_only" &&
+            workflow.driver_bootstrap_scope ===
+                "prepared_state_cleanup_obligation_and_current_lease_before_effect_unwired" &&
+            workflow.driver_bootstrap_rejects_prior_effect_or_archive_history === true &&
+            workflow.driver_bootstrap_accepts_exact_concurrent_local_publication === true &&
+            workflow.driver_bootstrap_remote_requests === false &&
+            workflow.driver_bootstrap_grants_dispatch_or_cleanup_authority === false &&
             workflow.effect_claim_journal_scope === "caller_constructible_redacted_hash_chain_only" &&
             workflow.effect_claim_lease_epoch_scope ===
                 "exact_generation_and_canonical_lease_record_digest_non_authenticating" &&
@@ -216,6 +228,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
                 "immutable_private_caller_constructible_pre_effect_plan_execution_operation_and_grace_binding_only" &&
             workflow.cleanup_obligation_read_only_verification_implemented === true &&
             workflow.cleanup_obligation_record_filesystem_writes_during_read === false &&
+            workflow.cleanup_obligation_unrelated_plan_publication_destabilizes_read === false &&
             workflow.cleanup_effect_claims_bind_obligation_digest === true &&
             workflow.cleanup_response_claims_bind_obligation_digest === true &&
             workflow.response_archive_inventory_carries_cleanup_obligation_digest === true &&
@@ -224,7 +237,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.complete_pagination_metadata_required_for_absence === true &&
             workflow.optional_response_projection_contract_implemented === true &&
             workflow.local_base_layer_e2e_workload_scope ===
-                "public_local_state_lease_effect_archive_obligation_recovery_and_durable_transcript_apis_only" &&
+                "public_local_driver_bootstrap_state_lease_effect_archive_obligation_recovery_and_durable_transcript_apis_only" &&
             workflow.local_base_layer_e2e_default_operations === 3 &&
             workflow.local_base_layer_e2e_max_operations === 128 &&
             workflow.local_base_layer_e2e_max_concurrency === 16 &&

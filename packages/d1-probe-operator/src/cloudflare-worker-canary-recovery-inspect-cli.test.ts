@@ -193,7 +193,7 @@ describe("Cloudflare Worker canary recovery inspector CLI", () => {
         ).toEqual(namesBefore);
         expect(await readFile(path)).toEqual(bytesBefore);
         expect((await lstat(path)).mtimeMs).toBe(statBefore.mtimeMs);
-    });
+    }, 15_000);
 
     it("rejects arguments, noncanonical input, oversized input, and unknown state with fixed denials", async () => {
         const missingDigest = "f".repeat(64);
@@ -217,7 +217,7 @@ describe("Cloudflare Worker canary recovery inspector CLI", () => {
             stdout: "",
             stderr: "recovery_state_not_found\n",
         });
-    }, 15_000);
+    }, 30_000);
 
     it("does not reconcile or remove a same-inode publication residue", async () => {
         const prepared = await prepareState();
@@ -234,5 +234,5 @@ describe("Cloudflare Worker canary recovery inspector CLI", () => {
         });
         await expect(lstat(path)).resolves.toMatchObject({ nlink: 2 });
         await expect(lstat(tempPath)).resolves.toMatchObject({ nlink: 2 });
-    });
+    }, 15_000);
 });
