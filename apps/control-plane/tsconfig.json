@@ -2,9 +2,12 @@
     "extends": "../../tsconfig.base.json",
     "compilerOptions": {
         "outDir": "../../.build/types/apps/control-plane",
+        "jsx": "react-jsx",
+        "lib": ["ES2024", "WebWorker", "DOM", "DOM.Iterable"],
+        "resolveJsonModule": true,
         "rootDir": ".",
-        "types": ["@cloudflare/workers-types"]
+        "types": ["@cloudflare/workers-types", "react", "react-dom"]
     },
-    "include": ["entry.d1.ts", "src/**/*.ts"],
+    "include": ["entry.d1.ts", "src/**/*.ts", "client/**/*.tsx", "vite.config.ts"],
     "references": [{ "path": "../../packages/db-d1" }]
 }

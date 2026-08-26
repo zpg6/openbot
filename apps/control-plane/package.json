@@ -5,10 +5,22 @@
     "type": "module",
     "scripts": {
         "dev": "wrangler dev --config wrangler.d1.jsonc --env preview",
-        "build": "wrangler deploy --dry-run --outdir ../../.build/workers/control-plane --config wrangler.d1.jsonc --env preview"
+        "build": "pnpm build:client && wrangler deploy --dry-run --outdir ../../.build/workers/control-plane --config wrangler.d1.jsonc --env preview",
+        "build:client": "vite build --config vite.config.ts"
     },
     "dependencies": {
+        "@dicebear/core": "catalog:",
+        "@dicebear/styles": "catalog:",
         "@openbot/db-d1": "workspace:*",
-        "hono": "catalog:"
+        "better-auth": "catalog:",
+        "hono": "catalog:",
+        "react": "19.2.7",
+        "react-dom": "19.2.7"
+    },
+    "devDependencies": {
+        "@types/react": "19.2.18",
+        "@types/react-dom": "19.2.4",
+        "@vitejs/plugin-react": "6.0.5",
+        "vite": "8.2.1"
     }
 }

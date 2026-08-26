@@ -14,21 +14,21 @@ Do not deploy OpenBot for real data yet. Authentication, policy enforcement, ven
 
 ## Intended first release
 
-- A server-rendered Hono control plane on Cloudflare Workers
+- A React 19 client rendered from a narrow versioned page model and served by a Hono control plane on Cloudflare Workers
 - TypeScript packages with Zod contracts and Drizzle repositories
 - D1 as the first control database, followed by optional Hyperdrive-backed PostgreSQL and MySQL profiles after contract tests pass
-- Better Auth with closed registration and one organization owner role
+- Better Auth magic links and organizations, with invitations, active membership, and owner/admin/member roles
 - Metorial for OAuth connections, reviewed tool metadata, and run-owned filtered MCP sessions
 - OpenRouter for one explicitly allowed model and provider with no fallback
 - One SQLite-backed Durable Object per run for short-lived orchestration state
 - One ephemeral Cloudflare Sandbox per code-enabled run, reached through a private sandbox runner with no OpenBot, provider, user, or storage credential in the container
 - Append-only, hash-linked, redacted audit records with a documented database-administrator limitation
 
-The first release excludes provider business-data writes, arbitrary MCP servers, interactive shell access, arbitrary command endpoints, package installation, browser control, persistent sandbox files, schedules, teams, direct Bot handoffs, and persistent conversation memory.
+The first release excludes provider business-data writes, arbitrary MCP servers, interactive shell access, arbitrary command endpoints, package installation, browser control, persistent sandbox files, unattended routine execution, teams, direct Bot handoffs, and persistent conversation memory.
 
 ## Product shape
 
-The main interface is a Bot roster and a single-column Bot workspace. Starting a task opens a five-minute confirmation that shows the exact prompt, provider tools, selected declarative skills, code profile, possible data classes, destinations, and limits. Confirming creates an independent run and reserves a random run-owned Sandbox identity when code is enabled. The container starts only after the gateway admits a code call. Prior runs do not silently become model context.
+The main interface is a Bot roster, the active Bot's chat, and a settings rail for Bot configuration, exact Metorial access, and routines. A Bot is a chat. Starting a task opens a five-minute confirmation that shows the exact prompt, each provider and connected account label, and every literal tool allow-list before execution. A chat message can also become a reviewed routine draft; saved routines appear in the rail and edits rebind them to the Bot's current exact authority. Routine scheduling and unattended execution remain disabled. Confirming a task creates an independent run and reserves a random run-owned Sandbox identity when code is enabled. Prior runs do not silently become model context.
 
 The planned R2 artifact workspace is separate from the read-only core. It uses versioned collections and snapshot-bound Bot reads instead of a shared cloud computer. Artifact routes stay absent until their security and storage gate passes.
 
@@ -71,7 +71,11 @@ The first real-app browser proof runs with:
 corepack pnpm test:app:e2e
 ```
 
-It opens the production Hono application in a headless browser, creates a Bot, selects the only enabled read permission, reviews a task, starts one claimed run, and reads its escaped result. Authentication, storage, and task execution are bounded local substitutions; this command is not provider, model, production-database, or deployment evidence. On macOS it uses installed Google Chrome when available. Elsewhere, install Playwright Chromium or set `OPENBOT_E2E_CHROME_PATH` to a compatible browser executable.
+It opens the production React + Hono application in a headless browser, creates a Bot, chooses two organization-scoped Metorial integrations and one exact enabled tool from each, chats a task, reviews both connected-account/tool disclosures, starts one claimed run, and reads its plain-text result. It then proposes and saves a routine from chat, edits it from the sidebar, and changes the organization's exact permission ceiling. The server-owned authority snapshot binds each opaque connection grant, provider version and specification, policy revision and digest, tool key and effect, and input/output schema digests. A separate semantic session intent pins the configured Metorial API version and serializer identity without pretending to be an unversioned vendor wire body. The private capability gateway must resolve opaque user grants to auth configs and serialize that intent for the pinned Metorial version; authless and deployment-auth providers remain explicit modes, never ambient fallback. Every run writes nine full-page screenshots and `openbot-product-flow.webm` under `test-results/app-e2e/walkthrough`. The HTML report at `playwright-report/index.html` includes the same attachments.
+
+Authentication, storage, and task execution are bounded local substitutions; this command is not provider, model, production-database, or deployment evidence. On macOS it uses installed Google Chrome when available. Elsewhere, install Playwright Chromium or set `OPENBOT_E2E_CHROME_PATH` to a compatible browser executable.
+
+The pinned Metorial provider/type and theSVG icon catalog generator is documented in [docs/metorial-provider-catalog.md](docs/metorial-provider-catalog.md). It requires a server-side Metorial key and a reviewed theSVG commit SHA; generated provider metadata never grants runtime access.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. Security reports belong in the private channel described in [SECURITY.md](SECURITY.md).
 

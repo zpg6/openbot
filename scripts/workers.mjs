@@ -27,6 +27,14 @@ if (!new Set(["preview", "production"]).has(environment)) {
 
 for (const worker of workerDeploymentOrder) {
     const outputDirectory = path.resolve(".build", "workers", worker.name);
+    if (worker.name === "control-plane" && command !== "typegen") {
+        const clientBuild = spawnSync(
+            process.execPath,
+            [packageManagerEntrypoint, "--filter", "@openbot/control-plane", "build:client"],
+            { env: process.env, stdio: "inherit" }
+        );
+        if (clientBuild.status !== 0) process.exit(clientBuild.status ?? 1);
+    }
     if (command === "deploy") {
         const content = await readFile(worker.config, "utf8");
         if (content.includes("REPLACE_WITH_")) {

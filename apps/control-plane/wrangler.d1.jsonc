@@ -3,9 +3,14 @@
     "name": "openbot-control-plane",
     "main": "entry.d1.ts",
     "compatibility_date": "2026-08-22",
+    "compatibility_flags": ["nodejs_compat"],
     "preview_urls": false,
     "workers_dev": false,
     "observability": { "enabled": false },
+    "assets": {
+        "binding": "ASSETS",
+        "directory": "../../.build/client/control-plane",
+    },
     "env": {
         "preview": {
             "d1_databases": [

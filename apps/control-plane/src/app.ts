@@ -6,6 +6,7 @@ import { registerProductProofRoutesV1, type ControlPlaneProductProofDependencies
 export interface ControlPlaneBindings {
     readonly CONTROL_DB_FRESH: D1Database;
     readonly ORCHESTRATOR: Fetcher;
+    readonly ASSETS: Fetcher;
 }
 
 export function createControlPlane(
@@ -18,12 +19,14 @@ export function createControlPlane(
         context.header("Cache-Control", "no-store");
         context.header(
             "Content-Security-Policy",
-            "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+            "default-src 'none'; script-src 'self'; connect-src 'self'; img-src data:; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         );
         context.header("Referrer-Policy", "same-origin");
         context.header("X-Content-Type-Options", "nosniff");
         context.header("X-Frame-Options", "DENY");
     });
+
+    app.get("/assets/*", context => context.env.ASSETS.fetch(context.req.raw));
 
     app.get("/healthz", async context => {
         const readiness = createD1ReadinessRepository(context.env.CONTROL_DB_FRESH);

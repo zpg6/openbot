@@ -12,11 +12,14 @@ autoInstallPeers: false
 catalog:
     "@cloudflare/vitest-plugin": 1.0.0
     "@cloudflare/workers-types": 5.20260820.1
+    "@dicebear/core": 10.5.0
+    "@dicebear/styles": 10.5.0
     "@hono/zod-openapi": 1.6.1
     "@playwright/test": 1.62.1
     "@types/node": 22.19.21
     "@vitest/runner": 4.1.11
     "@vitest/snapshot": 4.1.11
+    better-auth: 1.7.1
     drizzle-kit: 0.31.10
     drizzle-orm: 0.45.2
     fast-check: 4.9.0

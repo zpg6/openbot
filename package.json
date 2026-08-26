@@ -14,6 +14,7 @@
         "typecheck": "tsc -b --pretty false",
         "test": "vitest run --config vitest.config.ts",
         "test:app:e2e": "playwright test --config playwright.config.ts",
+        "generate:metorial-catalog": "node scripts/generate-metorial-provider-catalog.mjs",
         "test:d1-probes": "corepack pnpm --dir packages/d1-probes test",
         "test:base-layer:e2e": "corepack pnpm --dir packages/d1-probe-operator test:base-layer:e2e",
         "bench:base-layer": "corepack pnpm --dir packages/d1-probe-operator bench:base-layer",

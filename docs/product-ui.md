@@ -2,11 +2,15 @@
 
 This document defines the first OpenBot browser interface. The bounded create-Bot and synthetic task-result proof is implemented; the remaining routes, stores, and provider behavior are still a design contract.
 
+The implemented proof uses a near-black three-column workspace: a compact Bot roster, the active Bot's chat, and a persistent settings rail. Pink appears only in the brand mark, focus, and checked controls. Bot identity comes from one of ten user-selected colors, three shapes, and six faces rendered locally with the open-source DiceBear Moods style. Green communicates connected/read/success state rather than brand. The interface uses the local system font stack and contains no OpenAI logos, fonts, icons, or copied assets.
+
+Typography takes its cue from Metorial's restrained product UI without copying its assets. The proof uses a 15-pixel body, 16-pixel chat text, compact 13-pixel utility text, and 12-pixel metadata and technical identifiers. It limits the system font stack to 400, 500, 600, and 700 weights, disables synthesized faces, and gives form controls explicit typography instead of inheriting label weight.
+
 OpenBot is unaffiliated with xAI and Grok Bot. Product research informed the hierarchy and interaction study below. The wireframes and content rules are original to OpenBot. Do not add third-party screenshots, logos, character art, or copied interface assets to this repository.
 
 ## Product promise shown in the interface
 
-A connection is not authority. The organization owner chooses reviewed tools and declarative skills for a Bot, then grants the Bot a narrow purpose, scope, limit, and expiry. Each task gets a fresh confirmation and an independent run.
+A connection is not authority. Better Auth supplies the verified user, current organization membership and role, and active organization. The organization-scoped server adapter then supplies available Metorial integrations, an opaque connection-grant identity and safe account label for each connection, pinned provider version/specification identity, and exact reviewed tool policies. An owner sets the organization's exact maximum tool set. A Bot may select several organization integrations and only a subset of that maximum. OpenBot re-resolves membership, the complete organization catalog, the Bot revision, and revocation fences on confirmation and execution; browser-submitted organization, integration, or permission identifiers cannot create authority. Each task gets a fresh authority snapshot and an independent run. The browser never receives a Better Auth token, Metorial auth-config ID, or raw connection-grant ID.
 
 The first release does one useful job. One owner reviews and starts a short read-only task that uses one reviewed Metorial connector, one fixed OpenRouter model route, and an optional reviewed Cloudflare Sandbox profile. The interface must not imply that OpenBot can write provider business data, browse websites, expose an interactive shell, install packages, share a persistent computer, remember prior conversations, or work unattended.
 
@@ -14,7 +18,7 @@ Use these product terms consistently:
 
 | Term                     | Meaning                                                                                                                       |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| Organization             | The account boundary. The first release has one owner role.                                                                   |
+| Organization             | The Better Auth tenancy boundary. Membership and role come from Better Auth; provider authority does not.                     |
 | Bot                      | A named configuration with immutable behavior revisions and scoped grants.                                                    |
 | Connection               | A provider authorization reference managed through Metorial. It grants nothing by itself.                                     |
 | Organization tool policy | An owner-reviewed, pinned connector tool that Bots may select.                                                                |
@@ -27,32 +31,42 @@ Use these product terms consistently:
 | Run                      | One independent execution object with one occupied Bot run slot and, when enabled, one random Sandbox.                        |
 | Cleanup                  | Revocation and deletion work for run-owned vendor and Sandbox resources. It may outlive execution.                            |
 
+## Identity and organization entry
+
+The signed-out page asks only for an email address and sends a Better Auth magic link. It returns the same result whether the email belongs to a member, has a pending invitation, or is new. The browser never receives the token from an application JSON response.
+
+After the link is redeemed:
+
+1. If the verified email has a pending invitation, show the organization name and inviter and let the user accept or decline. Acceptance happens through Better Auth and requires the signed-in verified email.
+2. If the user has one accepted membership, set it as the active organization and enter the Bot roster.
+3. If the user has several memberships and no valid active organization, require an organization choice.
+4. If the user has no accepted membership or invitation, require organization creation. The creator becomes owner and the new organization becomes active.
+
+The organization switcher sits with the account menu, not in every Bot header. Switching organizations replaces the entire Bot roster, integrations, policies, routines, confirmations, and audit scope. OpenBot never accepts an organization ID from a Bot form as proof of access.
+
+The owner-only organization settings page has `Members`, `Integrations`, and `Permissions`. `Integrations` manages the organization's Metorial provider deployments and safe connection labels. `Permissions` is the exact organization ceiling over reviewed tool-policy revisions. A newly discovered provider tool starts disabled. Lowering the ceiling immediately stales dependent confirmations and denies future dispatches. The UI may explain affected Bots and routines, but it cannot delay revocation until the user visits them.
+
 ## Desktop layout
 
-At 900 CSS pixels and wider, render one 20rem sidebar and one main column. Do not add a third inspector column.
+At 900 CSS pixels and wider, render a compact Bot roster, one central chat, and a persistent settings rail. A Bot is a chat, not a dashboard page. The right rail owns Bot settings, exact Metorial access, and routines.
 
 ```text
-+------------------------------+------------------------------------------------+
-| OpenBot             New Bot  | [Bot mark] Research helper            Access   |
-| [Search Bots...............] | Tasks   Access   Profile                        |
-|                              +------------------------------------------------+
-| [mark] Research helper       |                                                |
-|        Needs confirmation    |             Task feed, max 48rem               |
-|                              |                                                |
-| [mark] Customer notes        |                         [user task prompt]      |
-|        Needs access          |                                                |
-|                              | [confirmation or run activity card]            |
-| [mark] Weekly review         | [safe tool summary]                            |
-|        Completed             | [plain-text result and evidence]               |
-|                              |                                                |
-| ---------------------------  | [Start a task...............................]   |
-| Connections                  | [Review task]                                  |
-| Audit                        |                                                |
-| Organization owner          |                                                |
-+------------------------------+------------------------------------------------+
++----------------------+-----------------------------------------+------------------------+
+| OpenBot              | [Bot] Research helper                   | Research helper        |
+| + New Bot            +-----------------------------------------+------------------------+
+|                      |                                         | Settings               |
+| [Bot] Research       |             Chat transcript             | Purpose                |
+|       open cases     |                                         | Appearance             |
+| [Bot] Customer notes|                         [user message]  | Instructions           |
+| [Bot] Weekly review | [Bot result]                            +------------------------+
+|                      |                                         | Metorial access        |
+|                      |                                         | Integration + tools    |
+|                      | [Message Research helper.............] +------------------------+
+| Organization owner  | [Review task]                           | Routines               |
++----------------------+-----------------------------------------+------------------------+
 ```
 
-The page uses document scrolling. The Bot header is sticky. The composer follows the feed in DOM order. It may become sticky only if it cannot cover the final card, focused control, or validation error.
+The center page uses document scrolling. The Bot header is sticky. The composer follows the feed in DOM order. It may become sticky only if it cannot cover the final card, focused control, or validation error. A routine starts as a normal chat request containing a repeating job and schedule. The Bot proposes a structured routine draft in chat; the user reviews schedule, prompt, current Bot revision, and exact permission subset before saving. The saved routine appears in the right rail and can be edited there. It never broadens the Bot or organization ceiling, and a later permission change leaves it visibly blocked until re-reviewed.
 
 The sidebar has a one-pixel divider. The main feed is at most 48rem wide. Cards use 16-pixel gaps, while sections use 24-pixel gaps. Confirmation, activity, result, and cleanup cards share border and radius tokens. Reserve elevation for the mobile drawer.
 
@@ -83,7 +97,7 @@ The fixed Bot palette identifies Bots. Color never communicates status by itself
 |   [ ] Write tools                Unavailable in this release      |
 |   [ ] Destructive tools          Unavailable in this release      |
 |                                                                  |
-| Tool slots                                      0 of 4 selected  |
+| Exact Metorial tools                           0 selected       |
 | Code execution [ ] Reviewed JavaScript sandbox                  |
 |                Uses one slot; requires an enabled code policy.  |
 |                                                                  |
@@ -91,15 +105,15 @@ The fixed Bot palette identifies Bots. Color never communicates status by itself
 +------------------------------------------------------------------+
 ```
 
-`Name`, `Short description`, and the fixed-palette mark are cosmetic Bot fields. The short description appears in the roster and does not change behavior or authority. `Purpose` maps to the immutable Bot job. `Behavior instructions` maps to immutable standing instructions. Changing purpose, behavior instructions, selected tool policies, skills, model route, or compute policy appends a Bot revision. It never passes through the cosmetic profile action.
+`Name`, `Short description`, and the fixed appearance choices are cosmetic Bot fields. The short description appears in the roster and does not change behavior or authority. `Purpose` maps to the immutable Bot job. `Behavior instructions` maps to immutable standing instructions. Changing purpose, behavior instructions, selected tool policies, skills, model route, or compute policy appends a Bot revision. It never passes through the cosmetic profile action.
 
 The Bot purpose explains its intended job. It grants nothing. The access form separately asks why this Bot revision may use the selected provider tools and binds that narrower purpose into the expiring grant.
 
-The first release requires at least one active reviewed read-only tool policy when creating a Bot. It creates no connection, provider authorization, or grant. If a selected connector has no usable provider authorization, the new Bot opens in `Needs access` state.
+The implemented proof requires at least one enabled tool permission under every selected Metorial integration. The catalog can contain any integration supplied by the account adapter and preserves each explicit auth mode, opaque user grant when required, provider deployment/version/specification, policy revision and digest, exact tool key and schema digests, effect, consequence, and scope. Disabled write or destructive entries stay visible but cannot be posted into authority. OpenBot's semantic session intent pins its own schema version, the configured Metorial API version, serializer identity, providers, auth modes, and exact allowed tool keys. It is not a vendor wire body. The private capability gateway must resolve a `user_grant` to one auth config and serialize the pinned Metorial version; `deployment` and `authless` intentionally omit user auth. Ambient auth selection is never allowed. Auth-config IDs never enter the control-plane confirmation or browser markup. The proof creates no connection, provider authorization, or grant.
 
 The builder displays `selected_permission_count of max_selected_permissions tool slots`. Code execution consumes one of the four model-tool slots, so selecting an enabled reviewed compute policy leaves at most three provider tools. If no code profile and policy have passed their gates, the code control is unavailable with that reason; the page never invents a profile. The enhancement announces slot-count changes in a polite live region. The server recomputes the limit on submit.
 
-Keep the palette mark for the first release. Do not add an avatar dependency, raw SVG field, image upload, or public avatar request. After the authority path ships, evaluate either an original locally bundled OpenBot icon pack or a pinned self-hosted DiceBear Voxel Bot renderer. [DiceBear core](https://github.com/dicebear/dicebear) is MIT-licensed and the [Voxel Bot style](https://www.dicebear.com/styles/voxel-bot/) is CC0 1.0, but adoption still requires dependency, license, CSP, and generated-SVG review. Use a random opaque Bot seed, not a name or email address. Serve generated images from OpenBot's origin. Keep roster marks static; any later animation is opt-in in the picker or large Bot header and must honor reduced motion.
+The proof pins DiceBear core and its Moods style at `10.5.0`. DiceBear core is MIT-licensed and Moods is CC0 1.0. The server generates each soft-shape SVG locally from the opaque Bot ID, one of ten reviewed colors, one of three clipping shapes, and one of six reviewed face recipes. The browser makes no avatar request and accepts no raw SVG or upload from a user. Roster avatars stay static. Only the large Bot view uses Moods' built-in slow CSS animation, with a static replacement under `prefers-reduced-motion: reduce`.
 
 ### Tool permission groups
 
@@ -222,7 +236,7 @@ OpenBot's redacted audit view is the normal activity record. A safe tool event m
 
 Metorial logs are supplemental vendor observations, not proof that OpenBot authorized a call correctly. A future role-checked organization-owner view may show `Open Metorial dashboard` on the Audit page. The link uses a configured path on the fixed `https://app.metorial.com` origin, includes no vendor object or return-path parameter, displays the hostname, and uses the external-link protections defined below. Metorial must enforce dashboard access with its own account role and session. Do not add a shared credential, an OpenBot proxy, or a deep link until that privileged use case exists.
 
-The first release has one owner role and may render only its owner-only privileged view. When the team permission model is implemented, ordinary users may create and operate Bots within organization-approved policies, request broader access, and view safe OpenBot events for Bots they can access. Only owners and implemented administrators may approve organization tool policies or grants, revoke shared provider authorizations, view all organization audit events, or see the Metorial dashboard-root link. Hiding the link is not a substitute for Metorial-side access control. Do not render a user variant before server-enforced user permissions exist.
+Better Auth supplies the current `owner`, `admin`, or `member` organization role, but OpenBot maps that role to its own action matrix after a fresh membership read. Members may create and operate Bots only within organization-approved policies and may view safe events for Bots they can access. Owners manage organization tool ceilings, shared provider authorizations, invitations, member roles, and all organization audit events. Administrators receive only the explicitly implemented subset of those actions. Hiding a control is never the authorization check, and hiding a Metorial dashboard link is not a substitute for Metorial-side access control.
 
 ## Mobile layout
 
@@ -340,17 +354,21 @@ All resource IDs are account-scoped UUIDs. Raw bootstrap, reset, and confirmatio
 
 ### Browser action index
 
-All actions below use `POST`. Sign-in and sign-out are the documented Better Auth form exceptions. Every other action checks the session, origin, CSRF token, idempotency key, and expected version or fence that its command requires.
+All actions below use `POST`. Magic-link verification and session read are the documented Better Auth GET exceptions. Every app-owned mutation checks the session when required, origin, CSRF token, idempotency key, and expected version or fence that its command requires.
 
 | Path                                                            | Mutation                                                                                 |
 | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `/actions/bootstrap`                                            | Consume the bootstrap token and create the first owner.                                  |
-| `/actions/password-reset`                                       | Change the password and revoke prior sessions.                                           |
+| `/actions/auth/magic-link`                                      | Request the same magic-link response for existing, invited, and new email addresses.     |
+| `/actions/organizations`                                        | Create the required first organization for a user with no membership.                    |
+| `/actions/organizations/active`                                 | Set an active organization after a fresh membership read.                                |
+| `/actions/organization-invitations`                             | Invite a verified email from an owner-authorized organization.                           |
+| `/actions/organization-invitations/:flowId/accept`              | Accept an invitation bound to the signed-in verified email.                              |
 | `/actions/bots`                                                 | Create a Bot and first revision.                                                         |
 | `/actions/bots/:botId/profile`                                  | Change cosmetic fields.                                                                  |
 | `/actions/bots/:botId/revisions`                                | Append a behavior revision.                                                              |
 | `/actions/organization-tool-policies`                           | Approve one reviewed tool version for selection.                                         |
 | `/actions/organization-tool-policies/:policyId/disables`        | Disable after the impact digest and fence still match.                                   |
+| `/actions/organization-permissions`                             | Change one exact organization tool ceiling entry after current-catalog revalidation.     |
 | `/actions/organization-compute-policies`                        | Create a policy that narrows the enabled installation profile.                           |
 | `/actions/organization-compute-policies/:policyId/disables`     | Disable after the impact digest and fence still match.                                   |
 | `/actions/skills`                                               | Create a skill and first revision.                                                       |
@@ -365,6 +383,9 @@ All actions below use `POST`. Sign-in and sign-out are the documented Better Aut
 | `/actions/compute-grants/:grantId/revocations`                  | Revoke compute authority and cancel dependent work.                                      |
 | `/actions/run-confirmations`                                    | Compile and store a disclosure snapshot.                                                 |
 | `/actions/run-confirmations/:confirmationId/discards`           | Consume without a run and schedule prompt erasure.                                       |
+| `/actions/routine-proposals`                                    | Compile a five-minute routine draft from the Bot chat and current exact authority.       |
+| `/actions/routines`                                             | Save one still-current routine draft atomically.                                         |
+| `/actions/routines/:routineId`                                  | Edit a routine with expected revision and rebind it to current Bot authority.            |
 | `/actions/runs`                                                 | Consume a session-bound confirmation and create a run.                                   |
 | `/actions/runs/:runId/cancellations`                            | Request cancellation once.                                                               |
 | `/actions/runs/:runId/cleanup-retries`                          | Return a manual cleanup obligation to pending.                                           |
@@ -387,7 +408,7 @@ The first public API uses the browser session. Unsafe methods also require origi
 
 `GET /api/v1/runs/:runId/events` accepts `after` and a limit of at most 50. It returns `RunPollPageV1`. Cursors bind account, resource, filters, and query version. A cursor from another account, run, or filter produces a generic invalid-cursor problem.
 
-Better Auth lives behind a committed allowlist under `/api/auth/*`. The initial allowlist has email-and-password sign-in, session read, password change, and POST sign-out. Direct sign-up and every unlisted method or path fail before Better Auth dispatch.
+Better Auth lives behind a committed allowlist under `/api/auth/*`. The raw handler exposes only session read, one-use magic-link verification, and POST sign-out. App-owned actions request magic links and perform organization, membership, and invitation mutations after their own origin, CSRF, role, and expected-state checks. Every unlisted method or path fails before Better Auth dispatch.
 
 `POST /operator/v1/admin-tokens` is the only operator HTTP command in the first release. It uses a separate operator credential. Internal Worker and Durable Object protocols are never published in OpenAPI.
 
