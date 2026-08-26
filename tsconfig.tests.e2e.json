@@ -1,0 +1,11 @@
+{
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "lib": ["ES2024", "DOM", "DOM.Iterable"],
+        "outDir": "./.build/types/tests/e2e",
+        "rootDir": ".",
+        "types": ["node", "@playwright/test"]
+    },
+    "include": ["playwright.config.ts", "tests/e2e/**/*.ts"],
+    "references": [{ "path": "./apps/control-plane" }]
+}

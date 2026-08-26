@@ -65,6 +65,14 @@ corepack pnpm verify
 
 `corepack pnpm test:integration` runs the local Worker RPC tests. Later database and preview checks use separate commands because they require Docker or disposable platform and vendor resources. Never substitute real organization data in a test account.
 
+The first real-app browser proof runs with:
+
+```sh
+corepack pnpm test:app:e2e
+```
+
+It opens the production Hono application in a headless browser, creates a Bot, selects the only enabled read permission, reviews a task, starts one claimed run, and reads its escaped result. Authentication, storage, and task execution are bounded local substitutions; this command is not provider, model, production-database, or deployment evidence. On macOS it uses installed Google Chrome when available. Elsewhere, install Playwright Chromium or set `OPENBOT_E2E_CHROME_PATH` to a compatible browser executable.
+
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. Security reports belong in the private channel described in [SECURITY.md](SECURITY.md).
 
 ## License

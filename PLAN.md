@@ -55,6 +55,14 @@ Scaled runs have found two real false-contention bugs. Archive inventory snapsho
 
 Base-layer work is complete only when the credentialed driver, restart recovery, automatic cleanup, secure launcher, and disposable-account observation rows are finished. Until then the registered commands remain non-mutating and product work stays blocked.
 
+### First real-app browser proof
+
+One bounded product-flow proof now exercises the production Hono application through Playwright. A browser opens OpenBot, creates a Bot, selects the sole enabled read permission, enters a task, reviews the disclosure, starts the run, and reads the escaped plain-text result. The browser test uses role-based user interactions and does not inject HTML, fulfill routes, call action endpoints directly, evaluate state changes, or wait for fixed delays.
+
+The local server substitutes a fixed authenticated owner, an account-scoped in-memory repository, and a deterministic task executor. Production route code still owns form validation, exact-origin and CSRF checks, the enabled permission catalog, account scoping, the five-minute confirmation, claim-before-execute ordering, and result escaping. The proof fixture keeps authentication, D1 persistence, Metorial, OpenRouter, remote deployment, attestation, lifecycle advancement, and gate promotion false. It cannot satisfy any live-canary or base-layer exit row.
+
+The proof is complete when `pnpm test:app:e2e`, its weakening-resistant structural checker, unit tests, type checking, and the full integration verification remain green. Bringing production authentication, durable repositories, or the real orchestrator into this path is separate scope and must preserve the base-layer exit criteria above.
+
 ## Product model and navigation
 
 Grok Bot leads with a roster of named Bots, then opens one message workspace for each Bot. The transcript mixes user instructions, work status, connection requests, approvals, and results. Bot details hold the profile and recurring work. Task entry stays primary while access administration remains one link away.
@@ -566,7 +574,7 @@ The production cookie is `__Host-openbot_session`, `Secure`, `HttpOnly`, `SameSi
 
 The callback atomically claims `pending` setup state with a fence before vendor work. A duplicate reads the stored status and never repeats finalization. A network-ambiguous result enters reconciliation. `Reopen provider` works only for a pending, unexpired setup; every failed, ambiguous, consumed, or expired setup requires a new setup, state, and provider URL. After processing, the callback uses `303` to the stored allowlisted path so the state value leaves the address bar.
 
-HTML escapes model and tool text. Responses set a strict CSP, `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and `Cache-Control: no-store` on authenticated, login, bootstrap, reset, and OAuth callback pages.
+HTML escapes model and tool text. Responses set a strict CSP, `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`, and `Cache-Control: no-store` on authenticated, login, bootstrap, reset, and OAuth callback pages. Keeping same-origin referrers lets the server require the browser's exact `Origin` on form mutations; cross-origin requests receive no referrer. External links separately use `rel="noopener noreferrer"`.
 
 ## Keys and sensitive data
 

@@ -1,6 +1,6 @@
 # Core command matrix
 
-This matrix is the design contract for core mutations. It does not mean the routes or stores exist. The current application registers only a health route.
+This matrix is the design contract for core mutations. It does not mean every route or store exists. The current application registers a health route and a dependency-injected local browser proof for Bot creation and one synthetic read-only run; that proof does not implement the production authentication, idempotency, audit, outbox, D1, or provider contracts below.
 
 All browser actions and unsafe `/api/v1` routes require an authenticated session, fixed `Origin`, CSRF token, account membership, and a random idempotency key. A key is scoped to account, actor, command kind, target, and canonical command digest. Repeating the same key and digest returns the stored response reference. Reusing the key with another digest returns `409 idempotency_mismatch`.
 

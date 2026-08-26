@@ -22,6 +22,19 @@ interface ArtifactDenyFixture {
 }
 
 describe("control-plane route inventory", () => {
+    const implementedProductProofRoutes = new Set([
+        "GET /",
+        "GET /login",
+        "GET /bots",
+        "GET /bots/new",
+        "GET /bots/:botId",
+        "GET /bots/:botId/runs/:runId",
+        "GET /run-confirmations/:confirmationId",
+        "POST /actions/bots",
+        "POST /actions/run-confirmations",
+        "POST /actions/runs",
+    ]);
+
     it("matches the committed core route fixture", async () => {
         const fixture = JSON.parse(await readFile(fixtureUrl, "utf8")) as RouteFixture;
 
@@ -44,15 +57,31 @@ describe("control-plane route inventory", () => {
         }
     });
 
-    it("keeps planned routes unreachable until their handlers exist", async () => {
+    it("keeps unimplemented planned routes unreachable", async () => {
         const app = createControlPlane();
 
         for (const route of coreRoutes) {
+            if (implementedProductProofRoutes.has(routeKey(route))) continue;
             const response = await app.request(`https://openbot.invalid${route.path}`, {
                 method: route.method,
             });
             expect(response.status, routeKey(route)).toBe(404);
         }
+    });
+
+    it("registers the signed-out product proof without exposing product data", async () => {
+        const app = createControlPlane();
+        const root = await app.request("https://openbot.invalid/");
+        const login = await app.request("https://openbot.invalid/login");
+        const bots = await app.request("https://openbot.invalid/bots");
+        const create = await app.request("https://openbot.invalid/actions/bots", { method: "POST" });
+
+        expect(root.status).toBe(302);
+        expect(root.headers.get("location")).toBe("/login");
+        expect(login.status).toBe(200);
+        expect(bots.status).toBe(302);
+        expect(create.status).toBe(503);
+        expect(login.headers.get("content-security-policy")).toContain("default-src 'none'");
     });
 
     it("keeps the Drizzle client inside the D1 package", async () => {

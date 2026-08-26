@@ -1,6 +1,6 @@
 # Product UI contract
 
-This document defines the first OpenBot browser interface. It is a design contract, not a statement that the routes or views are implemented.
+This document defines the first OpenBot browser interface. The bounded create-Bot and synthetic task-result proof is implemented; the remaining routes, stores, and provider behavior are still a design contract.
 
 OpenBot is unaffiliated with xAI and Grok Bot. Product research informed the hierarchy and interaction study below. The wireframes and content rules are original to OpenBot. Do not add third-party screenshots, logos, character art, or copied interface assets to this repository.
 

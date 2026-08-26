@@ -1,0 +1,51 @@
+{
+    "schema_version": 1,
+    "kind": "openbot_product_flow_browser_proof",
+    "status": "local_synthetic_result_only",
+    "entrypoint": "createControlPlane",
+    "browser_driver": "playwright",
+    "browser_steps": [
+        "open_openbot",
+        "open_new_bot",
+        "enter_bot_identity_and_behavior",
+        "select_reviewed_read_permission",
+        "create_bot",
+        "submit_task_for_review",
+        "review_disclosure",
+        "start_run",
+        "read_plain_text_result"
+    ],
+    "production_code_exercised": {
+        "hono_application": true,
+        "server_rendered_pages": true,
+        "form_handlers": true,
+        "csrf_validation": true,
+        "server_owned_permission_catalog": true,
+        "account_scoped_repository_contract": true,
+        "confirmation_claim_before_execution": true,
+        "task_executor_contract": true,
+        "plain_text_result_rendering": true
+    },
+    "test_substitutions": {
+        "authenticated_owner": "fixed_local_owner",
+        "repository": "in_memory_account_scoped",
+        "task_executor": "deterministic_synthetic_result"
+    },
+    "browser_shortcuts": {
+        "page_set_content": false,
+        "browser_route_fulfillment": false,
+        "direct_api_requests": false,
+        "dom_evaluation_for_state_changes": false,
+        "fixed_time_waits": false
+    },
+    "authority": {
+        "fixture_is_remote_evidence": false,
+        "synthetic_result_is_model_or_connector_evidence": false,
+        "provider_access_proven": false,
+        "production_storage_proven": false,
+        "production_authentication_proven": false,
+        "eligible_for_attestation": false,
+        "lifecycle_advance_allowed": false,
+        "gate_promotion_allowed": false
+    }
+}
