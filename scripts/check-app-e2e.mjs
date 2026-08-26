@@ -107,7 +107,7 @@ const checkSources = input => {
     );
     requirePattern(
         input.product,
-        /input\[type='text'\],\s*textarea,\s*select\s*\{[^}]*font:\s*400\s+15px\/1\.5\s+var\(--font-sans\);/u,
+        /input\[type='text'\],\s*input\[type='search'\],\s*textarea,\s*select\s*\{[^}]*font:\s*400\s+15px\/1\.5\s+var\(--font-sans\);/u,
         "text inputs must reset inherited label weight with explicit regular typography"
     );
     requirePattern(
@@ -143,6 +143,13 @@ const checkSources = input => {
             'aria-label="Routines"',
             "page.view.bot",
             "page.view.integrations",
+            "const defaultPermissionIds",
+            ": defaultPermissionIds(integration),",
+            'name="integration"',
+            "Available apps",
+            "Added to this Bot",
+            "Configure ${integration.display_name}",
+            "Choose the exact Metorial tools this Bot can use.",
         ],
         "React must render every authenticated product page and submit only to app-owned Hono actions"
     );
@@ -227,10 +234,12 @@ const checkSources = input => {
         [
             'page.goto("/")',
             'getByRole("link", { name: "New Bot" })',
-            'getByRole("checkbox", { name: /Linear/u }).check()',
-            'getByRole("checkbox", { name: /List issues/u }).check()',
-            'getByRole("checkbox", { name: /Slack/u }).check()',
-            'getByRole("checkbox", { name: /List channels/u }).check()',
+            'getByRole("button", { name: "Add Linear" }).click()',
+            'getByRole("checkbox", { name: /List issues/u })).toBeChecked()',
+            'getByRole("button", { name: "Add Slack" }).click()',
+            'getByRole("checkbox", { name: /List channels/u })).toBeChecked()',
+            'getByRole("region", { name: "Added to this Bot" })',
+            'getByRole("button", { name: "Configure Linear" }).click()',
             'getByRole("radio", { name: "Sky", exact: true }).check()',
             'getByRole("radio", { name: "Hexagon", exact: true }).check()',
             'getByRole("radio", { name: "Cheerful", exact: true }).check()',
@@ -405,6 +414,14 @@ if (positiveErrors.length > 0) {
                 ...files,
                 manifest,
                 product: files.product.replace("font: 400 15px/1.5 var(--font-sans);", "font: inherit;"),
+            },
+        },
+        {
+            name: "missing app picker defaults",
+            value: {
+                ...files,
+                manifest,
+                client: files.client.replace("defaultPermissionIds(integration)", "[]"),
             },
         },
         {

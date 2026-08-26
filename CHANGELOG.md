@@ -4,6 +4,8 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 
 ## Unreleased
 
+- Replaced the Bot builder's expanding integration checkboxes with a searchable Metorial app grid, an explicit list of apps added to the Bot, safe read-tool defaults, and a focused exact-tool editor. The browser still submits the existing app-owned Hono form contract, and the server rechecks every selected integration and policy against the current organization ceiling.
+
 ### Added
 
 - Converted the authenticated product surface to React 19 while keeping Hono as the Worker control plane. Hono now emits a narrow versioned page model; React renders the Bot roster, builder, chat, task confirmation, result, routines, and organization permission settings without an HTML injection bridge. The browser contract excludes Better Auth tokens and opaque Metorial connection authority.

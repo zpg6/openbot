@@ -41,8 +41,8 @@ test("an owner creates a Bot, selects permission, runs a task, and reads the res
 
     await page.getByRole("link", { name: "New Bot" }).first().click();
     await expect(page.getByRole("heading", { name: "New Bot" })).toBeVisible();
-    await expect(page.getByRole("checkbox", { name: /Linear/u })).toBeVisible();
-    await expect(page.getByRole("checkbox", { name: /Slack/u })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add Linear" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add Slack" })).toBeVisible();
 
     await page.getByLabel("Name", { exact: true }).fill("Support reader");
     await page.getByLabel("Short description").fill("Summarizes open support cases.");
@@ -51,12 +51,16 @@ test("an owner creates a Bot, selects permission, runs a task, and reads the res
     await page.getByRole("radio", { name: "Sky", exact: true }).check();
     await page.getByRole("radio", { name: "Hexagon", exact: true }).check();
     await page.getByRole("radio", { name: "Cheerful", exact: true }).check();
-    await page.getByRole("checkbox", { name: /Linear/u }).check();
+    await page.getByRole("button", { name: "Add Linear" }).click();
+    await expect(page.getByRole("checkbox", { name: /List issues/u })).toBeChecked();
+    await page.getByRole("button", { name: "Add Slack" }).click();
+    await expect(page.getByRole("checkbox", { name: /List channels/u })).toBeChecked();
+    const addedApps = page.getByRole("region", { name: "Added to this Bot" });
+    await expect(addedApps.getByRole("button", { name: "Configure Linear" })).toBeVisible();
+    await expect(addedApps.getByRole("button", { name: "Configure Slack" })).toBeVisible();
+    await addedApps.getByRole("button", { name: "Configure Linear" }).click();
     await expect(page.getByRole("checkbox", { name: /Create issue/u })).toBeDisabled();
     await expect(page.getByRole("checkbox", { name: /Delete issue/u })).toBeDisabled();
-    await page.getByRole("checkbox", { name: /List issues/u }).check();
-    await page.getByRole("checkbox", { name: /Slack/u }).check();
-    await page.getByRole("checkbox", { name: /List channels/u }).check();
     await capture("02-new-bot.png", "02 New Bot");
     await page.getByRole("button", { name: "Create Bot" }).click();
 

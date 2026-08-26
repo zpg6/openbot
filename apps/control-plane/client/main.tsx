@@ -1,4 +1,4 @@
-import { StrictMode, type ReactNode } from "react";
+import { StrictMode, useMemo, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 
 import type {
@@ -54,17 +54,19 @@ const ErrorSummary = ({ children }: { readonly children: ReactNode }) => (
 );
 
 const PermissionChoice = ({
-    integration,
     permission,
+    checked,
+    onChange,
 }: {
-    readonly integration: OpenBotClientIntegrationV1;
     readonly permission: OpenBotClientPermissionV1;
+    readonly checked: boolean;
+    readonly onChange: (checked: boolean) => void;
 }) => (
     <label className="choice">
         <input
             type="checkbox"
-            name={`permission.${integration.integration_id}`}
-            value={permission.policy_id}
+            checked={checked}
+            onChange={event => onChange(event.currentTarget.checked)}
             disabled={!permission.enabled}
         />
         <span>
@@ -81,44 +83,224 @@ const PermissionChoice = ({
     </label>
 );
 
+const defaultPermissionIds = (integration: OpenBotClientIntegrationV1): readonly string[] =>
+    integration.permissions
+        .filter(permission => permission.enabled && permission.effect === "read")
+        .map(permission => permission.policy_id);
+
 const IntegrationChoices = ({ integrations }: { readonly integrations: readonly OpenBotClientIntegrationV1[] }) => {
+    const [query, setQuery] = useState("");
+    const [selectedIntegrationIds, setSelectedIntegrationIds] = useState<readonly string[]>([]);
+    const [selectedPermissionIds, setSelectedPermissionIds] = useState<Readonly<Record<string, readonly string[]>>>({});
+    const [activeIntegrationId, setActiveIntegrationId] = useState<string | null>(null);
+
+    const filteredIntegrations = useMemo(() => {
+        const normalized = query.trim().toLocaleLowerCase();
+        if (normalized.length === 0) return integrations;
+        return integrations.filter(integration =>
+            `${integration.display_name} ${integration.description}`.toLocaleLowerCase().includes(normalized)
+        );
+    }, [integrations, query]);
+
     if (integrations.length === 0)
         return <div className="notice">No Metorial integrations are available for this organization.</div>;
+
+    const integrationById = new Map(integrations.map(integration => [integration.integration_id, integration]));
+    const selectedIntegrations = selectedIntegrationIds.flatMap(integrationId => {
+        const integration = integrationById.get(integrationId);
+        return integration === undefined ? [] : [integration];
+    });
+    const activeIntegration = activeIntegrationId === null ? null : (integrationById.get(activeIntegrationId) ?? null);
+
+    const addOrOpenIntegration = (integration: OpenBotClientIntegrationV1): void => {
+        if (integration.connection_state !== "connected") return;
+        if (!selectedIntegrationIds.includes(integration.integration_id)) {
+            setSelectedIntegrationIds(current => [...current, integration.integration_id]);
+            setSelectedPermissionIds(current => ({
+                ...current,
+                [integration.integration_id]: defaultPermissionIds(integration),
+            }));
+        }
+        setActiveIntegrationId(integration.integration_id);
+    };
+
+    const removeIntegration = (integrationId: string): void => {
+        setSelectedIntegrationIds(current => current.filter(candidate => candidate !== integrationId));
+        setSelectedPermissionIds(current => {
+            const next = { ...current };
+            delete next[integrationId];
+            return next;
+        });
+        if (activeIntegrationId === integrationId) {
+            setActiveIntegrationId(selectedIntegrationIds.find(candidate => candidate !== integrationId) ?? null);
+        }
+    };
+
+    const setPermission = (integrationId: string, permissionId: string, checked: boolean): void => {
+        setSelectedPermissionIds(current => {
+            const selected = current[integrationId] ?? [];
+            return {
+                ...current,
+                [integrationId]: checked
+                    ? [...selected.filter(candidate => candidate !== permissionId), permissionId]
+                    : selected.filter(candidate => candidate !== permissionId),
+            };
+        });
+    };
+
     return (
-        <div className="integration-options">
-            {integrations.map(integration => {
-                const available = integration.connection_state === "connected";
-                return (
-                    <section className="integration-card" key={integration.integration_id}>
-                        <label className="integration-choice">
-                            <input
-                                type="checkbox"
-                                name="integration"
-                                value={integration.integration_id}
+        <div className="app-picker">
+            {selectedIntegrations.map(integration => (
+                <span key={integration.integration_id}>
+                    <input type="hidden" name="integration" value={integration.integration_id} />
+                    {(selectedPermissionIds[integration.integration_id] ?? []).map(permissionId => (
+                        <input
+                            type="hidden"
+                            name={`permission.${integration.integration_id}`}
+                            value={permissionId}
+                            key={permissionId}
+                        />
+                    ))}
+                </span>
+            ))}
+
+            <section className="app-catalog" aria-labelledby="available-apps-heading">
+                <div className="app-section-head">
+                    <div>
+                        <h2 id="available-apps-heading">Available apps</h2>
+                        <p>Pick an app to add its organization-approved read tools.</p>
+                    </div>
+                    <label className="app-search">
+                        <span className="visually-hidden">Find an app</span>
+                        <input
+                            type="search"
+                            value={query}
+                            onChange={event => setQuery(event.currentTarget.value)}
+                            placeholder="Find an app"
+                        />
+                    </label>
+                </div>
+                <div className="app-grid">
+                    {filteredIntegrations.map(integration => {
+                        const available = integration.connection_state === "connected";
+                        const selected = selectedIntegrationIds.includes(integration.integration_id);
+                        return (
+                            <button
+                                className={`app-tile${selected ? " selected" : ""}`}
+                                type="button"
+                                onClick={() => addOrOpenIntegration(integration)}
                                 disabled={!available}
-                            />
-                            <IntegrationIcon integration={integration} />
-                            <span>
-                                <strong>{integration.display_name}</strong>
-                                <small>{integration.description}</small>
-                                <span className="technical">{integration.connected_account_label}</span>
-                            </span>
-                            <span className={`status-badge${available ? " good" : ""}`}>
-                                {available ? "Connected" : "Needs connection"}
-                            </span>
-                        </label>
-                        <div className="permission-stack">
-                            {integration.permissions.map(permission => (
-                                <PermissionChoice
-                                    integration={integration}
-                                    permission={permission}
-                                    key={permission.policy_id}
-                                />
-                            ))}
+                                aria-label={`${selected ? "Open" : "Add"} ${integration.display_name}`}
+                                aria-pressed={selected}
+                                key={integration.integration_id}
+                            >
+                                <IntegrationIcon integration={integration} />
+                                <span className="app-tile-copy">
+                                    <strong>{integration.display_name}</strong>
+                                    <small>{integration.description}</small>
+                                </span>
+                                <span className={`app-tile-action${selected ? " added" : ""}`} aria-hidden="true">
+                                    {selected ? "Added" : available ? "Add" : "Connect"}
+                                </span>
+                            </button>
+                        );
+                    })}
+                </div>
+                {filteredIntegrations.length === 0 ? (
+                    <p className="app-empty">No apps match "{query.trim()}".</p>
+                ) : null}
+            </section>
+
+            <section className="selected-apps" aria-labelledby="selected-apps-heading">
+                <div className="app-section-head">
+                    <div>
+                        <h2 id="selected-apps-heading">Added to this Bot</h2>
+                        <p>
+                            {selectedIntegrations.length === 0
+                                ? "No apps added yet."
+                                : "Click an app to edit its tools."}
+                        </p>
+                    </div>
+                    <span className="app-count">{selectedIntegrations.length}</span>
+                </div>
+                {selectedIntegrations.length === 0 ? (
+                    <div className="selected-apps-empty">
+                        <span className="empty-app-mark" aria-hidden="true">
+                            +
+                        </span>
+                        <span>Choose an app above. It will show up here.</span>
+                    </div>
+                ) : (
+                    <div className="selected-app-list">
+                        {selectedIntegrations.map(integration => {
+                            const permissionCount = (selectedPermissionIds[integration.integration_id] ?? []).length;
+                            const active = integration.integration_id === activeIntegrationId;
+                            return (
+                                <div
+                                    className={`selected-app-row${active ? " active" : ""}`}
+                                    key={integration.integration_id}
+                                >
+                                    <button
+                                        className="selected-app-open"
+                                        type="button"
+                                        onClick={() => setActiveIntegrationId(integration.integration_id)}
+                                        aria-label={`Configure ${integration.display_name}`}
+                                    >
+                                        <IntegrationIcon integration={integration} />
+                                        <span>
+                                            <strong>{integration.display_name}</strong>
+                                            <small>{integration.connected_account_label}</small>
+                                        </span>
+                                        <span className="selected-app-permissions">
+                                            {permissionCount} {permissionCount === 1 ? "tool" : "tools"}
+                                        </span>
+                                    </button>
+                                    <button
+                                        className="remove-app"
+                                        type="button"
+                                        onClick={() => removeIntegration(integration.integration_id)}
+                                        aria-label={`Remove ${integration.display_name}`}
+                                    >
+                                        Remove
+                                    </button>
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+            </section>
+
+            {activeIntegration === null ? null : (
+                <section className="app-detail" aria-labelledby="app-detail-heading">
+                    <div className="app-detail-head">
+                        <IntegrationIcon integration={activeIntegration} />
+                        <div>
+                            <p className="eyebrow">App access</p>
+                            <h2 id="app-detail-heading">{activeIntegration.display_name}</h2>
+                            <p>{activeIntegration.connected_account_label}</p>
                         </div>
-                    </section>
-                );
-            })}
+                        <span className="status-badge good">Connected</span>
+                    </div>
+                    <div className="app-detail-copy">
+                        <p>Choose the exact Metorial tools this Bot can use.</p>
+                        <p className="technical">Organization policy stays in force even if this Bot asks for more.</p>
+                    </div>
+                    <div className="permission-stack app-permissions">
+                        {activeIntegration.permissions.map(permission => (
+                            <PermissionChoice
+                                permission={permission}
+                                checked={(selectedPermissionIds[activeIntegration.integration_id] ?? []).includes(
+                                    permission.policy_id
+                                )}
+                                onChange={checked =>
+                                    setPermission(activeIntegration.integration_id, permission.policy_id, checked)
+                                }
+                                key={permission.policy_id}
+                            />
+                        ))}
+                    </div>
+                </section>
+            )}
         </div>
     );
 };
