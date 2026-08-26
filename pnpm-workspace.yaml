@@ -15,6 +15,7 @@ catalog:
     "@dicebear/core": 10.5.0
     "@dicebear/styles": 10.5.0
     "@hono/zod-openapi": 1.6.1
+    "@metorial/core": 3.0.5
     "@playwright/test": 1.62.1
     "@types/node": 22.19.21
     "@vitest/runner": 4.1.11

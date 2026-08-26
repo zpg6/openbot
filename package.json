@@ -47,6 +47,7 @@
         "@openbot/gate-attestation": "workspace:*",
         "@cloudflare/vitest-plugin": "catalog:",
         "@cloudflare/workers-types": "catalog:",
+        "@metorial/core": "catalog:",
         "@playwright/test": "catalog:",
         "@types/node": "catalog:",
         "drizzle-kit": "catalog:",

@@ -77,7 +77,7 @@ The saved permission pins the exact tool key, provider deployment and version, c
 
 An organization connector uses the separate `connector_specific` resource rule. Metorial resource URI filters select MCP resources; they do not prove that a tool argument is limited to one repository, mailbox, drive, channel, or account. That proof requires a reviewed argument mapper plus provider-side enforcement and a sibling-target denial. An unsupported mapping returns `resource_scope_unsupported` before session creation.
 
-The management probe sends `Metorial-Version: 2026-01-01-magnetar` and records the exact observed SDK and generated-client versions. The current official package tree declares `metorial@3.0.9`, `@metorial/sdk@3.0.9`, and `@metorial/generated@3.0.2`. These are research observations, not installed dependencies or product authority. The probe must verify the exact resolved package integrity before use.
+The management probe sends `Metorial-Version: 2026-01-01-magnetar` and records the exact observed SDK and generated-client versions. The dev-time provider catalog generator pins `@metorial/core@3.0.5`, which resolves the official `@metorial/generated@3.0.2` client. The package may run only in the reviewed catalog script. It is not a product Worker dependency or runtime authority. The live management probe must still verify the exact resolved package integrity before use.
 
 The cleanup probe must create a second client before cleanup, request cleanup, and then show what that second client can do. Until it passes, OpenBot may say that its gateway denied later calls. It may not say Metorial revoked the bearer URL.
 

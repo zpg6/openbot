@@ -4,6 +4,7 @@ OpenBot records user-visible and operator-visible changes here. The project foll
 
 ## Unreleased
 
+- The dev-time Metorial catalog generator now uses the pinned official core SDK instead of hand-written REST calls. It writes a reviewable JSON catalog of every active public provider and current-version tool, including SDK identity, effect tags, schema digests, and reviewed local theSVG artwork. Account connections and authority remain runtime-only data.
 - Replaced the Bot builder's expanding integration checkboxes with a searchable Metorial app grid, an explicit list of apps added to the Bot, safe read-tool defaults, and a focused exact-tool editor. The browser still submits the existing app-owned Hono form contract, and the server rechecks every selected integration and policy against the current organization ceiling.
 
 ### Added

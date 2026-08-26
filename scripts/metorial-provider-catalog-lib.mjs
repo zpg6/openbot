@@ -1,6 +1,25 @@
 const MAX_ICON_BYTES = 64 * 1024;
 const safeSlug = value => typeof value === "string" && /^[a-z0-9][a-z0-9-]*$/u.test(value);
 
+export const paginateMetorialSdk = async ({ resourceName, requestPage, maxPages = 100 }) => {
+    const items = [];
+    let after;
+    for (let page = 0; page < maxPages; page += 1) {
+        const value = await requestPage({ limit: 100, ...(after === undefined ? {} : { after }) });
+        if (!value || !Array.isArray(value.items) || typeof value.pagination?.hasMoreAfter !== "boolean") {
+            throw new Error(`unexpected Metorial SDK list shape for ${resourceName}`);
+        }
+        items.push(...value.items);
+        if (!value.pagination.hasMoreAfter) return items;
+        const lastId = value.items.at(-1)?.id;
+        if (typeof lastId !== "string" || lastId === after) {
+            throw new Error(`invalid Metorial SDK pagination for ${resourceName}`);
+        }
+        after = lastId;
+    }
+    throw new Error(`Metorial SDK pagination exceeded ${maxPages} pages for ${resourceName}`);
+};
+
 export const normalizeIconCandidate = value => value.toLowerCase().replaceAll(/[^a-z0-9]/gu, "");
 
 export const parseReviewedProviderIconMap = value => {

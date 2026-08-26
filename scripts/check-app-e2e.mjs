@@ -320,16 +320,20 @@ const checkSources = input => {
         input.metorialCatalogGenerator,
         [
             'METORIAL_BASE_URL = "https://api.metorial.com"',
-            '"/providers"',
-            '"/provider-tools"',
-            '"Metorial-Version": apiVersion',
+            'METORIAL_API_VERSION = "2026-01-01-magnetar"',
+            '"@metorial/core"',
+            "createMetorialCoreSDK({",
+            "metorial.providers.list(query)",
+            "metorial.providers.tools.list",
+            "metorial-provider-catalog.json",
             'THESVG_REPOSITORY = "GLINCKER/thesvg"',
             "THESVG_REVISION",
             "safeSvg",
+            "effect_tags:",
             "input_schema_sha256",
             "output_schema_sha256",
         ],
-        "the Metorial catalog generator must pin official provider, tool, and local icon metadata"
+        "the dev-time Metorial SDK catalog generator must pin official provider, tool, effect-tag, and local icon metadata"
     );
     if (
         controlManifest.dependencies?.["@dicebear/core"] !== "catalog:" ||

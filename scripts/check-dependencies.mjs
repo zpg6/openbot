@@ -5139,7 +5139,13 @@ for (const file of files.filter(file => sourceExtensions.has(path.extname(file))
                 errors.push(`${file}: only packages/db-d1 may import the D1 Drizzle driver and SQL builder`);
             }
         }
-        if (/^(?:mysql2|pg|postgres|@metorial\/|@cloudflare\/sandbox|openai$)/u.test(specifier)) {
+        const reviewedMetorialCatalogImport =
+            file === "scripts/generate-metorial-provider-catalog.mjs" &&
+            (specifier === "@metorial/core" || specifier === "@metorial/core/package.json");
+        if (
+            /^(?:mysql2|pg|postgres|@cloudflare\/sandbox|openai$)/u.test(specifier) ||
+            (specifier.startsWith("@metorial/") && !reviewedMetorialCatalogImport)
+        ) {
             errors.push(`${file}: deferred database or vendor dependency imported: ${specifier}`);
         }
     }

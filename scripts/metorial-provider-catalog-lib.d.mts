@@ -17,6 +17,20 @@ export interface CatalogIconIndexes {
     readonly byCandidate: Map<string, CatalogIcon[]>;
 }
 
+export interface MetorialSdkListPage<T extends { readonly id: string }> {
+    readonly items: readonly T[];
+    readonly pagination: { readonly hasMoreAfter: boolean };
+}
+
+export function paginateMetorialSdk<T extends { readonly id: string }>(input: {
+    readonly resourceName: string;
+    readonly requestPage: (query: {
+        readonly limit: number;
+        readonly after?: string;
+    }) => Promise<MetorialSdkListPage<T>>;
+    readonly maxPages?: number;
+}): Promise<readonly T[]>;
+
 export function normalizeIconCandidate(value: string): string;
 export function parseReviewedProviderIconMap(value: unknown): Map<string, string>;
 export function buildIconIndexes(icons: readonly unknown[]): CatalogIconIndexes;
