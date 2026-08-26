@@ -45,6 +45,12 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.credentialed_runner_uses_durable_driver_recovery_observation_session === false &&
             fixture.implementation?.checkout_local_driver_lease_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_driver_lease === false &&
+            fixture.implementation?.exact_predecessor_lease_takeover_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_exact_predecessor_lease_takeover === false &&
+            fixture.implementation?.recovery_state_transition_candidate_planner_implemented === true &&
+            fixture.implementation?.recovery_state_transition_executor_implemented === false &&
+            fixture.implementation?.keyed_response_semantic_projection_implemented === false &&
+            fixture.implementation?.credentialed_runner_uses_recovery_state_transition_candidate === false &&
             fixture.implementation?.untrusted_effect_claim_journal_implemented === true &&
             fixture.implementation?.credentialed_runner_writes_effect_claim_journal === false &&
             fixture.implementation?.shared_execution_nonce_commitment_domain_implemented === true &&
@@ -61,7 +67,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.response_projection_contract_implemented === true &&
             fixture.implementation?.read_only_recovery_inspector_implemented === true &&
             fixture.implementation?.root_recovery_inspector_command_registered === true &&
-            fixture.implementation?.secure_secret_fd_launcher_implemented === false &&
+            fixture.implementation?.secure_secret_fd_launcher_implemented === true &&
+            fixture.implementation?.credentialed_runner_uses_secure_secret_fd_launcher === false &&
+            fixture.implementation?.secure_launcher_production_export_has_injection_seam === false &&
+            fixture.implementation?.secure_launcher_full_result_input_binding_implemented === false &&
             fixture.implementation?.encrypted_response_preimage_archive_implemented === true &&
             fixture.implementation?.bounded_response_preimage_capture_hook_implemented === true &&
             fixture.implementation?.credentialed_runner_uses_response_preimage_capture_hook === false &&
@@ -90,6 +99,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.implementation?.local_base_layer_e2e_durable_session_identity_contention_implemented === true &&
             fixture.implementation?.reviewed_base_layer_benchmark_profiles_runner_implemented === true &&
             fixture.implementation?.local_base_layer_e2e_reconstructs_durable_transcript === true &&
+            fixture.implementation?.local_base_layer_e2e_opens_durable_recovery_session === true &&
+            fixture.implementation?.local_base_layer_e2e_compiles_cleanup_resumption_plan === true &&
+            fixture.implementation?.local_base_layer_e2e_cleans_interrupted_benchmark_records === true &&
+            fixture.implementation?.local_base_layer_e2e_uses_bounded_batch_barriers === true &&
             fixture.implementation?.local_base_layer_e2e_remote_network_requests === false &&
             fixture.implementation?.credentialed_runner_covered_by_local_base_layer_e2e === false &&
             fixture.implementation?.response_preimage_capture_implemented === false &&
@@ -114,6 +127,10 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             baseLayer.private_driver_session_composition_required === true &&
             baseLayer.restart_recovery_observation_session_required === true &&
             baseLayer.cleanup_resumption_planning_required === true &&
+            baseLayer.exact_predecessor_lease_takeover_required === true &&
+            baseLayer.keyed_response_semantic_projection_before_transition_required === true &&
+            baseLayer.secure_secret_fd_launcher_required === true &&
+            baseLayer.secure_launcher_process_tree_supervisor_required_before_wiring === true &&
             baseLayer.reviewed_maximum_benchmark_profiles_required === true &&
             baseLayer.scalable_local_e2e_required === true &&
             baseLayer.authority_separation_required === true &&
@@ -146,6 +163,9 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             fixture.authority?.durable_driver_session_prevents_caller_retention_of_operation_or_archive_key === false &&
             fixture.authority?.durable_driver_recovery_session_authorizes_actions === false &&
             fixture.authority?.cleanup_resumption_plan_authorizes_actions === false &&
+            fixture.authority?.exact_predecessor_lease_takeover_authorizes_dispatch_cleanup_or_transition === false &&
+            fixture.authority?.recovery_state_transition_candidate_authorizes_transition === false &&
+            fixture.authority?.secure_launcher_result_is_evidence === false &&
             fixture.authority?.reviewed_base_layer_benchmark_report_is_evidence === false,
         "the isolated canary must grant no evidence, upload, lifecycle, attestation, or gate authority"
     );
@@ -204,6 +224,14 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
                 "double_sampled_operation_lease_recovery_transcript_observation_only" &&
             workflow.durable_driver_recovery_retries_or_mutates === false &&
             workflow.durable_driver_recovery_exposes_raw_identity_or_lease_owner === false &&
+            workflow.exact_predecessor_lease_takeover_scope ===
+                "expired_esrch_predecessor_digest_generation_cas_single_local_lease_mutation_unwired" &&
+            workflow.exact_predecessor_lease_takeover_mutations_per_attempt_max === 1 &&
+            workflow.exact_predecessor_lease_takeover_reasserts_full_recovery_after_mutation === true &&
+            workflow.recovery_state_transition_candidate_scope ===
+                "double_revalidated_recovery_and_lease_read_only_candidate_unwired" &&
+            workflow.recovery_state_transition_candidate_requires_keyed_response_semantic_projection === true &&
+            workflow.recovery_state_transition_candidate_transitions_state === false &&
             workflow.cleanup_resumption_scope ===
                 "double_sampled_consistency_recovery_obligation_digest_only_planning" &&
             workflow.cleanup_resumption_performs_requests_or_mutations === false &&
@@ -271,7 +299,7 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.complete_pagination_metadata_required_for_absence === true &&
             workflow.optional_response_projection_contract_implemented === true &&
             workflow.local_base_layer_e2e_workload_scope ===
-                "public_local_durable_driver_session_state_lease_effect_archive_obligation_recovery_and_durable_transcript_apis_only" &&
+                "public_local_durable_driver_session_state_lease_effect_archive_obligation_recovery_durable_recovery_cleanup_resumption_and_durable_transcript_apis_only" &&
             workflow.local_base_layer_e2e_default_operations === 3 &&
             workflow.local_base_layer_e2e_max_operations === 128 &&
             workflow.local_base_layer_e2e_max_concurrency === 16 &&
@@ -280,11 +308,25 @@ export const checkCloudflareWorkerApiCanaryFixture = fixture => {
             workflow.local_base_layer_e2e_durable_session_max_parallel_attempts === 512 &&
             workflow.local_base_layer_e2e_durable_session_identity_fields_challenged === 5 &&
             workflow.local_base_layer_e2e_durable_session_contention_writes_records === false &&
+            workflow.local_base_layer_e2e_recovery_sessions_per_operation === 1 &&
+            workflow.local_base_layer_e2e_cleanup_resumption_plans_per_operation === 1 &&
+            workflow.local_base_layer_e2e_removes_only_validated_synthetic_plan_records_on_start === true &&
+            workflow.local_base_layer_e2e_waits_for_batch_cleanup_before_next_batch === true &&
             workflow.local_base_layer_e2e_latency_threshold_enforced === false &&
             same(workflow.reviewed_base_layer_benchmark_profiles, [
                 "max_scale_128_16_4096",
                 "max_payload_1_1_262144",
             ]) &&
+            workflow.secure_launcher_scope === "fixed_disabled_child_descriptor_only_empty_environment_unwired" &&
+            same(workflow.secure_launcher_secret_descriptors, [3, 4]) &&
+            workflow.secure_launcher_automatic_retries === 0 &&
+            workflow.secure_launcher_command_limit_bytes === 2 * 1024 * 1024 &&
+            workflow.secure_launcher_output_limit_bytes_each === 256 * 1024 &&
+            workflow.secure_launcher_deadline_ms === 310_000 &&
+            workflow.secure_launcher_termination_timeout_ms === 1_000 &&
+            workflow.secure_launcher_child_descendant_processes_allowed === false &&
+            workflow.secure_launcher_termination_failure_returns_canonical_result === false &&
+            workflow.secure_launcher_unproven_containment_error === "worker_canary_child_containment_unproven" &&
             workflow.recovery_inspector?.command === "d1-probe:inspect-worker-api-canary-recovery" &&
             workflow.recovery_inspector?.canonical_stdin_required === true &&
             same(workflow.recovery_inspector?.credential_inputs, []) &&

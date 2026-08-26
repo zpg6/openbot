@@ -62,6 +62,8 @@ export const validateBaseLayerBenchmarkReportV1 = (input, profile) => {
         effect_claims: profile.operations * 9,
         encrypted_response_archives: profile.operations * 3,
         durable_transcripts_reconstructed: profile.operations,
+        durable_recovery_sessions_opened: profile.operations,
+        cleanup_resumption_plans_compiled: profile.operations,
         driver_bootstraps: profile.operations,
         cleanup_obligations: profile.operations,
         response_body_bytes_per_request: profile.responseBytes,
@@ -177,6 +179,8 @@ const reportFixture = profile => ({
         effect_claims: profile.operations * 9,
         encrypted_response_archives: profile.operations * 3,
         durable_transcripts_reconstructed: profile.operations,
+        durable_recovery_sessions_opened: profile.operations,
+        cleanup_resumption_plans_compiled: profile.operations,
         driver_bootstraps: profile.operations,
         cleanup_obligations: profile.operations,
         response_body_bytes_per_request: profile.responseBytes,
@@ -223,6 +227,20 @@ const runSelfTest = () => {
         {
             ...reportFixture(profile),
             throughput: { ...reportFixture(profile).throughput, operations: profile.operations - 1 },
+        },
+        {
+            ...reportFixture(profile),
+            throughput: {
+                ...reportFixture(profile).throughput,
+                durable_recovery_sessions_opened: profile.operations - 1,
+            },
+        },
+        {
+            ...reportFixture(profile),
+            throughput: {
+                ...reportFixture(profile).throughput,
+                cleanup_resumption_plans_compiled: profile.operations - 1,
+            },
         },
         {
             ...reportFixture(profile),

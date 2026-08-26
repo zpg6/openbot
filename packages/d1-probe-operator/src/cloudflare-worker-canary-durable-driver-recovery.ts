@@ -12,7 +12,7 @@ import {
 } from "./cloudflare-worker-canary-effect-journal.js";
 import {
     digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1,
-    readD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
+    readD1ProbeCloudflareWorkerCanaryDriverLeaseHeadReadOnlyV1,
     type D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1,
 } from "./cloudflare-worker-canary-driver-lease.js";
 import {
@@ -98,7 +98,9 @@ export interface D1ProbeCloudflareWorkerCanaryDurableDriverRecoveryTestOnlyDepen
     readonly validate_operation: typeof validateD1ProbeCloudflareWorkerCanaryOperationV1;
     readonly digest_operation: typeof digestD1ProbeCloudflareWorkerCanaryOperationRecordV1;
     readonly commit_execution_nonce: typeof commitD1ProbeCloudflareWorkerCanaryExecutionNonceV1;
-    readonly read_driver_lease: (planDigest: string) => Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1>;
+    readonly read_driver_lease_head_read_only: (
+        planDigest: string
+    ) => Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1>;
     readonly digest_driver_lease: typeof digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1;
     readonly read_base_recovery: (planDigest: string) => Promise<D1ProbeCloudflareWorkerCanaryBaseRecoveryV1>;
     readonly read_durable_transcript: (planDigest: string) => Promise<D1ProbeCloudflareWorkerCanaryDurableTranscriptV1>;
@@ -108,7 +110,7 @@ const fixedDependencies: D1ProbeCloudflareWorkerCanaryDurableDriverRecoveryTestO
     validate_operation: validateD1ProbeCloudflareWorkerCanaryOperationV1,
     digest_operation: digestD1ProbeCloudflareWorkerCanaryOperationRecordV1,
     commit_execution_nonce: commitD1ProbeCloudflareWorkerCanaryExecutionNonceV1,
-    read_driver_lease: readD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
+    read_driver_lease_head_read_only: readD1ProbeCloudflareWorkerCanaryDriverLeaseHeadReadOnlyV1,
     digest_driver_lease: digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1,
     read_base_recovery: readD1ProbeCloudflareWorkerCanaryBaseRecoveryV1,
     read_durable_transcript: readD1ProbeCloudflareWorkerCanaryDurableTranscriptV1,
@@ -151,12 +153,12 @@ const readStableSnapshot = async (
     const first = await Promise.all([
         dependencies.read_base_recovery(planDigest),
         dependencies.read_durable_transcript(planDigest),
-        dependencies.read_driver_lease(planDigest),
+        dependencies.read_driver_lease_head_read_only(planDigest),
     ]);
     const second = await Promise.all([
         dependencies.read_base_recovery(planDigest),
         dependencies.read_durable_transcript(planDigest),
-        dependencies.read_driver_lease(planDigest),
+        dependencies.read_driver_lease_head_read_only(planDigest),
     ]);
     const firstSignature = stableSignature(first);
     return firstSignature !== null && firstSignature === stableSignature(second)

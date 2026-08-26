@@ -72,6 +72,15 @@ const AcquireLeaseV1Schema = z
     })
     .strict();
 
+const TakeoverExpectedLeaseV1Schema = AcquireLeaseV1Schema.extend({
+    expected_generation: z
+        .number()
+        .int()
+        .nonnegative()
+        .max(MAX_GENERATIONS_V1 - 1),
+    expected_record_digest: DigestV1Schema,
+}).strict();
+
 const OwnedLeaseV1Schema = z
     .object({
         plan_digest: DigestV1Schema,
@@ -532,6 +541,7 @@ const readLatest = async (
         const prefix = `${planDigest}.`;
         const entries = (await readdir(root)).filter(name => name.startsWith(prefix)).sort();
         const finalPattern = new RegExp(`^${planDigest}\\.(\\d+)\\.driver-lease\\.json$`, "u");
+        const initialHadPublicationResidue = entries.some(name => !finalPattern.test(name));
         const generations = entries
             .map(name => finalPattern.exec(name))
             .filter((match): match is RegExpExecArray => match !== null)
@@ -561,7 +571,7 @@ const readLatest = async (
             }
             latest = read.lease;
         }
-        const remainingEntries = (await readdir(root)).filter(name => name.startsWith(prefix));
+        const remainingEntries = (await readdir(root)).filter(name => name.startsWith(prefix)).sort();
         if (remainingEntries.some(name => !finalPattern.test(name))) {
             if (!orphanCleanupAllowed || latest === null) return { success: false, code: "lease_corrupt" };
             const reconciled = await reconcileOrphanTemp(root, planDigest, latest);
@@ -569,6 +579,14 @@ const readLatest = async (
             return reconciled.cleaned
                 ? await readLatest(root, planDigest, false)
                 : { success: false, code: "lease_corrupt" };
+        }
+        if (
+            remainingEntries.length !== entries.length ||
+            remainingEntries.some((name, index) => name !== entries[index])
+        ) {
+            return initialHadPublicationResidue
+                ? await readLatest(root, planDigest, false)
+                : { success: false, code: "concurrent_lease_write" };
         }
         return latest === null ? { success: false, code: "lease_not_found" } : { success: true, lease: latest };
     } catch {
@@ -616,6 +634,16 @@ const readHistoryReadOnly = async (
     } catch {
         return { success: false, code: "lease_io_unavailable" };
     }
+};
+
+const readLatestReadOnly = async (
+    root: string,
+    planDigest: string
+): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1> => {
+    const history = await readHistoryReadOnly(root, planDigest);
+    if (!history.success) return history;
+    const lease = history.leases.at(-1);
+    return lease === undefined ? { success: false, code: "lease_corrupt" } : { success: true, lease };
 };
 
 const publishGeneration = async (
@@ -750,6 +778,20 @@ export const readD1ProbeCloudflareWorkerCanaryDriverLeaseV1 = async (
     }
 };
 
+export const readD1ProbeCloudflareWorkerCanaryDriverLeaseHeadReadOnlyV1 = async (
+    planDigestInput: unknown
+): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1> => {
+    const planDigest = safeParse(DigestV1Schema, planDigestInput);
+    if (planDigest === null) return { success: false, code: "invalid_lease_request" };
+    try {
+        const leaseRoot = await ensureLeaseRoot(false);
+        if (!leaseRoot.success) return leaseRoot;
+        return await readLatestReadOnly(leaseRoot.root, planDigest);
+    } catch {
+        return { success: false, code: "lease_io_unavailable" };
+    }
+};
+
 export const readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1 = async (
     planDigestInput: unknown
 ): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseHistoryResultV1> => {
@@ -773,9 +815,8 @@ const acquireWithDependencies = async (
     const ownerPid = safeParse(OwnerPidV1Schema, dependencies.ownerPid);
     if (ownerPid === null) return { success: false, code: "invalid_lease_request" };
     try {
-        const now = safeNow(dependencies);
-        const expiry = now === null ? null : expiresAt(now, request.lease_duration_ms);
-        if (now === null || expiry === null) return { success: false, code: "lease_clock_invalid" };
+        const observedNow = safeNow(dependencies);
+        if (observedNow === null) return { success: false, code: "lease_clock_invalid" };
         const executionNonceCommitment = await commitment(
             EXECUTION_NONCE_COMMITMENT_DOMAIN_V1,
             request.execution_nonce
@@ -792,7 +833,7 @@ const acquireWithDependencies = async (
                 return { success: false, code: "lease_binding_mismatch" };
             }
             if (current.lease.state === "released") return { success: false, code: "lease_released" };
-            if (now < current.lease.expires_at_ms) return { success: false, code: "lease_already_held" };
+            if (observedNow < current.lease.expires_at_ms) return { success: false, code: "lease_already_held" };
             if (ownerPid === current.lease.owner_pid) return { success: false, code: "lease_pid_live" };
             let liveness: D1ProbeCloudflareWorkerCanaryPidLivenessV1;
             try {
@@ -822,6 +863,11 @@ const acquireWithDependencies = async (
         } else if (current.code !== "lease_not_found") {
             return current;
         }
+        const issuedAt = current.success ? safeNow(dependencies) : observedNow;
+        const expiry = issuedAt === null ? null : expiresAt(issuedAt, request.lease_duration_ms);
+        if (issuedAt === null || issuedAt < observedNow || expiry === null) {
+            return { success: false, code: "lease_clock_invalid" };
+        }
         const ownerNonce = makeOwnerNonce(dependencies);
         if (ownerNonce === null) return { success: false, code: "lease_randomness_unavailable" };
         try {
@@ -841,8 +887,110 @@ const acquireWithDependencies = async (
                 owner_pid: ownerPid,
                 owner_nonce_commitment: ownerNonceCommitment,
                 prior_owner_liveness: priorOwnerLiveness,
-                issued_at_ms: now,
-                heartbeat_at_ms: now,
+                issued_at_ms: issuedAt,
+                heartbeat_at_ms: issuedAt,
+                expires_at_ms: expiry,
+                caller_mutation_authority: false,
+                authoritative: false,
+                eligible_for_upload: false,
+                eligible_for_attestation: false,
+                lifecycle_advance_allowed: false,
+                gate_promotion_allowed: false,
+                mutation_authority: false,
+            };
+            const published = await publishGeneration(leaseRoot.root, lease);
+            if (!published.success) return published;
+            return {
+                success: true,
+                lease,
+                owner: ownerFor(lease, request.execution_nonce, ownerNonce.encoded),
+            };
+        } finally {
+            ownerNonce.bytes.fill(0);
+        }
+    } catch {
+        return { success: false, code: "lease_io_unavailable" };
+    }
+};
+
+const takeoverExpectedWithDependencies = async (
+    input: unknown,
+    dependencies: D1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyDependenciesV1
+): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseOwnedResultV1> => {
+    const request = safeParse(TakeoverExpectedLeaseV1Schema, input);
+    if (request === null) return { success: false, code: "invalid_lease_request" };
+    const ownerPid = safeParse(OwnerPidV1Schema, dependencies.ownerPid);
+    if (ownerPid === null) return { success: false, code: "invalid_lease_request" };
+    try {
+        const observedNow = safeNow(dependencies);
+        if (observedNow === null) return { success: false, code: "lease_clock_invalid" };
+        const executionNonceCommitment = await commitment(
+            EXECUTION_NONCE_COMMITMENT_DOMAIN_V1,
+            request.execution_nonce
+        );
+        const leaseRoot = await ensureLeaseRoot(false);
+        if (!leaseRoot.success) return leaseRoot;
+        const current = await readLatestReadOnly(leaseRoot.root, request.plan_digest);
+        if (!current.success) return current;
+        const currentDigest = await recordDigest(current.lease);
+        if (
+            current.lease.generation !== request.expected_generation ||
+            currentDigest !== request.expected_record_digest
+        ) {
+            return { success: false, code: "concurrent_lease_write" };
+        }
+        if (current.lease.execution_nonce_commitment !== executionNonceCommitment) {
+            return { success: false, code: "lease_binding_mismatch" };
+        }
+        if (current.lease.state === "released") return { success: false, code: "lease_released" };
+        if (observedNow < current.lease.expires_at_ms) return { success: false, code: "lease_already_held" };
+        if (ownerPid === current.lease.owner_pid) return { success: false, code: "lease_pid_live" };
+        let liveness: D1ProbeCloudflareWorkerCanaryPidLivenessV1;
+        try {
+            liveness = await dependencies.checkPidLiveness(current.lease.owner_pid);
+        } catch {
+            liveness = "unknown";
+        }
+        if (!(["live", "esrch", "eperm", "unknown"] as const).includes(liveness)) liveness = "unknown";
+        const denial = livenessDenial(liveness);
+        if (denial !== null) return { success: false, code: denial };
+        const checked = await readLatestReadOnly(leaseRoot.root, request.plan_digest);
+        if (!checked.success) return checked;
+        if (
+            checked.lease.generation !== request.expected_generation ||
+            (await recordDigest(checked.lease)) !== request.expected_record_digest
+        ) {
+            return { success: false, code: "concurrent_lease_write" };
+        }
+        if (current.lease.generation >= MAX_GENERATIONS_V1 - 1) {
+            return { success: false, code: "lease_generation_exhausted" };
+        }
+        const issuedAt = safeNow(dependencies);
+        const expiry = issuedAt === null ? null : expiresAt(issuedAt, request.lease_duration_ms);
+        if (issuedAt === null || issuedAt < observedNow || expiry === null) {
+            return { success: false, code: "lease_clock_invalid" };
+        }
+        const ownerNonce = makeOwnerNonce(dependencies);
+        if (ownerNonce === null) return { success: false, code: "lease_randomness_unavailable" };
+        try {
+            const ownerNonceCommitment = await commitment(OWNER_NONCE_COMMITMENT_DOMAIN_V1, ownerNonce.encoded);
+            if (ownerNonceCommitment === current.lease.owner_nonce_commitment) {
+                return { success: false, code: "lease_randomness_unavailable" };
+            }
+            const lease: D1ProbeCloudflareWorkerCanaryDriverLeaseV1 = {
+                schema_version: 1,
+                kind: "d1_probe_cloudflare_worker_api_canary_driver_lease",
+                transition: "taken_over",
+                state: "active",
+                plan_digest: request.plan_digest,
+                execution_nonce_commitment: executionNonceCommitment,
+                generation: current.lease.generation + 1,
+                previous_record_digest: request.expected_record_digest,
+                owner_pid: ownerPid,
+                owner_nonce_commitment: ownerNonceCommitment,
+                prior_owner_liveness: "esrch",
+                issued_at_ms: issuedAt,
+                heartbeat_at_ms: issuedAt,
                 expires_at_ms: expiry,
                 caller_mutation_authority: false,
                 authoritative: false,
@@ -975,10 +1123,41 @@ const assertCurrentWithDependencies = async (
     }
 };
 
+const assertCurrentReadOnlyWithDependencies = async (
+    input: unknown,
+    dependencies: D1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyDependenciesV1
+): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1> => {
+    const request = safeParse(OwnedLeaseV1Schema, input);
+    if (request === null) return { success: false, code: "invalid_lease_request" };
+    const ownerPid = safeParse(OwnerPidV1Schema, dependencies.ownerPid);
+    if (ownerPid === null) return { success: false, code: "invalid_lease_request" };
+    try {
+        const leaseRoot = await ensureLeaseRoot(false);
+        if (!leaseRoot.success) return leaseRoot;
+        const current = await readLatestReadOnly(leaseRoot.root, request.plan_digest);
+        if (!current.success) return current;
+        const ownerDenial = await exactOwner(current.lease, request, ownerPid);
+        if (ownerDenial !== null) return { success: false, code: ownerDenial };
+        const now = safeNow(dependencies);
+        if (now === null || now < current.lease.heartbeat_at_ms) {
+            return { success: false, code: "lease_clock_invalid" };
+        }
+        if (now >= current.lease.expires_at_ms) return { success: false, code: "lease_expired" };
+        return { success: true, lease: current.lease };
+    } catch {
+        return { success: false, code: "lease_io_unavailable" };
+    }
+};
+
 export const acquireD1ProbeCloudflareWorkerCanaryDriverLeaseV1 = async (
     input: unknown
 ): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseOwnedResultV1> =>
     await acquireWithDependencies(input, defaultDependencies);
+
+export const takeoverExpectedD1ProbeCloudflareWorkerCanaryDriverLeaseV1 = async (
+    input: unknown
+): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseOwnedResultV1> =>
+    await takeoverExpectedWithDependencies(input, defaultDependencies);
 
 export const renewD1ProbeCloudflareWorkerCanaryDriverLeaseV1 = async (
     input: unknown
@@ -995,11 +1174,18 @@ export const assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseV1 = async (
 ): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1> =>
     await assertCurrentWithDependencies(input, defaultDependencies);
 
+export const assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseReadOnlyV1 = async (
+    input: unknown
+): Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1> =>
+    await assertCurrentReadOnlyWithDependencies(input, defaultDependencies);
+
 export type D1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1 = {
     readonly acquire: (input: unknown) => Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseOwnedResultV1>;
+    readonly takeoverExpected: (input: unknown) => Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseOwnedResultV1>;
     readonly renew: (input: unknown) => Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseOwnedResultV1>;
     readonly release: (input: unknown) => Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1>;
     readonly assertCurrent: (input: unknown) => Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1>;
+    readonly assertCurrentReadOnly: (input: unknown) => Promise<D1ProbeCloudflareWorkerCanaryDriverLeaseReadResultV1>;
 };
 
 /** Test-only clock, randomness, PID, and liveness seam. Production callers must use the fixed public functions. */
@@ -1009,9 +1195,12 @@ export const createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1 = (
     const fixedDependencies = Object.freeze({ ...dependencies });
     return Object.freeze({
         acquire: async (input: unknown) => await acquireWithDependencies(input, fixedDependencies),
+        takeoverExpected: async (input: unknown) => await takeoverExpectedWithDependencies(input, fixedDependencies),
         renew: async (input: unknown) => await renewWithDependencies(input, fixedDependencies),
         release: async (input: unknown) => await releaseWithDependencies(input, fixedDependencies),
         assertCurrent: async (input: unknown) => await assertCurrentWithDependencies(input, fixedDependencies),
+        assertCurrentReadOnly: async (input: unknown) =>
+            await assertCurrentReadOnlyWithDependencies(input, fixedDependencies),
     });
 };
 

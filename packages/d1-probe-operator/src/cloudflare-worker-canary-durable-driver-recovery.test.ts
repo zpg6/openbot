@@ -154,7 +154,7 @@ const dependenciesFor = (
     commit_execution_nonce: vi.fn(async nonce =>
         nonce === operation.execution_nonce ? executionNonceCommitment : digest("9")
     ),
-    read_driver_lease: vi.fn(async () => driverLeaseFixture()),
+    read_driver_lease_head_read_only: vi.fn(async () => driverLeaseFixture()),
     digest_driver_lease: vi.fn(async () => driverLeaseDigest),
     read_base_recovery: vi.fn(async () => recovery),
     read_durable_transcript: vi.fn(async () => transcript),
@@ -258,9 +258,10 @@ describe("Cloudflare Worker canary durable-driver restart recovery", () => {
             disposition: "local_histories_aligned",
         },
     ])("opens an observation-only session for $name", async ({ recovery, transcript, disposition }) => {
+        const dependencies = dependenciesFor(recovery, transcript);
         const result = await openD1ProbeCloudflareWorkerCanaryDurableDriverRecoverySessionWithDependenciesTestOnlyV1(
             { operation },
-            dependenciesFor(recovery, transcript)
+            dependencies
         );
         expect(result).toMatchObject({
             success: true,
@@ -294,6 +295,8 @@ describe("Cloudflare Worker canary durable-driver restart recovery", () => {
             ambiguous_remote_effect_retry_allowed: false,
             recovery_action_authorized: false,
         });
+        expect(dependencies.read_driver_lease_head_read_only).toHaveBeenCalledTimes(2);
+        expect(Object.keys(dependencies)).not.toContain("read_driver_lease");
     });
 
     it("does not serialize the execution nonce, attempt tag, ownership tag, or script name", async () => {
@@ -324,10 +327,10 @@ describe("Cloudflare Worker canary durable-driver restart recovery", () => {
             ),
             dependenciesFor(recoveryFixture(), transcriptFixture({ authoritative: true as false })),
             dependenciesFor(recoveryFixture(), transcriptFixture(), {
-                read_driver_lease: async () => driverLeaseFixture({ generation: 1 }),
+                read_driver_lease_head_read_only: async () => driverLeaseFixture({ generation: 1 }),
             }),
             dependenciesFor(recoveryFixture(), transcriptFixture(), {
-                read_driver_lease: async () => driverLeaseFixture({ mutation_authority: true as false }),
+                read_driver_lease_head_read_only: async () => driverLeaseFixture({ mutation_authority: true as false }),
             }),
         ];
         for (const dependencies of cases) {

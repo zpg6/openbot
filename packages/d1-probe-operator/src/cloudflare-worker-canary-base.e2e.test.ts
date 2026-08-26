@@ -2,12 +2,14 @@ import { createHmac } from "node:crypto";
 import { lstat, readdir, unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { readD1ProbeCloudflareWorkerCanaryBaseRecoveryV1 } from "./cloudflare-worker-canary-base-recovery.js";
 import { compileD1ProbeCloudflareWorkerCanaryCleanupCommandV1 } from "./cloudflare-worker-canary-cleanup-grace.js";
 import { D1_PROBE_CLOUDFLARE_WORKER_CANARY_CLEANUP_OBLIGATION_ROOT_V1 } from "./cloudflare-worker-canary-cleanup-obligation.js";
+import { planD1ProbeCloudflareWorkerCanaryCleanupResumptionV1 } from "./cloudflare-worker-canary-cleanup-resumption.js";
 import { D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1 } from "./cloudflare-worker-canary-driver-lease.js";
+import { openD1ProbeCloudflareWorkerCanaryDurableDriverRecoverySessionV1 } from "./cloudflare-worker-canary-durable-driver-recovery.js";
 import {
     createD1ProbeCloudflareWorkerCanaryDurableDriverV1,
     type D1ProbeCloudflareWorkerCanaryDurableDriverSessionV1,
@@ -58,6 +60,8 @@ const ROOTS = [
 ] as const;
 
 const benchmarkPlanDigests = new Set<string>();
+const BENCHMARK_ATTEMPT_TAG_PREFIX = "openbot-canary-attempt-";
+const OPERATION_RECORD_NAME = /^([0-9a-f]{64})\.\d+\.operation\.json$/u;
 
 const readBoundedInteger = (
     name: "OPENBOT_BASE_E2E_OPERATIONS" | "OPENBOT_BASE_E2E_CONCURRENCY" | "OPENBOT_BASE_E2E_RESPONSE_BYTES",
@@ -158,6 +162,29 @@ const removePlanRecords = async (planDigest: string): Promise<void> => {
                     throw error;
                 }
             });
+        }
+    }
+};
+
+const removeInterruptedBenchmarkRecords = async (): Promise<void> => {
+    let names: string[];
+    try {
+        names = await readdir(D1_PROBE_CLOUDFLARE_WORKER_CANARY_STATE_ROOT_V1);
+    } catch (error) {
+        if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") return;
+        throw error;
+    }
+    const planDigests = new Set(
+        names.map(name => OPERATION_RECORD_NAME.exec(name)?.[1]).filter((value): value is string => value !== undefined)
+    );
+    for (const candidate of planDigests) {
+        const state = await readD1ProbeCloudflareWorkerCanaryStateReadOnlyV1(candidate);
+        if (
+            state.success &&
+            state.operation.plan.account_id === PLAN_ACCOUNT_ID &&
+            state.operation.attempt_tag.startsWith(BENCHMARK_ATTEMPT_TAG_PREFIX)
+        ) {
+            await removePlanRecords(candidate);
         }
     }
 };
@@ -327,13 +354,16 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
         operation = await transition(operation, "delete_dispatching");
 
         const recoveryStarted = performance.now();
-        const [recovery, durableTranscript, state, journal, archive] = await Promise.all([
-            readD1ProbeCloudflareWorkerCanaryBaseRecoveryV1(planDigest),
-            readD1ProbeCloudflareWorkerCanaryDurableTranscriptV1(planDigest),
-            readD1ProbeCloudflareWorkerCanaryStateReadOnlyV1(planDigest),
-            readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1(planDigest),
-            readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(planDigest),
-        ]);
+        const [recovery, durableRecovery, cleanupResumption, durableTranscript, state, journal, archive] =
+            await Promise.all([
+                readD1ProbeCloudflareWorkerCanaryBaseRecoveryV1(planDigest),
+                openD1ProbeCloudflareWorkerCanaryDurableDriverRecoverySessionV1({ operation }),
+                planD1ProbeCloudflareWorkerCanaryCleanupResumptionV1({ plan_digest: planDigest }),
+                readD1ProbeCloudflareWorkerCanaryDurableTranscriptV1(planDigest),
+                readD1ProbeCloudflareWorkerCanaryStateReadOnlyV1(planDigest),
+                readD1ProbeCloudflareWorkerCanaryEffectJournalReadOnlyV1(planDigest),
+                readD1ProbeCloudflareWorkerCanaryResponseArchiveInventoryReadOnlyV1(planDigest),
+            ]);
         const recoveryMs = performance.now() - recoveryStarted;
         if (
             recovery.classification !== "local_histories_aligned" ||
@@ -344,6 +374,22 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             recovery.mutation_replay_allowed !== false ||
             recovery.cleanup_authorized !== false ||
             recovery.recovery_action_authorized !== false ||
+            !durableRecovery.success ||
+            durableRecovery.session.disposition !== "local_histories_aligned" ||
+            durableRecovery.session.operation_revision !== 3 ||
+            durableRecovery.session.operation_state !== "delete_dispatching" ||
+            durableRecovery.session.archive_record_count !== 3 ||
+            durableRecovery.session.cleanup_authorized !== false ||
+            durableRecovery.session.recovery_action_authorized !== false ||
+            durableRecovery.session.lease_takeover_performed !== false ||
+            cleanupResumption.classification !== "cleanup_resume_ready" ||
+            cleanupResumption.decision !== "resume_cleanup_reconciliation" ||
+            cleanupResumption.resumption_requirement !== "fresh_lease_and_exact_head_reassertion" ||
+            cleanupResumption.operation_revision !== 3 ||
+            cleanupResumption.operation_state !== "delete_dispatching" ||
+            cleanupResumption.cleanup_obligation_digest !== cleanupObligationDigest ||
+            cleanupResumption.cleanup_authorized !== false ||
+            cleanupResumption.recovery_action_authorized !== false ||
             durableTranscript.classification !== "durable_prefix_complete" ||
             durableTranscript.entry_count !== 3 ||
             durableTranscript.complete_response_archive_count !== 3 ||
@@ -380,6 +426,18 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
             throw new Error(
                 `base-layer convergence failed: ${JSON.stringify({
                     recovery: [recovery.classification, recovery.recovery_requirement, recovery.archive_record_count],
+                    durable_recovery: durableRecovery.success
+                        ? [
+                              durableRecovery.session.disposition,
+                              durableRecovery.session.operation_revision,
+                              durableRecovery.session.archive_record_count,
+                          ]
+                        : durableRecovery.code,
+                    cleanup_resumption: [
+                        cleanupResumption.classification,
+                        cleanupResumption.decision,
+                        cleanupResumption.operation_revision,
+                    ],
                     durable_transcript: [
                         durableTranscript.classification,
                         durableTranscript.entry_count,
@@ -430,21 +488,20 @@ const runOperation = async (operationIndex: number, targetResponseBytes: number)
 const runPool = async (operations: number, concurrency: number, targetResponseBytes: number) => {
     const results = new Array<OperationMeasurements>(operations);
     const failures: unknown[] = [];
-    let next = 0;
-    await Promise.all(
-        Array.from({ length: Math.min(operations, concurrency) }, async () => {
-            for (;;) {
-                const index = next;
-                next += 1;
-                if (index >= operations) return;
+    for (let batchStart = 0; batchStart < operations; batchStart += concurrency) {
+        const batchEnd = Math.min(operations, batchStart + concurrency);
+        await Promise.all(
+            Array.from({ length: batchEnd - batchStart }, async (_, offset) => {
+                const index = batchStart + offset;
                 try {
                     results[index] = await runOperation(index, targetResponseBytes);
                 } catch (error) {
                     failures.push(error);
                 }
-            }
-        })
-    );
+            })
+        );
+        if (failures.length > 0) break;
+    }
     if (failures.length > 0) throw failures[0];
     return results;
 };
@@ -454,6 +511,8 @@ let contentionReport: Record<string, unknown> | null = null;
 let durableSessionContentionReport: Record<string, unknown> | null = null;
 
 describe("Cloudflare Worker canary base-layer E2E benchmark", () => {
+    beforeAll(removeInterruptedBenchmarkRecords);
+
     it("runs the durable state, lease, effect, archive, obligation, and recovery path at configurable scale", async () => {
         const started = performance.now();
         const measurements = await runPool(scale.operations, scale.concurrency, scale.response_bytes);
@@ -469,6 +528,8 @@ describe("Cloudflare Worker canary base-layer E2E benchmark", () => {
             effect_claims: scale.operations * 9,
             encrypted_response_archives: scale.operations * 3,
             durable_transcripts_reconstructed: scale.operations,
+            durable_recovery_sessions_opened: scale.operations,
+            cleanup_resumption_plans_compiled: scale.operations,
             driver_bootstraps: scale.operations,
             cleanup_obligations: scale.operations,
             response_body_bytes_per_request: scale.response_bytes,

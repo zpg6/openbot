@@ -6,14 +6,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
     D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1,
     acquireD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
+    assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseReadOnlyV1,
     assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
     createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1,
     d1ProbeCloudflareWorkerCanaryDriverLeasePathV1,
     digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1,
+    readD1ProbeCloudflareWorkerCanaryDriverLeaseHeadReadOnlyV1,
     readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1,
     readD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
     releaseD1ProbeCloudflareWorkerCanaryDriverLeaseV1,
     type D1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyDependenciesV1,
+    type D1ProbeCloudflareWorkerCanaryDriverLeaseV1,
     type D1ProbeCloudflareWorkerCanaryDriverLeaseOwnerV1,
     type D1ProbeCloudflareWorkerCanaryPidLivenessV1,
 } from "./cloudflare-worker-canary-driver-lease.js";
@@ -116,6 +119,10 @@ describe("Cloudflare Worker canary driver lease", () => {
         if (!acquired.success) return;
         expect(acquired.lease.owner_pid).toBe(process.pid);
         await expect(assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseV1(acquired.owner)).resolves.toEqual({
+            success: true,
+            lease: acquired.lease,
+        });
+        await expect(assertCurrentD1ProbeCloudflareWorkerCanaryDriverLeaseReadOnlyV1(acquired.owner)).resolves.toEqual({
             success: true,
             lease: acquired.lease,
         });
@@ -331,6 +338,196 @@ describe("Cloudflare Worker canary driver lease", () => {
         }
     });
 
+    it("takes over only the exact expected predecessor generation and digest", async () => {
+        const digest = planDigest();
+        const held = await acquire(digest, 20_064, 1_000, 64);
+        if (!held.success) throw new Error(held.code);
+        const heldDigest = await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(held.lease);
+        if (heldDigest === null) throw new Error("lease digest unavailable");
+
+        const takenOver = await createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1(
+            dependencies(20_065, 1_100, 65, "esrch")
+        ).takeoverExpected({
+            plan_digest: digest,
+            execution_nonce: executionNonce,
+            lease_duration_ms: 100,
+            expected_generation: held.lease.generation,
+            expected_record_digest: heldDigest,
+        });
+
+        expect(takenOver.success).toBe(true);
+        if (!takenOver.success) return;
+        expect(takenOver.lease).toMatchObject({
+            transition: "taken_over",
+            generation: held.lease.generation + 1,
+            previous_record_digest: heldDigest,
+            prior_owner_liveness: "esrch",
+        });
+    });
+
+    it("resamples the clock after liveness before issuing the takeover lease", async () => {
+        const digest = planDigest();
+        const held = await acquire(digest, 20_164, 1_000, 64);
+        if (!held.success) throw new Error(held.code);
+        const heldDigest = await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(held.lease);
+        if (heldDigest === null) throw new Error("lease digest unavailable");
+        let now = 1_100;
+
+        const takenOver = await createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1({
+            ...dependencies(20_165, now, 65),
+            now: () => now,
+            checkPidLiveness: async () => {
+                now = 5_000;
+                return "esrch";
+            },
+        }).takeoverExpected({
+            plan_digest: digest,
+            execution_nonce: executionNonce,
+            lease_duration_ms: 100,
+            expected_generation: held.lease.generation,
+            expected_record_digest: heldDigest,
+        });
+
+        expect(takenOver.success).toBe(true);
+        if (!takenOver.success) return;
+        expect(takenOver.lease).toMatchObject({
+            issued_at_ms: 5_000,
+            heartbeat_at_ms: 5_000,
+            expires_at_ms: 5_100,
+        });
+    });
+
+    it("rejects clock rollback after liveness without publishing a takeover", async () => {
+        const digest = planDigest();
+        const held = await acquire(digest, 20_168, 1_000, 68);
+        if (!held.success) throw new Error(held.code);
+        const heldDigest = await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(held.lease);
+        if (heldDigest === null) throw new Error("lease digest unavailable");
+        let clockReads = 0;
+
+        const denied = await createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1({
+            ...dependencies(20_169, 1_100, 69, "esrch"),
+            now: () => {
+                clockReads += 1;
+                return clockReads === 1 ? 1_100 : 1_099;
+            },
+        }).takeoverExpected({
+            plan_digest: digest,
+            execution_nonce: executionNonce,
+            lease_duration_ms: 100,
+            expected_generation: held.lease.generation,
+            expected_record_digest: heldDigest,
+        });
+
+        expect(denied).toEqual({ success: false, code: "lease_clock_invalid" });
+        await expect(readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1(digest)).resolves.toEqual({
+            success: true,
+            leases: [held.lease],
+        });
+    });
+
+    it("does not reconcile publication residue during an exact takeover precheck", async () => {
+        const digest = planDigest();
+        const held = await acquire(digest, 20_166, 1_000, 66);
+        if (!held.success) throw new Error(held.code);
+        const heldDigest = await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(held.lease);
+        if (heldDigest === null) throw new Error("lease digest unavailable");
+        const finalPath = d1ProbeCloudflareWorkerCanaryDriverLeasePathV1(digest, held.lease.generation);
+        if (finalPath === null) throw new Error("lease path unavailable");
+        const tempPath = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_DRIVER_LEASE_ROOT_V1}/${digest}.0.99999999-9999-4999-8999-999999999999.driver-lease.tmp`;
+        await link(finalPath, tempPath);
+
+        await expect(
+            createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1(
+                dependencies(20_167, 1_100, 67, "esrch")
+            ).takeoverExpected({
+                plan_digest: digest,
+                execution_nonce: executionNonce,
+                lease_duration_ms: 100,
+                expected_generation: held.lease.generation,
+                expected_record_digest: heldDigest,
+            })
+        ).resolves.toEqual({ success: false, code: "lease_corrupt" });
+        await expect(Promise.all([lstat(finalPath), lstat(tempPath)])).resolves.toEqual([
+            expect.objectContaining({ nlink: 2 }),
+            expect.objectContaining({ nlink: 2 }),
+        ]);
+    });
+
+    it("does not mutate when the expected takeover predecessor changed before the call", async () => {
+        const digest = planDigest();
+        const held = await acquire(digest, 20_066, 1_000, 66);
+        if (!held.success) throw new Error(held.code);
+        const heldDigest = await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(held.lease);
+        if (heldDigest === null) throw new Error("lease digest unavailable");
+        const renewed = await createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1(
+            dependencies(20_066, 1_050, 67)
+        ).renew({ ...held.owner, lease_duration_ms: 100 });
+        if (!renewed.success) throw new Error(renewed.code);
+
+        let livenessChecks = 0;
+        const denied = await createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1({
+            ...dependencies(20_067, 1_200, 68, "esrch"),
+            checkPidLiveness: async () => {
+                livenessChecks += 1;
+                return "esrch";
+            },
+        }).takeoverExpected({
+            plan_digest: digest,
+            execution_nonce: executionNonce,
+            lease_duration_ms: 100,
+            expected_generation: held.lease.generation,
+            expected_record_digest: heldDigest,
+        });
+
+        expect(denied).toEqual({ success: false, code: "concurrent_lease_write" });
+        expect(livenessChecks).toBe(0);
+        await expect(readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1(digest)).resolves.toEqual({
+            success: true,
+            leases: [held.lease, renewed.lease],
+        });
+    });
+
+    it("does not mutate a newer predecessor when the head changes during exact takeover liveness proof", async () => {
+        const digest = planDigest();
+        const held = await acquire(digest, 20_068, 1_000, 68);
+        if (!held.success) throw new Error(held.code);
+        const heldDigest = await digestD1ProbeCloudflareWorkerCanaryDriverLeaseRecordV1(held.lease);
+        if (heldDigest === null) throw new Error("lease digest unavailable");
+        let replacementLease: D1ProbeCloudflareWorkerCanaryDriverLeaseV1 | null = null;
+
+        const raced = await createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1({
+            ...dependencies(20_069, 1_100, 69),
+            checkPidLiveness: async () => {
+                const replacement = await createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1(
+                    dependencies(20_070, 1_100, 70, "esrch")
+                ).takeoverExpected({
+                    plan_digest: digest,
+                    execution_nonce: executionNonce,
+                    lease_duration_ms: 100,
+                    expected_generation: held.lease.generation,
+                    expected_record_digest: heldDigest,
+                });
+                if (!replacement.success) throw new Error(replacement.code);
+                replacementLease = replacement.lease;
+                return "esrch";
+            },
+        }).takeoverExpected({
+            plan_digest: digest,
+            execution_nonce: executionNonce,
+            lease_duration_ms: 100,
+            expected_generation: held.lease.generation,
+            expected_record_digest: heldDigest,
+        });
+
+        expect(raced).toEqual({ success: false, code: "concurrent_lease_write" });
+        expect(replacementLease).not.toBeNull();
+        await expect(readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1(digest)).resolves.toEqual({
+            success: true,
+            leases: [held.lease, replacementLease],
+        });
+    });
+
     it("denies takeover when the latest generation changes during the PID check", async () => {
         const digest = planDigest();
         const held = await acquire(digest, 20_071, 1_000, 71);
@@ -419,7 +616,19 @@ describe("Cloudflare Worker canary driver lease", () => {
         cleanupPaths.add(tempPath);
         await link(finalPath, tempPath);
 
+        await expect(readD1ProbeCloudflareWorkerCanaryDriverLeaseHeadReadOnlyV1(digest)).resolves.toEqual({
+            success: false,
+            code: "lease_corrupt",
+        });
         await expect(readD1ProbeCloudflareWorkerCanaryDriverLeaseHistoryReadOnlyV1(digest)).resolves.toEqual({
+            success: false,
+            code: "lease_corrupt",
+        });
+        await expect(
+            createD1ProbeCloudflareWorkerCanaryDriverLeaseTestOnlyStoreV1(
+                dependencies(20_091, 1_050, 92)
+            ).assertCurrentReadOnly(acquired.owner)
+        ).resolves.toEqual({
             success: false,
             code: "lease_corrupt",
         });
