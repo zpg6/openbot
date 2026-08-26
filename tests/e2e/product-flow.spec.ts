@@ -42,24 +42,27 @@ test("an owner creates a Bot, selects permission, runs a task, and reads the res
 
     await page.getByRole("link", { name: "New Bot" }).first().click();
     await expect(page.getByRole("heading", { name: "New Bot" })).toBeVisible();
-    await expect(page.getByText(/1,134 Metorial apps/u)).toBeVisible();
-    const appSearch = page.getByLabel("Find an app");
-    await appSearch.fill("Linear");
-    await expect(page.getByRole("button", { name: "Add Linear" })).toBeVisible();
-    await appSearch.fill("Slack");
-    await expect(page.getByRole("button", { name: "Add Slack" })).toBeVisible();
+    await expect(page.getByLabel("Purpose")).toBeHidden();
 
     await page.getByLabel("Name", { exact: true }).fill("Support reader");
     await page.getByLabel("Short description").fill("Summarizes open support cases.");
+    await page.getByRole("button", { name: "Continue to behavior" }).click();
     await page.getByLabel("Purpose").fill("Review open support cases for the selected account.");
     await page.getByLabel("Behavior instructions").fill("Name case IDs and do not guess missing status.");
+    await page.getByRole("button", { name: "Continue to appearance" }).click();
     await page.getByRole("radio", { name: "Sky", exact: true }).check();
     await page.getByRole("radio", { name: "Hexagon", exact: true }).check();
     await page.getByRole("radio", { name: "Cheerful", exact: true }).check();
-    await appSearch.fill("Linear");
+    await page.getByRole("button", { name: "Continue to apps" }).click();
+    await expect(page.getByText(/20 common picks/u)).toBeVisible();
+    const appSearch = page.getByLabel("Find an app");
+    await appSearch.fill("1password");
+    await expect(page.getByRole("button", { name: "Connect 1password" })).toBeVisible();
+    await appSearch.fill("");
+    await expect(page.getByRole("button", { name: "Add Linear" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Add Slack" })).toBeVisible();
     await page.getByRole("button", { name: "Add Linear" }).click();
     await expect(page.getByRole("checkbox", { name: /List issues/u })).toBeChecked();
-    await appSearch.fill("Slack");
     await page.getByRole("button", { name: "Add Slack" }).click();
     await expect(page.getByRole("checkbox", { name: /List channels/u })).toBeChecked();
     const addedApps = page.getByRole("region", { name: "Added to this Bot" });

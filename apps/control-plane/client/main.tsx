@@ -97,28 +97,62 @@ const defaultPermissionIds = (integration: OpenBotClientIntegrationV1): readonly
         .filter(permission => permission.enabled && permission.effect === "read")
         .map(permission => permission.policy_id);
 
+const POPULAR_APP_IDENTIFIERS = Object.freeze([
+    "slack",
+    "gmail",
+    "google-calendar",
+    "google-drive",
+    "outlook",
+    "microsoft-teams",
+    "notion",
+    "linear",
+    "github",
+    "jira",
+    "asana",
+    "airtable",
+    "salesforce",
+    "hubspot",
+    "apollo",
+    "sharepoint",
+    "stripe",
+    "zendesk",
+    "dropbox",
+    "discord",
+] as const);
+const popularAppIdentifiers = new Set<string>(POPULAR_APP_IDENTIFIERS);
+
 const IntegrationChoices = ({
     integrations,
     catalogApps,
+    onSelectionCountChange,
 }: {
     readonly integrations: readonly OpenBotClientIntegrationV1[];
     readonly catalogApps: readonly OpenBotClientCatalogAppV1[];
+    readonly onSelectionCountChange: (count: number) => void;
 }) => {
     const [query, setQuery] = useState("");
-    const [visibleCount, setVisibleCount] = useState(48);
     const [selectedIntegrationIds, setSelectedIntegrationIds] = useState<readonly string[]>([]);
     const [selectedPermissionIds, setSelectedPermissionIds] = useState<Readonly<Record<string, readonly string[]>>>({});
     const [activeIntegrationId, setActiveIntegrationId] = useState<string | null>(null);
 
-    const filteredCatalogApps = useMemo(() => {
+    const catalogByIdentifier = useMemo(() => new Map(catalogApps.map(app => [app.identifier, app])), [catalogApps]);
+    const popularApps = useMemo(
+        () => POPULAR_APP_IDENTIFIERS.flatMap(identifier => catalogByIdentifier.get(identifier) ?? []),
+        [catalogByIdentifier]
+    );
+    const remainingApps = useMemo(
+        () => catalogApps.filter(app => !popularAppIdentifiers.has(app.identifier)),
+        [catalogApps]
+    );
+    const searchResults = useMemo(() => {
         const normalized = query.trim().toLocaleLowerCase();
-        if (normalized.length === 0) return catalogApps;
-        return catalogApps.filter(app =>
+        if (normalized.length === 0) return [];
+        return remainingApps.filter(app =>
             `${app.display_name} ${app.description} ${app.categories.join(" ")}`
                 .toLocaleLowerCase()
                 .includes(normalized)
         );
-    }, [catalogApps, query]);
+    }, [query, remainingApps]);
 
     const integrationById = new Map(integrations.map(integration => [integration.integration_id, integration]));
     const integrationByIdentifier = new Map(
@@ -133,7 +167,9 @@ const IntegrationChoices = ({
     const addOrOpenIntegration = (integration: OpenBotClientIntegrationV1): void => {
         if (integration.connection_state !== "connected") return;
         if (!selectedIntegrationIds.includes(integration.integration_id)) {
-            setSelectedIntegrationIds(current => [...current, integration.integration_id]);
+            const next = [...selectedIntegrationIds, integration.integration_id];
+            setSelectedIntegrationIds(next);
+            onSelectionCountChange(next.length);
             setSelectedPermissionIds(current => ({
                 ...current,
                 [integration.integration_id]: defaultPermissionIds(integration),
@@ -143,7 +179,9 @@ const IntegrationChoices = ({
     };
 
     const removeIntegration = (integrationId: string): void => {
-        setSelectedIntegrationIds(current => current.filter(candidate => candidate !== integrationId));
+        const next = selectedIntegrationIds.filter(candidate => candidate !== integrationId);
+        setSelectedIntegrationIds(next);
+        onSelectionCountChange(next.length);
         setSelectedPermissionIds(current => {
             const next = { ...current };
             delete next[integrationId];
@@ -166,6 +204,42 @@ const IntegrationChoices = ({
         });
     };
 
+    const appTile = (app: OpenBotClientCatalogAppV1, compact: boolean): ReactNode => {
+        const integration = integrationByIdentifier.get(app.identifier) ?? null;
+        const available = integration?.connection_state === "connected";
+        const selected = integration !== null && selectedIntegrationIds.includes(integration.integration_id);
+        return (
+            <button
+                className={`app-tile${compact ? " compact" : ""}${selected ? " selected" : ""}${available ? "" : " needs-connection"}`}
+                type="button"
+                onClick={() => {
+                    if (integration !== null && available) addOrOpenIntegration(integration);
+                    else window.location.assign(`/organization/settings?connect=${encodeURIComponent(app.identifier)}`);
+                }}
+                aria-label={`${selected ? "Open" : available ? "Add" : "Connect"} ${app.display_name}`}
+                aria-pressed={selected}
+                key={app.identifier}
+            >
+                <IntegrationIcon
+                    integration={
+                        integration ?? {
+                            display_name: app.display_name,
+                            icon_data_uri: null,
+                            icon_url: app.icon_url,
+                        }
+                    }
+                />
+                <span className="app-tile-copy">
+                    <strong>{app.display_name}</strong>
+                    <small>{app.description}</small>
+                </span>
+                <span className={`app-tile-action${selected ? " added" : ""}`} aria-hidden="true">
+                    {selected ? "Added" : available ? "Add" : "Connect"}
+                </span>
+            </button>
+        );
+    };
+
     return (
         <div className="app-picker">
             {selectedIntegrations.map(integration => (
@@ -185,10 +259,13 @@ const IntegrationChoices = ({
             <section className="app-catalog" aria-labelledby="available-apps-heading">
                 <div className="app-section-head">
                     <div>
-                        <h2 id="available-apps-heading">Available apps</h2>
+                        <h2 id="available-apps-heading">
+                            {query.trim().length === 0 ? "Popular apps" : "Search results"}
+                        </h2>
                         <p>
-                            {catalogApps.length.toLocaleString()} Metorial apps · connected apps add their approved read
-                            tools.
+                            {query.trim().length === 0
+                                ? `${popularApps.length} common picks. Connected apps add their approved read tools.`
+                                : `${searchResults.length.toLocaleString()} matches in ${remainingApps.length.toLocaleString()} more apps.`}
                         </p>
                     </div>
                     <label className="app-search">
@@ -196,69 +273,23 @@ const IntegrationChoices = ({
                         <input
                             type="search"
                             value={query}
-                            onChange={event => {
-                                setQuery(event.currentTarget.value);
-                                setVisibleCount(48);
-                            }}
-                            placeholder="Find an app"
+                            onChange={event => setQuery(event.currentTarget.value)}
+                            placeholder={`Search ${remainingApps.length.toLocaleString()} more apps`}
                         />
                     </label>
                 </div>
-                <div className="app-grid">
-                    {filteredCatalogApps.slice(0, visibleCount).map(app => {
-                        const integration = integrationByIdentifier.get(app.identifier) ?? null;
-                        const available = integration?.connection_state === "connected";
-                        const selected =
-                            integration !== null && selectedIntegrationIds.includes(integration.integration_id);
-                        return (
-                            <button
-                                className={`app-tile${selected ? " selected" : ""}${available ? "" : " needs-connection"}`}
-                                type="button"
-                                onClick={() => {
-                                    if (integration !== null && available) addOrOpenIntegration(integration);
-                                    else
-                                        window.location.assign(
-                                            `/organization/settings?connect=${encodeURIComponent(app.identifier)}`
-                                        );
-                                }}
-                                aria-label={`${selected ? "Open" : available ? "Add" : "Connect"} ${app.display_name}`}
-                                aria-pressed={selected}
-                                key={app.identifier}
-                            >
-                                <IntegrationIcon
-                                    integration={
-                                        integration ?? {
-                                            display_name: app.display_name,
-                                            icon_data_uri: null,
-                                            icon_url: app.icon_url,
-                                        }
-                                    }
-                                />
-                                <span className="app-tile-copy">
-                                    <strong>{app.display_name}</strong>
-                                    <small>{app.description}</small>
-                                </span>
-                                <span className={`app-tile-action${selected ? " added" : ""}`} aria-hidden="true">
-                                    {selected ? "Added" : available ? "Add" : "Connect"}
-                                </span>
-                            </button>
-                        );
-                    })}
+                <div className={`app-grid${query.trim().length === 0 ? " featured-app-grid" : " app-search-results"}`}>
+                    {(query.trim().length === 0 ? popularApps : searchResults.slice(0, 20)).map(app =>
+                        appTile(app, query.trim().length === 0)
+                    )}
                 </div>
-                {filteredCatalogApps.length === 0 ? <p className="app-empty">No apps match "{query.trim()}".</p> : null}
-                {filteredCatalogApps.length > visibleCount ? (
-                    <div className="app-catalog-more">
-                        <span>
-                            Showing {visibleCount.toLocaleString()} of {filteredCatalogApps.length.toLocaleString()}
-                        </span>
-                        <button
-                            className="button tertiary"
-                            type="button"
-                            onClick={() => setVisibleCount(current => current + 48)}
-                        >
-                            Show more
-                        </button>
-                    </div>
+                {query.trim().length > 0 && searchResults.length === 0 ? (
+                    <p className="app-empty">No other apps match "{query.trim()}".</p>
+                ) : null}
+                {searchResults.length > 20 ? (
+                    <p className="app-search-summary">
+                        Showing the first 20 matches. Add another word to narrow it down.
+                    </p>
                 ) : null}
             </section>
 
@@ -319,39 +350,37 @@ const IntegrationChoices = ({
                         })}
                     </div>
                 )}
-            </section>
-
-            {activeIntegration === null ? null : (
-                <section className="app-detail" aria-labelledby="app-detail-heading">
-                    <div className="app-detail-head">
-                        <IntegrationIcon integration={activeIntegration} />
-                        <div>
-                            <p className="eyebrow">App access</p>
-                            <h2 id="app-detail-heading">{activeIntegration.display_name}</h2>
-                            <p>{activeIntegration.connected_account_label}</p>
+                {activeIntegration === null ? null : (
+                    <section className="app-detail inline-app-detail" aria-labelledby="app-detail-heading">
+                        <div className="app-detail-head">
+                            <IntegrationIcon integration={activeIntegration} />
+                            <div>
+                                <p className="eyebrow">App access</p>
+                                <h2 id="app-detail-heading">{activeIntegration.display_name}</h2>
+                                <p>{activeIntegration.connected_account_label}</p>
+                            </div>
+                            <span className="status-badge good">Connected</span>
                         </div>
-                        <span className="status-badge good">Connected</span>
-                    </div>
-                    <div className="app-detail-copy">
-                        <p>Choose the exact Metorial tools this Bot can use.</p>
-                        <p className="technical">Organization policy stays in force even if this Bot asks for more.</p>
-                    </div>
-                    <div className="permission-stack app-permissions">
-                        {activeIntegration.permissions.map(permission => (
-                            <PermissionChoice
-                                permission={permission}
-                                checked={(selectedPermissionIds[activeIntegration.integration_id] ?? []).includes(
-                                    permission.policy_id
-                                )}
-                                onChange={checked =>
-                                    setPermission(activeIntegration.integration_id, permission.policy_id, checked)
-                                }
-                                key={permission.policy_id}
-                            />
-                        ))}
-                    </div>
-                </section>
-            )}
+                        <div className="app-detail-copy">
+                            <p>Choose exact tools. Organization policy still applies.</p>
+                        </div>
+                        <div className="permission-stack app-permissions">
+                            {activeIntegration.permissions.map(permission => (
+                                <PermissionChoice
+                                    permission={permission}
+                                    checked={(selectedPermissionIds[activeIntegration.integration_id] ?? []).includes(
+                                        permission.policy_id
+                                    )}
+                                    onChange={checked =>
+                                        setPermission(activeIntegration.integration_id, permission.policy_id, checked)
+                                    }
+                                    key={permission.policy_id}
+                                />
+                            ))}
+                        </div>
+                    </section>
+                )}
+            </section>
         </div>
     );
 };
@@ -361,20 +390,25 @@ const AppearanceChoices = ({
     options,
     className,
     kind,
+    selectedId,
+    onSelect,
 }: {
     readonly name: string;
     readonly options: readonly { readonly id: string; readonly display_name: string; readonly preview?: string }[];
     readonly className: string;
     readonly kind: "color" | "shape" | "face";
+    readonly selectedId: string;
+    readonly onSelect: (id: string) => void;
 }) => (
     <div className={className}>
-        {options.map((option, index) => (
+        {options.map(option => (
             <label className={`${kind}-choice`} key={option.id}>
                 <input
                     type="radio"
                     name={name}
                     value={option.id}
-                    defaultChecked={kind === "shape" ? index === 1 : index === 0}
+                    checked={selectedId === option.id}
+                    onChange={() => onSelect(option.id)}
                 />
                 {kind === "color" ? (
                     <span className="swatch" style={{ background: option.preview }} aria-hidden="true" />
@@ -507,97 +541,269 @@ const OrganizationSettingsView = ({ page }: { readonly page: OrganizationSetting
 );
 
 type NewBotPage = OpenBotClientPageV1 & { readonly view: Extract<OpenBotClientPageV1["view"], { kind: "new_bot" }> };
-const NewBotView = ({ page }: { readonly page: NewBotPage }) => (
-    <>
-        <div className="page-head">
-            <div>
-                <p className="eyebrow">Bot setup</p>
-                <h1>New Bot</h1>
-                <p className="muted">Give it one clear job and only the access it needs.</p>
-            </div>
+type NewBotSection = "identity" | "behavior" | "appearance" | "apps";
+
+const SetupSection = ({
+    id,
+    step,
+    title,
+    summary,
+    complete,
+    active,
+    onToggle,
+    children,
+}: {
+    readonly id: NewBotSection;
+    readonly step: number;
+    readonly title: string;
+    readonly summary: string;
+    readonly complete: boolean;
+    readonly active: boolean;
+    readonly onToggle: () => void;
+    readonly children: ReactNode;
+}) => (
+    <section className={`setup-section${active ? " open" : ""}`}>
+        <h2>
+            <button
+                className="setup-section-toggle"
+                type="button"
+                onClick={onToggle}
+                aria-expanded={active}
+                aria-controls={`setup-${id}`}
+            >
+                <span className={`setup-step${complete ? " complete" : ""}`} aria-hidden="true">
+                    {complete ? "✓" : step}
+                </span>
+                <span className="setup-section-copy">
+                    <strong>{title}</strong>
+                    <small>{summary}</small>
+                </span>
+                <span className="setup-section-action">{active ? "Hide" : complete ? "Edit" : "Open"}</span>
+            </button>
+        </h2>
+        <div className="setup-section-panel" id={`setup-${id}`} hidden={!active}>
+            {children}
         </div>
-        {page.view.error === null ? null : <ErrorSummary>{page.view.error}</ErrorSummary>}
-        <form method="post" action="/actions/bots">
-            <input type="hidden" name="_csrf" value={page.view.csrf_token} />
-            <fieldset>
-                <legend>Identity</legend>
-                <label htmlFor="name">
-                    Name
-                    <input id="name" name="name" type="text" required maxLength={128} autoComplete="off" />
-                </label>
-                <label htmlFor="short-description">
-                    Short description
-                    <input
-                        id="short-description"
-                        name="short_description"
-                        type="text"
-                        required
-                        maxLength={512}
-                        autoComplete="off"
-                    />
-                </label>
-            </fieldset>
-            <fieldset>
-                <legend>Appearance</legend>
-                <div className="appearance-group">
-                    <p className="appearance-label">Color</p>
-                    <AppearanceChoices
-                        name="palette_color_id"
-                        options={page.view.colors}
-                        className="color-options"
-                        kind="color"
-                    />
-                </div>
-                <div className="appearance-group">
-                    <p className="appearance-label">Shape</p>
-                    <AppearanceChoices
-                        name="avatar_shape_id"
-                        options={page.view.shapes}
-                        className="shape-options"
-                        kind="shape"
-                    />
-                </div>
-                <div className="appearance-group">
-                    <p className="appearance-label">Face</p>
-                    <AppearanceChoices
-                        name="avatar_face_id"
-                        options={page.view.faces}
-                        className="face-options"
-                        kind="face"
-                    />
-                </div>
-                <p className="muted">
-                    Moods artwork is generated locally. Motion stops when reduced motion is enabled.
-                </p>
-            </fieldset>
-            <fieldset>
-                <legend>Behavior</legend>
-                <label htmlFor="purpose">
-                    Purpose
-                    <textarea id="purpose" name="purpose" required />
-                </label>
-                <label htmlFor="instructions">
-                    Behavior instructions
-                    <textarea id="instructions" name="standing_instructions" required />
-                </label>
-            </fieldset>
-            <fieldset>
-                <legend>Metorial access</legend>
-                <p className="muted">
-                    Choose organization integrations, then pass through the exact tools this Bot may request. The server
-                    verifies every selection against the current organization ceiling.
-                </p>
-                <IntegrationChoices integrations={page.view.integrations} catalogApps={page.view.catalog_apps} />
-            </fieldset>
-            <div className="actions">
-                <a className="text-link" href="/bots">
-                    Cancel
-                </a>
-                <button type="submit">Create Bot</button>
-            </div>
-        </form>
-    </>
+    </section>
 );
+
+const optionName = (
+    options: readonly { readonly id: string; readonly display_name: string }[],
+    selectedId: string
+): string => options.find(option => option.id === selectedId)?.display_name ?? selectedId;
+
+const NewBotView = ({ page }: { readonly page: NewBotPage }) => {
+    const [activeSection, setActiveSection] = useState<NewBotSection | null>("identity");
+    const [name, setName] = useState("");
+    const [shortDescription, setShortDescription] = useState("");
+    const [purpose, setPurpose] = useState("");
+    const [instructions, setInstructions] = useState("");
+    const [colorId, setColorId] = useState(page.view.colors[0]?.id ?? "graphite");
+    const [shapeId, setShapeId] = useState(page.view.shapes[1]?.id ?? page.view.shapes[0]?.id ?? "squircle");
+    const [faceId, setFaceId] = useState(page.view.faces[0]?.id ?? "calm");
+    const [selectedAppCount, setSelectedAppCount] = useState(0);
+    const [localError, setLocalError] = useState<string | null>(null);
+    const identityComplete = name.trim().length > 0 && shortDescription.trim().length > 0;
+    const behaviorComplete = purpose.trim().length > 0 && instructions.trim().length > 0;
+    const openSection = (section: NewBotSection): void =>
+        setActiveSection(current => (current === section ? null : section));
+
+    return (
+        <>
+            <div className="page-head compact-page-head">
+                <div>
+                    <p className="eyebrow">Bot setup</p>
+                    <h1>New Bot</h1>
+                    <p className="muted">Give it one clear job and only the access it needs.</p>
+                </div>
+            </div>
+            {page.view.error === null && localError === null ? null : (
+                <ErrorSummary>{page.view.error ?? localError}</ErrorSummary>
+            )}
+            <form
+                className="new-bot-form"
+                method="post"
+                action="/actions/bots"
+                noValidate
+                onSubmit={event => {
+                    const missingSection = !identityComplete ? "identity" : !behaviorComplete ? "behavior" : null;
+                    if (missingSection === null) return;
+                    event.preventDefault();
+                    setActiveSection(missingSection);
+                    setLocalError("Add the missing identity and behavior details before creating this Bot.");
+                }}
+            >
+                <input type="hidden" name="_csrf" value={page.view.csrf_token} />
+                <div className="setup-stack">
+                    <SetupSection
+                        id="identity"
+                        step={1}
+                        title="Identity"
+                        summary={identityComplete ? `${name} · ${shortDescription}` : "Name and describe this Bot"}
+                        complete={identityComplete}
+                        active={activeSection === "identity"}
+                        onToggle={() => openSection("identity")}
+                    >
+                        <div className="compact-field-grid">
+                            <label htmlFor="name">
+                                Name
+                                <input
+                                    id="name"
+                                    name="name"
+                                    type="text"
+                                    value={name}
+                                    onChange={event => setName(event.currentTarget.value)}
+                                    maxLength={128}
+                                    autoComplete="off"
+                                />
+                            </label>
+                            <label htmlFor="short-description">
+                                Short description
+                                <input
+                                    id="short-description"
+                                    name="short_description"
+                                    type="text"
+                                    value={shortDescription}
+                                    onChange={event => setShortDescription(event.currentTarget.value)}
+                                    maxLength={512}
+                                    autoComplete="off"
+                                />
+                            </label>
+                        </div>
+                        <div className="setup-panel-actions">
+                            <button
+                                className="button secondary"
+                                type="button"
+                                onClick={() => setActiveSection("behavior")}
+                            >
+                                Continue to behavior
+                            </button>
+                        </div>
+                    </SetupSection>
+
+                    <SetupSection
+                        id="behavior"
+                        step={2}
+                        title="Behavior"
+                        summary={behaviorComplete ? "Purpose and instructions added" : "Set its job and boundaries"}
+                        complete={behaviorComplete}
+                        active={activeSection === "behavior"}
+                        onToggle={() => openSection("behavior")}
+                    >
+                        <div className="compact-field-grid">
+                            <label htmlFor="purpose">
+                                Purpose
+                                <textarea
+                                    id="purpose"
+                                    name="purpose"
+                                    value={purpose}
+                                    onChange={event => setPurpose(event.currentTarget.value)}
+                                />
+                            </label>
+                            <label htmlFor="instructions">
+                                Behavior instructions
+                                <textarea
+                                    id="instructions"
+                                    name="standing_instructions"
+                                    value={instructions}
+                                    onChange={event => setInstructions(event.currentTarget.value)}
+                                />
+                            </label>
+                        </div>
+                        <div className="setup-panel-actions">
+                            <button
+                                className="button secondary"
+                                type="button"
+                                onClick={() => setActiveSection("appearance")}
+                            >
+                                Continue to appearance
+                            </button>
+                        </div>
+                    </SetupSection>
+
+                    <SetupSection
+                        id="appearance"
+                        step={3}
+                        title="Appearance"
+                        summary={`${optionName(page.view.colors, colorId)} · ${optionName(page.view.shapes, shapeId)} · ${optionName(page.view.faces, faceId)}`}
+                        complete
+                        active={activeSection === "appearance"}
+                        onToggle={() => openSection("appearance")}
+                    >
+                        <div className="appearance-group">
+                            <p className="appearance-label">Color</p>
+                            <AppearanceChoices
+                                name="palette_color_id"
+                                options={page.view.colors}
+                                className="color-options"
+                                kind="color"
+                                selectedId={colorId}
+                                onSelect={setColorId}
+                            />
+                        </div>
+                        <div className="appearance-group">
+                            <p className="appearance-label">Shape</p>
+                            <AppearanceChoices
+                                name="avatar_shape_id"
+                                options={page.view.shapes}
+                                className="shape-options"
+                                kind="shape"
+                                selectedId={shapeId}
+                                onSelect={setShapeId}
+                            />
+                        </div>
+                        <div className="appearance-group">
+                            <p className="appearance-label">Face</p>
+                            <AppearanceChoices
+                                name="avatar_face_id"
+                                options={page.view.faces}
+                                className="face-options"
+                                kind="face"
+                                selectedId={faceId}
+                                onSelect={setFaceId}
+                            />
+                        </div>
+                        <p className="muted setup-note">
+                            Moods artwork is generated locally. Reduced motion is respected.
+                        </p>
+                        <div className="setup-panel-actions">
+                            <button className="button secondary" type="button" onClick={() => setActiveSection("apps")}>
+                                Continue to apps
+                            </button>
+                        </div>
+                    </SetupSection>
+
+                    <SetupSection
+                        id="apps"
+                        step={4}
+                        title="Apps and permissions"
+                        summary={
+                            selectedAppCount > 0 ? `${selectedAppCount} apps added` : "Choose apps and exact tools"
+                        }
+                        complete={selectedAppCount > 0}
+                        active={activeSection === "apps"}
+                        onToggle={() => openSection("apps")}
+                    >
+                        <p className="muted setup-note">
+                            A Bot can use only the tools allowed by the current organization policy.
+                        </p>
+                        <IntegrationChoices
+                            integrations={page.view.integrations}
+                            catalogApps={page.view.catalog_apps}
+                            onSelectionCountChange={setSelectedAppCount}
+                        />
+                    </SetupSection>
+                </div>
+                <div className="actions setup-form-actions">
+                    <a className="text-link" href="/bots">
+                        Cancel
+                    </a>
+                    <button type="submit">Create Bot</button>
+                </div>
+            </form>
+        </>
+    );
+};
 
 const ChatHeader = ({ bot }: { readonly bot: OpenBotClientBotDetailV1 }) => (
     <div className="chat-header">
