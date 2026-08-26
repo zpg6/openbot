@@ -22,6 +22,25 @@ export interface MetorialSdkListPage<T extends { readonly id: string }> {
     readonly pagination: { readonly hasMoreAfter: boolean };
 }
 
+export interface MetorialIntegrationCatalogEntry {
+    readonly identifier: string;
+    readonly package_name: string;
+    readonly manifest_version: string | null;
+    readonly display_name: string;
+    readonly description: string;
+    readonly categories: readonly string[];
+    readonly skills: readonly string[];
+    readonly official_logo_url: string | null;
+    readonly repository_logo_path: string | null;
+}
+
+export function parseMetorialReadmeDisplayName(readme: string): string;
+export function parseMetorialIntegrationManifest(input: {
+    readonly directoryName: string;
+    readonly manifest: unknown;
+    readonly readme: string;
+}): MetorialIntegrationCatalogEntry;
+
 export function paginateMetorialSdk<T extends { readonly id: string }>(input: {
     readonly resourceName: string;
     readonly requestPage: (query: {

@@ -14,6 +14,7 @@ const paths = Object.freeze({
     manifest: "package.json",
     controlManifest: "apps/control-plane/package.json",
     metorialCatalogGenerator: "scripts/generate-metorial-provider-catalog.mjs",
+    metorialIntegrationCatalogGenerator: "scripts/generate-metorial-integration-catalog.mjs",
 });
 
 const files = Object.fromEntries(
@@ -63,6 +64,7 @@ const checkSources = input => {
             "validCsrf(form, actor)",
             "formIntegrationSelections(form, integrations)",
             "dependencies.listMetorialIntegrations(actor.account_id, actor.user_id)",
+            "dependencies.listMetorialCatalogApps?.()",
             "selectedIntegrationBindings(bot, integrations)",
             "compileMetorialSessionIntent(dependencies, bindings)",
             'intent_version: "openbot_metorial_session_intent_v1" as const',
@@ -165,6 +167,8 @@ const checkSources = input => {
             'readonly kind: "run_result"',
             "OpenBotClientPermissionV1",
             "OpenBotClientIntegrationV1",
+            "OpenBotClientCatalogAppV1",
+            "catalog_apps",
         ],
         "the Hono-to-React page contract must stay explicit and versioned"
     );
@@ -334,6 +338,22 @@ const checkSources = input => {
             "output_schema_sha256",
         ],
         "the dev-time Metorial SDK catalog generator must pin official provider, tool, effect-tag, and local icon metadata"
+    );
+    requireAll(
+        input.metorialIntegrationCatalogGenerator,
+        [
+            'REPOSITORY = "https://github.com/metorial/integrations.git"',
+            'REPOSITORY_REVISION = "e0179f7d85450c1f7cc9d47ac60f4c9a17512569"',
+            'join(directory, "slate.json")',
+            'join(directory, "README.md")',
+            "parseMetorialIntegrationManifest",
+            "metorial-integration-catalog.json",
+            "metorial-integration-picker.json",
+            "discovery_only: true",
+            "organization_deployments_from_metorial_sdk: true",
+            "bot_permissions_are_subset_of_organization_ceiling: true",
+        ],
+        "the keyless Metorial catalog must stay pinned to official manifests and separate discovery from authority"
     );
     if (
         controlManifest.dependencies?.["@dicebear/core"] !== "catalog:" ||

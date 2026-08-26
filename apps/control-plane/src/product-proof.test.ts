@@ -30,6 +30,7 @@ const policyMetadata = {
 const integrations: readonly ProductProofMetorialIntegrationV1[] = [
     {
         integration_id: "integration_test_linear",
+        provider_identifier: "linear",
         provider_deployment_id: "pdp_test_linear",
         provider_version_id: "pver_test_linear",
         provider_specification_id: "pspec_test_linear",
@@ -65,6 +66,7 @@ const integrations: readonly ProductProofMetorialIntegrationV1[] = [
     },
     {
         integration_id: "integration_test_slack",
+        provider_identifier: "slack",
         provider_deployment_id: "pdp_test_slack",
         provider_version_id: "pver_test_slack",
         provider_specification_id: "pspec_test_slack",

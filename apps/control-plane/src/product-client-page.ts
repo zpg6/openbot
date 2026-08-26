@@ -18,12 +18,22 @@ export interface OpenBotClientPermissionV1 {
 
 export interface OpenBotClientIntegrationV1 {
     readonly integration_id: string;
+    readonly provider_identifier: string;
     readonly connected_account_label: string;
     readonly display_name: string;
     readonly description: string;
     readonly icon_data_uri: string | null;
     readonly connection_state: "connected" | "needs_connection";
     readonly permissions: readonly OpenBotClientPermissionV1[];
+}
+
+export interface OpenBotClientCatalogAppV1 {
+    readonly identifier: string;
+    readonly display_name: string;
+    readonly description: string;
+    readonly categories: readonly string[];
+    readonly icon_url: string | null;
+    readonly connected_integration_id: string | null;
 }
 
 export interface OpenBotClientBotDetailV1 extends OpenBotClientBotV1 {
@@ -62,6 +72,7 @@ export type OpenBotClientViewV1 =
           readonly csrf_token: string;
           readonly error: string | null;
           readonly integrations: readonly OpenBotClientIntegrationV1[];
+          readonly catalog_apps: readonly OpenBotClientCatalogAppV1[];
           readonly colors: readonly OpenBotClientAppearanceOptionV1[];
           readonly shapes: readonly OpenBotClientAppearanceOptionV1[];
           readonly faces: readonly OpenBotClientAppearanceOptionV1[];

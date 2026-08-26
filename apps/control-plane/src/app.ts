@@ -19,7 +19,7 @@ export function createControlPlane(
         context.header("Cache-Control", "no-store");
         context.header(
             "Content-Security-Policy",
-            "default-src 'none'; script-src 'self'; connect-src 'self'; img-src data:; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+            "default-src 'none'; script-src 'self'; connect-src 'self'; img-src data: https://provider-logos.metorial-cdn.com; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
         );
         context.header("Referrer-Policy", "same-origin");
         context.header("X-Content-Type-Options", "nosniff");

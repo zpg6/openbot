@@ -4,6 +4,7 @@ import type { Hono } from "hono";
 
 import type { ControlPlaneBindings } from "./app.js";
 import type {
+    OpenBotClientCatalogAppV1,
     OpenBotClientBotDetailV1,
     OpenBotClientBotV1,
     OpenBotClientIntegrationV1,
@@ -60,6 +61,7 @@ export type ProductProofMetorialAuthBindingV1 =
 
 export interface ProductProofMetorialIntegrationV1 {
     readonly integration_id: string;
+    readonly provider_identifier: string;
     readonly provider_deployment_id: string;
     readonly provider_version_id: string;
     readonly provider_specification_id: string;
@@ -70,6 +72,14 @@ export interface ProductProofMetorialIntegrationV1 {
     readonly icon_data_uri?: string | null | undefined;
     readonly connection_state: "connected" | "needs_connection";
     readonly permissions: readonly ProductProofPermissionV1[];
+}
+
+export interface ProductProofMetorialCatalogAppV1 {
+    readonly identifier: string;
+    readonly display_name: string;
+    readonly description: string;
+    readonly categories: readonly string[];
+    readonly icon_url: string | null;
 }
 
 export interface ProductProofBotPermissionPinV1 {
@@ -268,6 +278,7 @@ export interface ControlPlaneProductProofDependenciesV1 {
         accountId: string,
         userId: string
     ) => Promise<readonly ProductProofMetorialIntegrationV1[]>;
+    readonly listMetorialCatalogApps?: (() => Promise<readonly ProductProofMetorialCatalogAppV1[]>) | undefined;
     readonly metorial_api_version: string;
     readonly metorial_session_serialization_identity: string;
     readonly repository: ProductProofRepositoryV1;
@@ -406,6 +417,7 @@ const validIntegrationCatalogEntry = (integration: ProductProofMetorialIntegrati
     const toolKeys = new Set<string>();
     return (
         safeId(integration.integration_id) &&
+        /^[a-z0-9][a-z0-9-]{0,127}$/u.test(integration.provider_identifier) &&
         safeMetorialId(integration.provider_deployment_id) &&
         safeMetorialId(integration.provider_version_id) &&
         safeMetorialId(integration.provider_specification_id) &&
@@ -764,13 +776,16 @@ button.app-tile { position: relative; min-width: 0; min-height: 5.6rem; display:
 button.app-tile:hover { border-color: var(--line-strong); background: var(--surface-raised); }
 button.app-tile:focus-visible, button.selected-app-open:focus-visible, button.remove-app:focus-visible { outline: 3px solid var(--signature-soft); outline-offset: 1px; border-color: var(--signature); }
 button.app-tile.selected { border-color: #6a6a66; background: #343432; box-shadow: inset 0 0 0 1px #6a6a66; }
-button.app-tile:disabled { opacity: .55; cursor: not-allowed; }
+button.app-tile.needs-connection { background: #292928; }
+button.app-tile.needs-connection .integration-mark { opacity: .72; }
 .app-tile-copy { min-width: 0; display: grid; gap: .18rem; padding-right: 2.7rem; }
 .app-tile-copy strong { overflow: hidden; font-size: .875rem; line-height: 1.3; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .app-tile-copy small { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: .75rem; line-height: 1.4; font-weight: 400; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .app-tile-action { position: absolute; top: .72rem; right: .72rem; color: var(--muted); font-size: .6875rem; line-height: 1.3; font-weight: 600; }
 .app-tile-action.added { color: var(--positive); }
 .app-empty { margin: 0; padding: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .8125rem; }
+.app-catalog-more { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .65rem .75rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .75rem; }
+.app-catalog-more .button { min-height: 2rem; padding: .42rem .65rem; font-size: .75rem; }
 .app-count { min-width: 1.7rem; height: 1.7rem; display: grid; place-items: center; border-radius: 999px; background: #3a3a38; color: var(--muted); font-size: .75rem; font-weight: 600; }
 .selected-apps-empty { min-height: 8rem; display: grid; place-items: center; align-content: center; gap: .55rem; padding: 1rem; color: var(--muted); font-size: .8125rem; text-align: center; }
 .empty-app-mark { width: 2rem; height: 2rem; display: grid; place-items: center; border: 1px dashed var(--line-strong); border-radius: .55rem; color: var(--faint); font-size: 1rem; }
@@ -908,6 +923,7 @@ const safeIntegrationIconDataUri = (value: string | null | undefined): string | 
 
 const clientIntegration = (integration: ProductProofMetorialIntegrationV1): OpenBotClientIntegrationV1 => ({
     integration_id: integration.integration_id,
+    provider_identifier: integration.provider_identifier,
     connected_account_label: integration.connected_account_label,
     display_name: integration.display_name,
     description: integration.description,
@@ -915,6 +931,39 @@ const clientIntegration = (integration: ProductProofMetorialIntegrationV1): Open
     connection_state: integration.connection_state,
     permissions: integration.permissions.map(clientPermission),
 });
+
+const clientCatalogApps = (
+    integrations: readonly ProductProofMetorialIntegrationV1[],
+    catalog: readonly ProductProofMetorialCatalogAppV1[]
+): readonly OpenBotClientCatalogAppV1[] => {
+    const connectedByIdentifier = new Map(
+        integrations.map(integration => [integration.provider_identifier, integration.integration_id])
+    );
+    const fallbackCatalog: readonly ProductProofMetorialCatalogAppV1[] = integrations.map(integration => ({
+        identifier: integration.provider_identifier,
+        display_name: integration.display_name,
+        description: integration.description,
+        categories: [],
+        icon_url: null,
+    }));
+    const catalogIds = new Set<string>();
+    return (catalog.length === 0 ? fallbackCatalog : catalog).flatMap(entry => {
+        if (
+            !/^[a-z0-9][a-z0-9-]{0,127}$/u.test(entry.identifier) ||
+            catalogIds.has(entry.identifier) ||
+            !safeCatalogDisplayText(entry.display_name, MAX_NAME_BYTES) ||
+            !safeCatalogDisplayText(entry.description, 2_048) ||
+            entry.categories.length > 32 ||
+            !entry.categories.every(category => /^[a-z0-9][a-z0-9-]{0,127}$/u.test(category)) ||
+            (entry.icon_url !== null &&
+                !/^https:\/\/provider-logos\.metorial-cdn\.com\/[A-Za-z0-9%._-]+$/u.test(entry.icon_url))
+        ) {
+            return [];
+        }
+        catalogIds.add(entry.identifier);
+        return [{ ...entry, connected_integration_id: connectedByIdentifier.get(entry.identifier) ?? null }];
+    });
+};
 
 const clientBot = (bot: ProductProofBotV1): OpenBotClientBotV1 => ({
     bot_id: bot.bot_id,
@@ -996,6 +1045,7 @@ const renderNewBot = async (
     actor: ControlPlaneActorV1,
     repository: ProductProofRepositoryV1,
     integrations: readonly ProductProofMetorialIntegrationV1[],
+    catalog: readonly ProductProofMetorialCatalogAppV1[],
     error: string | null = null,
     _selectedIds: readonly string[] = []
 ): Promise<string> =>
@@ -1008,6 +1058,7 @@ const renderNewBot = async (
             csrf_token: actor.csrf_token,
             error,
             integrations: integrations.filter(validIntegrationCatalogEntry).map(clientIntegration),
+            catalog_apps: clientCatalogApps(integrations.filter(validIntegrationCatalogEntry), catalog),
             colors: BOT_COLOR_CATALOG_V1.map(color => ({
                 id: color.color_id,
                 display_name: color.display_name,
@@ -1210,8 +1261,11 @@ export const registerProductProofRoutesV1 = (
         const actor = await requireActor(context.req.raw, dependencies);
         if (actor === null) return context.redirect("/login", 302);
         if (actor.role !== "owner") return context.text("Forbidden", 403);
-        const integrations = await dependencies.listMetorialIntegrations(actor.account_id, actor.user_id);
-        return context.html(await renderNewBot(actor, dependencies.repository, integrations));
+        const [integrations, catalog] = await Promise.all([
+            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.listMetorialCatalogApps?.() ?? Promise.resolve([]),
+        ]);
+        return context.html(await renderNewBot(actor, dependencies.repository, integrations, catalog));
     });
 
     app.post("/actions/bots", async context => {
@@ -1229,7 +1283,10 @@ export const registerProductProofRoutesV1 = (
         const palette = form.get("palette_color_id");
         const avatarShape = form.get("avatar_shape_id");
         const avatarFace = form.get("avatar_face_id");
-        const integrations = await dependencies.listMetorialIntegrations(actor.account_id, actor.user_id);
+        const [integrations, catalog] = await Promise.all([
+            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.listMetorialCatalogApps?.() ?? Promise.resolve([]),
+        ]);
         const integrationSelections = formIntegrationSelections(form, integrations);
         if (
             name === null ||
@@ -1249,6 +1306,7 @@ export const registerProductProofRoutesV1 = (
                     actor,
                     dependencies.repository,
                     integrations,
+                    catalog,
                     "Enter every field and select at least one available integration permission.",
                     []
                 ),

@@ -7,6 +7,7 @@ import type {
     ControlPlaneActorV1,
     ProductProofBotV1,
     ProductProofConfirmationV1,
+    ProductProofMetorialCatalogAppV1,
     ProductProofMetorialIntegrationV1,
     ProductProofPermissionV1,
     ProductProofRepositoryV1,
@@ -24,6 +25,26 @@ const actor: ControlPlaneActorV1 = Object.freeze({
     role: "owner",
 });
 const expectedPrompt = "Summarize urgent Linear issues and list the Slack channels where I should post the update.";
+const pickerCatalog = JSON.parse(
+    await readFile(resolve("apps/control-plane/src/generated/metorial-integration-picker.json"), "utf8")
+) as {
+    readonly integrations: readonly (readonly [
+        identifier: string,
+        displayName: string,
+        description: string,
+        categories: readonly string[],
+        iconUrl: string | null,
+    ])[];
+};
+const metorialCatalogApps: readonly ProductProofMetorialCatalogAppV1[] = pickerCatalog.integrations.map(
+    ([identifier, displayName, description, categories, iconUrl]) => ({
+        identifier,
+        display_name: displayName,
+        description,
+        categories,
+        icon_url: iconUrl,
+    })
+);
 
 const linearPolicyMetadata = Object.freeze({
     policy_revision: "linear_catalog_v1",
@@ -46,6 +67,7 @@ const slackIcon =
 const integrations: readonly ProductProofMetorialIntegrationV1[] = Object.freeze([
     Object.freeze({
         integration_id: "integration_linear_e2e",
+        provider_identifier: "linear",
         provider_deployment_id: "pdp_linear_e2e",
         provider_version_id: "pver_linear_e2e",
         provider_specification_id: "pspec_linear_e2e",
@@ -93,6 +115,7 @@ const integrations: readonly ProductProofMetorialIntegrationV1[] = Object.freeze
     }),
     Object.freeze({
         integration_id: "integration_slack_e2e",
+        provider_identifier: "slack",
         provider_deployment_id: "pdp_slack_e2e",
         provider_version_id: "pver_slack_e2e",
         provider_specification_id: "pspec_slack_e2e",
@@ -331,6 +354,7 @@ const app = createControlPlane({
     resolveActor: async () => actor,
     listMetorialIntegrations: async (accountId, userId) =>
         accountId === actor.account_id && userId === actor.user_id ? currentOrganizationIntegrations() : [],
+    listMetorialCatalogApps: async () => metorialCatalogApps,
     setOrganizationPermissionEnabled: async input => {
         if (input.account_id !== actor.account_id || input.user_id !== actor.user_id) return false;
         const permission = integrations

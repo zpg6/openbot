@@ -1,21 +1,27 @@
-# Metorial provider catalog generation
+# Metorial catalog generation
 
-OpenBot keeps the provider catalog separate from account authority. The generated catalog describes every Metorial provider template and its pinned-version tools. Runtime access still comes from the account-scoped deployment and connection resolver.
+OpenBot has two Metorial data layers with different authority.
 
-Run:
+The public discovery catalog comes from the official `metorial/integrations` repository. It lets the UI list every supported app without a Metorial API key:
+
+```sh
+corepack pnpm generate:metorial-catalog
+```
+
+The generator checks out a pinned repository commit, reads each integration's `slate.json` and README, validates its metadata, and writes `apps/control-plane/src/generated/metorial-integration-catalog.json`. It also writes the compact page-adapter payload `metorial-integration-picker.json`. The checked-in JSON IR contains names, descriptions, categories, skills, package names, and manifest-supplied logo references. It contains no deployment IDs, auth configuration, connection grants, API keys, or sessions. Set `METORIAL_INTEGRATIONS_DIR` to reuse a local checkout at the pinned revision.
+
+This catalog is discovery metadata, not permission authority. Listing an app does not make it connected. A control-plane adapter supplies the compact discovery summaries separately from the organization integration resolver, so catalog size does not inflate the authorization module or ordinary unit tests. At runtime OpenBot uses the pinned `@metorial/core` SDK to load the active Better Auth organization's Metorial deployments, provider versions, connection state, and tools. The organization policy limits that tool set globally. A bot may select only connected organization integrations and only a subset of the organization-allowed tools.
+
+When an environment key is available, generate the runtime enrichment snapshot separately:
 
 ```sh
 METORIAL_API_KEY=metorial_sk_... \
 METORIAL_ENVIRONMENT_LABEL=development \
-corepack pnpm generate:metorial-catalog
+corepack pnpm generate:metorial-provider-enrichment
 ```
 
-The dev-time generator uses the pinned `@metorial/core` SDK and its `2026-01-01-magnetar` generated client. It paginates every active public provider and loads every tool from each pinned current provider version. The output records the exact SDK version, provider and tool identity, Metorial effect tags, and schema digests. It never stores credentials, auth-config IDs, deployment configuration, or arbitrary metadata. `METORIAL_API_VERSION` is optional; when set, it must match the SDK's pinned version.
+The enrichment generator paginates active public providers and loads every tool from each current provider version through the SDK's pinned `2026-01-01-magnetar` API. It records provider and tool identities, effect tags, and schema digests. It never stores credentials or account bindings.
 
-Brand icons come from the theSVG revision pinned in the generator. A provider receives an icon only when `scripts/metorial-provider-icon-map.json` maps its exact Metorial provider ID to a reviewed theSVG slug. Unique normalized name or slug matches are emitted only as `icon_suggestion` records for review. They are never rendered automatically. Ambiguous and missing matches stay `null` and render OpenBot's generic integration mark.
+Brand art has two sources. Official manifest logo references are exact discovery metadata from Metorial. Reviewed, locally embedded theSVG marks remain available to the enrichment generator; guessed name matches are emitted only as review suggestions and are never rendered automatically. Runtime UI should serve reviewed or cached local art rather than hotlinking arbitrary remote images.
 
-The generator reads theSVG's source manifest, including its object-shaped `variants` field, and accepts only the declared `default` path for a reviewed slug. Downloaded SVGs must pass a strict static-image policy and are emitted as local data URIs; the browser makes no theSVG request.
-
-Review the generated diff before committing it. In particular, verify provider-to-brand matches and every reported icon license. theSVG's tooling is MIT-licensed, while individual brand marks retain their own licenses and trademark rules.
-
-The generated JSON IR is `apps/control-plane/src/generated/metorial-provider-catalog.json`. Commit and review that file so the Bot app picker can render a stable catalog without calling Metorial during a page request. Environment-specific provider deployments and user auth-config bindings do not belong in it. Runtime code joins this public catalog to the current Better Auth organization, that organization's Metorial deployments, and the user's opaque connection grants.
+Review generated diffs before committing them. The metadata source repository currently carries `FSL-1.1-ALv2`; theSVG's tooling is MIT-licensed, while individual brand marks retain their own licenses and trademark rules.

@@ -26,6 +26,7 @@ test.afterEach(async ({ page }, testInfo) => {
 });
 
 test("an owner creates a Bot, selects permission, runs a task, and reads the result", async ({ page }, testInfo) => {
+    test.setTimeout(90_000);
     const capture = async (filename: string, title: string): Promise<void> => {
         const path = resolve(walkthroughDirectory, filename);
         await page.locator("main h1").first().scrollIntoViewIfNeeded();
@@ -41,7 +42,11 @@ test("an owner creates a Bot, selects permission, runs a task, and reads the res
 
     await page.getByRole("link", { name: "New Bot" }).first().click();
     await expect(page.getByRole("heading", { name: "New Bot" })).toBeVisible();
+    await expect(page.getByText(/1,134 Metorial apps/u)).toBeVisible();
+    const appSearch = page.getByLabel("Find an app");
+    await appSearch.fill("Linear");
     await expect(page.getByRole("button", { name: "Add Linear" })).toBeVisible();
+    await appSearch.fill("Slack");
     await expect(page.getByRole("button", { name: "Add Slack" })).toBeVisible();
 
     await page.getByLabel("Name", { exact: true }).fill("Support reader");
@@ -51,8 +56,10 @@ test("an owner creates a Bot, selects permission, runs a task, and reads the res
     await page.getByRole("radio", { name: "Sky", exact: true }).check();
     await page.getByRole("radio", { name: "Hexagon", exact: true }).check();
     await page.getByRole("radio", { name: "Cheerful", exact: true }).check();
+    await appSearch.fill("Linear");
     await page.getByRole("button", { name: "Add Linear" }).click();
     await expect(page.getByRole("checkbox", { name: /List issues/u })).toBeChecked();
+    await appSearch.fill("Slack");
     await page.getByRole("button", { name: "Add Slack" }).click();
     await expect(page.getByRole("checkbox", { name: /List channels/u })).toBeChecked();
     const addedApps = page.getByRole("region", { name: "Added to this Bot" });
@@ -61,6 +68,7 @@ test("an owner creates a Bot, selects permission, runs a task, and reads the res
     await addedApps.getByRole("button", { name: "Configure Linear" }).click();
     await expect(page.getByRole("checkbox", { name: /Create issue/u })).toBeDisabled();
     await expect(page.getByRole("checkbox", { name: /Delete issue/u })).toBeDisabled();
+    await appSearch.fill("");
     await capture("02-new-bot.png", "02 New Bot");
     await page.getByRole("button", { name: "Create Bot" }).click();
 

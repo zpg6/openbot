@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import type {
     OpenBotClientBotDetailV1,
     OpenBotClientBotV1,
+    OpenBotClientCatalogAppV1,
     OpenBotClientIntegrationV1,
     OpenBotClientPageV1,
     OpenBotClientPermissionV1,
@@ -34,15 +35,23 @@ const BotAvatar = ({
 const IntegrationIcon = ({
     integration,
 }: {
-    readonly integration: Pick<OpenBotClientIntegrationV1, "display_name" | "icon_data_uri">;
+    readonly integration: {
+        readonly display_name: string;
+        readonly icon_data_uri?: string | null;
+        readonly icon_url?: string | null;
+    };
 }) =>
-    integration.icon_data_uri === null ? (
+    (integration.icon_data_uri ?? integration.icon_url ?? null) === null ? (
         <span className="integration-mark fallback" aria-hidden="true">
             {integration.display_name.slice(0, 1).toUpperCase()}
         </span>
     ) : (
         <span className="integration-mark" aria-hidden="true">
-            <img src={integration.icon_data_uri} alt="" />
+            <img
+                src={integration.icon_data_uri ?? integration.icon_url ?? undefined}
+                alt=""
+                referrerPolicy="no-referrer"
+            />
         </span>
     );
 
@@ -88,24 +97,33 @@ const defaultPermissionIds = (integration: OpenBotClientIntegrationV1): readonly
         .filter(permission => permission.enabled && permission.effect === "read")
         .map(permission => permission.policy_id);
 
-const IntegrationChoices = ({ integrations }: { readonly integrations: readonly OpenBotClientIntegrationV1[] }) => {
+const IntegrationChoices = ({
+    integrations,
+    catalogApps,
+}: {
+    readonly integrations: readonly OpenBotClientIntegrationV1[];
+    readonly catalogApps: readonly OpenBotClientCatalogAppV1[];
+}) => {
     const [query, setQuery] = useState("");
+    const [visibleCount, setVisibleCount] = useState(48);
     const [selectedIntegrationIds, setSelectedIntegrationIds] = useState<readonly string[]>([]);
     const [selectedPermissionIds, setSelectedPermissionIds] = useState<Readonly<Record<string, readonly string[]>>>({});
     const [activeIntegrationId, setActiveIntegrationId] = useState<string | null>(null);
 
-    const filteredIntegrations = useMemo(() => {
+    const filteredCatalogApps = useMemo(() => {
         const normalized = query.trim().toLocaleLowerCase();
-        if (normalized.length === 0) return integrations;
-        return integrations.filter(integration =>
-            `${integration.display_name} ${integration.description}`.toLocaleLowerCase().includes(normalized)
+        if (normalized.length === 0) return catalogApps;
+        return catalogApps.filter(app =>
+            `${app.display_name} ${app.description} ${app.categories.join(" ")}`
+                .toLocaleLowerCase()
+                .includes(normalized)
         );
-    }, [integrations, query]);
-
-    if (integrations.length === 0)
-        return <div className="notice">No Metorial integrations are available for this organization.</div>;
+    }, [catalogApps, query]);
 
     const integrationById = new Map(integrations.map(integration => [integration.integration_id, integration]));
+    const integrationByIdentifier = new Map(
+        integrations.map(integration => [integration.provider_identifier, integration])
+    );
     const selectedIntegrations = selectedIntegrationIds.flatMap(integrationId => {
         const integration = integrationById.get(integrationId);
         return integration === undefined ? [] : [integration];
@@ -168,36 +186,57 @@ const IntegrationChoices = ({ integrations }: { readonly integrations: readonly 
                 <div className="app-section-head">
                     <div>
                         <h2 id="available-apps-heading">Available apps</h2>
-                        <p>Pick an app to add its organization-approved read tools.</p>
+                        <p>
+                            {catalogApps.length.toLocaleString()} Metorial apps · connected apps add their approved read
+                            tools.
+                        </p>
                     </div>
                     <label className="app-search">
                         <span className="visually-hidden">Find an app</span>
                         <input
                             type="search"
                             value={query}
-                            onChange={event => setQuery(event.currentTarget.value)}
+                            onChange={event => {
+                                setQuery(event.currentTarget.value);
+                                setVisibleCount(48);
+                            }}
                             placeholder="Find an app"
                         />
                     </label>
                 </div>
                 <div className="app-grid">
-                    {filteredIntegrations.map(integration => {
-                        const available = integration.connection_state === "connected";
-                        const selected = selectedIntegrationIds.includes(integration.integration_id);
+                    {filteredCatalogApps.slice(0, visibleCount).map(app => {
+                        const integration = integrationByIdentifier.get(app.identifier) ?? null;
+                        const available = integration?.connection_state === "connected";
+                        const selected =
+                            integration !== null && selectedIntegrationIds.includes(integration.integration_id);
                         return (
                             <button
-                                className={`app-tile${selected ? " selected" : ""}`}
+                                className={`app-tile${selected ? " selected" : ""}${available ? "" : " needs-connection"}`}
                                 type="button"
-                                onClick={() => addOrOpenIntegration(integration)}
-                                disabled={!available}
-                                aria-label={`${selected ? "Open" : "Add"} ${integration.display_name}`}
+                                onClick={() => {
+                                    if (integration !== null && available) addOrOpenIntegration(integration);
+                                    else
+                                        window.location.assign(
+                                            `/organization/settings?connect=${encodeURIComponent(app.identifier)}`
+                                        );
+                                }}
+                                aria-label={`${selected ? "Open" : available ? "Add" : "Connect"} ${app.display_name}`}
                                 aria-pressed={selected}
-                                key={integration.integration_id}
+                                key={app.identifier}
                             >
-                                <IntegrationIcon integration={integration} />
+                                <IntegrationIcon
+                                    integration={
+                                        integration ?? {
+                                            display_name: app.display_name,
+                                            icon_data_uri: null,
+                                            icon_url: app.icon_url,
+                                        }
+                                    }
+                                />
                                 <span className="app-tile-copy">
-                                    <strong>{integration.display_name}</strong>
-                                    <small>{integration.description}</small>
+                                    <strong>{app.display_name}</strong>
+                                    <small>{app.description}</small>
                                 </span>
                                 <span className={`app-tile-action${selected ? " added" : ""}`} aria-hidden="true">
                                     {selected ? "Added" : available ? "Add" : "Connect"}
@@ -206,8 +245,20 @@ const IntegrationChoices = ({ integrations }: { readonly integrations: readonly 
                         );
                     })}
                 </div>
-                {filteredIntegrations.length === 0 ? (
-                    <p className="app-empty">No apps match "{query.trim()}".</p>
+                {filteredCatalogApps.length === 0 ? <p className="app-empty">No apps match "{query.trim()}".</p> : null}
+                {filteredCatalogApps.length > visibleCount ? (
+                    <div className="app-catalog-more">
+                        <span>
+                            Showing {visibleCount.toLocaleString()} of {filteredCatalogApps.length.toLocaleString()}
+                        </span>
+                        <button
+                            className="button tertiary"
+                            type="button"
+                            onClick={() => setVisibleCount(current => current + 48)}
+                        >
+                            Show more
+                        </button>
+                    </div>
                 ) : null}
             </section>
 
@@ -536,7 +587,7 @@ const NewBotView = ({ page }: { readonly page: NewBotPage }) => (
                     Choose organization integrations, then pass through the exact tools this Bot may request. The server
                     verifies every selection against the current organization ceiling.
                 </p>
-                <IntegrationChoices integrations={page.view.integrations} />
+                <IntegrationChoices integrations={page.view.integrations} catalogApps={page.view.catalog_apps} />
             </fieldset>
             <div className="actions">
                 <a className="text-link" href="/bots">
