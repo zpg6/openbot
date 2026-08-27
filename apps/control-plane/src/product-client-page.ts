@@ -65,6 +65,7 @@ export type OpenBotClientViewV1 =
           readonly csrf_token: string;
           readonly organization_name: string;
           readonly integrations: readonly OpenBotClientIntegrationV1[];
+          readonly catalog_apps: readonly OpenBotClientCatalogAppV1[];
           readonly can_manage: boolean;
       }
     | {
@@ -81,6 +82,11 @@ export type OpenBotClientViewV1 =
           readonly kind: "bot_chat";
           readonly csrf_token: string;
           readonly bot: OpenBotClientBotDetailV1;
+          readonly routine_created: {
+              readonly name: string;
+              readonly prompt: string;
+              readonly schedule: string;
+          } | null;
       }
     | {
           readonly kind: "confirmation";
@@ -122,6 +128,7 @@ export type OpenBotClientViewV1 =
       }
     | {
           readonly kind: "run_result";
+          readonly csrf_token: string;
           readonly bot: OpenBotClientBotDetailV1;
           readonly prompt: string;
           readonly result_text: string | null;

@@ -352,26 +352,43 @@ const currentOrganizationIntegrations = (): readonly ProductProofMetorialIntegra
 
 const app = createControlPlane({
     resolveActor: async () => actor,
-    listMetorialIntegrations: async (accountId, userId) =>
-        accountId === actor.account_id && userId === actor.user_id ? currentOrganizationIntegrations() : [],
-    listMetorialCatalogApps: async () => metorialCatalogApps,
-    setOrganizationPermissionEnabled: async input => {
-        if (input.account_id !== actor.account_id || input.user_id !== actor.user_id) return false;
-        const permission = integrations
-            .find(integration => integration.integration_id === input.integration_id)
-            ?.permissions.find(candidate => candidate.policy_id === input.policy_id);
-        if (permission === undefined) return false;
-        organizationPermissionOverrides.set(permission.policy_id, input.enabled);
-        return true;
+    connector: {
+        plugin_id: "metorial",
+        api_version: "2025-01-01",
+        session_serialization_identity: "openbot-e2e-serializer@1",
+        listIntegrations: async (accountId, userId) =>
+            accountId === actor.account_id && userId === actor.user_id ? currentOrganizationIntegrations() : [],
+        listCatalogApps: async () => metorialCatalogApps,
+        setOrganizationPermissionEnabled: async input => {
+            if (input.account_id !== actor.account_id || input.user_id !== actor.user_id) return false;
+            const permission = integrations
+                .find(integration => integration.integration_id === input.integration_id)
+                ?.permissions.find(candidate => candidate.policy_id === input.policy_id);
+            if (permission === undefined) return false;
+            organizationPermissionOverrides.set(permission.policy_id, input.enabled);
+            return true;
+        },
     },
-    metorial_api_version: "2025-01-01",
-    metorial_session_serialization_identity: "openbot-e2e-serializer@1",
     repository: createMemoryRepository(),
+    chatAgent: {
+        async respond(input) {
+            if (input.message.includes("every weekday at 9:00 AM Pacific")) {
+                return {
+                    kind: "create_routine" as const,
+                    name: "Weekday support brief",
+                    prompt: "Summarize urgent support cases for the weekday standup.",
+                    schedule: "Every weekday at 9:00 AM Pacific",
+                };
+            }
+            return { kind: "run_task" as const };
+        },
+    },
     taskExecutor: {
         async execute(input) {
             const selected = input.permissions.map((permission: ProductProofPermissionV1) => permission.tool_key);
             const expectedSessionIntent = {
                 intent_version: "openbot_metorial_session_intent_v1",
+                connector_plugin_id: "metorial",
                 metorial_api_version: "2025-01-01",
                 serialization_identity: "openbot-e2e-serializer@1",
                 providers: [

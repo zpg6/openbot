@@ -178,8 +178,9 @@ const form = (
 
 const mutationHeaders = { Origin: "https://openbot.invalid" } as const;
 const metorialContract = {
-    metorial_api_version: "2026-07-24",
-    metorial_session_serialization_identity: "openbot-test-serializer@1",
+    plugin_id: "metorial",
+    api_version: "2026-07-24",
+    session_serialization_identity: "openbot-test-serializer@1",
 } as const;
 
 describe("control-plane product proof", () => {
@@ -193,8 +194,9 @@ describe("control-plane product proof", () => {
             schedule: "Every weekday at 9:00 AM Pacific",
             metorial_session_intent: {
                 intent_version: "openbot_metorial_session_intent_v1",
-                metorial_api_version: metorialContract.metorial_api_version,
-                serialization_identity: metorialContract.metorial_session_serialization_identity,
+                connector_plugin_id: metorialContract.plugin_id,
+                metorial_api_version: metorialContract.api_version,
+                serialization_identity: metorialContract.session_serialization_identity,
                 providers: [
                     {
                         provider_deployment_id: "pdp_test_linear",
@@ -214,8 +216,7 @@ describe("control-plane product proof", () => {
         const createRoutineProposal = vi.fn(async () => proposal);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations.slice(0, 1),
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations.slice(0, 1) },
             repository: {
                 ...repository(async () => bot),
                 getBot: async () => bot,
@@ -258,8 +259,9 @@ describe("control-plane product proof", () => {
             schedule: "Every weekday at 9:00 AM Pacific",
             metorial_session_intent: {
                 intent_version: "openbot_metorial_session_intent_v1",
-                metorial_api_version: metorialContract.metorial_api_version,
-                serialization_identity: metorialContract.metorial_session_serialization_identity,
+                connector_plugin_id: metorialContract.plugin_id,
+                metorial_api_version: metorialContract.api_version,
+                serialization_identity: metorialContract.session_serialization_identity,
                 providers: [
                     {
                         provider_deployment_id: "pdp_test_linear",
@@ -285,8 +287,7 @@ describe("control-plane product proof", () => {
         const saveRoutineProposal = vi.fn(async () => null);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => changedCatalog,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => changedCatalog },
             repository: {
                 ...repository(async () => bot),
                 getBot: async () => bot,
@@ -310,9 +311,11 @@ describe("control-plane product proof", () => {
         const setOrganizationPermissionEnabled = vi.fn(async () => true);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            setOrganizationPermissionEnabled,
-            ...metorialContract,
+            connector: {
+                ...metorialContract,
+                listIntegrations: async () => integrations,
+                setOrganizationPermissionEnabled,
+            },
             repository: repository(async () => bot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -342,9 +345,11 @@ describe("control-plane product proof", () => {
         const setOrganizationPermissionEnabled = vi.fn(async () => true);
         const app = createControlPlane({
             resolveActor: async () => ({ ...actor, role: "member" as const }),
-            listMetorialIntegrations: async () => integrations,
-            setOrganizationPermissionEnabled,
-            ...metorialContract,
+            connector: {
+                ...metorialContract,
+                listIntegrations: async () => integrations,
+                setOrganizationPermissionEnabled,
+            },
             repository: repository(async () => bot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -367,8 +372,7 @@ describe("control-plane product proof", () => {
         const createBot = vi.fn<ProductProofRepositoryV1["createBot"]>(async () => bot);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations },
             repository: repository(createBot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -408,8 +412,7 @@ describe("control-plane product proof", () => {
         const catalog: readonly ProductProofMetorialIntegrationV1[] = [{ ...integrations[0]!, auth: { mode } }];
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => catalog,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => catalog },
             repository: repository(createBot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -428,8 +431,7 @@ describe("control-plane product proof", () => {
         const createBot = vi.fn<ProductProofRepositoryV1["createBot"]>(async () => bot);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations },
             repository: repository(createBot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -448,8 +450,7 @@ describe("control-plane product proof", () => {
         const createBot = vi.fn<ProductProofRepositoryV1["createBot"]>(async () => bot);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations },
             repository: repository(createBot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -467,8 +468,10 @@ describe("control-plane product proof", () => {
         const createBot = vi.fn<ProductProofRepositoryV1["createBot"]>(async () => bot);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => [integrations[0]!, { ...integrations[0]! }],
-            ...metorialContract,
+            connector: {
+                ...metorialContract,
+                listIntegrations: async () => [integrations[0]!, { ...integrations[0]! }],
+            },
             repository: repository(createBot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -491,8 +494,7 @@ describe("control-plane product proof", () => {
         ].filter(value => value !== undefined);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => disconnected,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => disconnected },
             repository: repository(createBot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -510,8 +512,7 @@ describe("control-plane product proof", () => {
         const createBot = vi.fn<ProductProofRepositoryV1["createBot"]>(async () => bot);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations },
             repository: repository(createBot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -529,8 +530,7 @@ describe("control-plane product proof", () => {
         const createBot = vi.fn<ProductProofRepositoryV1["createBot"]>(async () => bot);
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations },
             repository: repository(createBot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -547,8 +547,7 @@ describe("control-plane product proof", () => {
         const createBot = vi.fn<ProductProofRepositoryV1["createBot"]>(async () => bot);
         const app = createControlPlane({
             resolveActor: async () => ({ ...actor, role: "member" }),
-            listMetorialIntegrations: async () => integrations,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations },
             repository: repository(createBot),
             taskExecutor: { execute: async () => ({ result_text: "unused" }) },
         });
@@ -569,9 +568,11 @@ describe("control-plane product proof", () => {
         });
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            metorial_api_version: metorialContract.metorial_api_version,
-            metorial_session_serialization_identity: "",
+            connector: {
+                ...metorialContract,
+                session_serialization_identity: "",
+                listIntegrations: async () => integrations,
+            },
             repository: {
                 ...repository(async () => bot),
                 listBots: async () => [bot],
@@ -592,7 +593,7 @@ describe("control-plane product proof", () => {
         });
 
         expect(response.status).toBe(409);
-        expect(await response.text()).toBe("Metorial configuration unavailable");
+        expect(await response.text()).toBe("App connection unavailable");
         expect(createConfirmation).not.toHaveBeenCalled();
     });
 
@@ -604,8 +605,7 @@ describe("control-plane product proof", () => {
         }));
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations },
             repository: {
                 ...repository(async () => bot),
                 getBot: async () => bot,
@@ -651,8 +651,7 @@ describe("control-plane product proof", () => {
         };
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations },
             repository: {
                 ...repository(async () => bot),
                 listBots: async () => [bot],
@@ -678,8 +677,9 @@ describe("control-plane product proof", () => {
             prompt: "List the open cases.",
             metorial_session_intent: {
                 intent_version: "openbot_metorial_session_intent_v1",
-                metorial_api_version: metorialContract.metorial_api_version,
-                serialization_identity: metorialContract.metorial_session_serialization_identity,
+                connector_plugin_id: metorialContract.plugin_id,
+                metorial_api_version: metorialContract.api_version,
+                serialization_identity: metorialContract.session_serialization_identity,
                 providers: [
                     {
                         provider_deployment_id: "pdp_test_linear",
@@ -739,8 +739,7 @@ describe("control-plane product proof", () => {
         const execute = vi.fn(async () => ({ result_text: "Three open cases." }));
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => integrations,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => integrations },
             repository: raceRepository,
             taskExecutor: { execute },
             now: () => 1_788_000_001_000,
@@ -769,8 +768,9 @@ describe("control-plane product proof", () => {
             prompt: "List the open cases.",
             metorial_session_intent: {
                 intent_version: "openbot_metorial_session_intent_v1",
-                metorial_api_version: metorialContract.metorial_api_version,
-                serialization_identity: metorialContract.metorial_session_serialization_identity,
+                connector_plugin_id: metorialContract.plugin_id,
+                metorial_api_version: metorialContract.api_version,
+                serialization_identity: metorialContract.session_serialization_identity,
                 providers: [
                     {
                         provider_deployment_id: "pdp_test_linear",
@@ -802,8 +802,7 @@ describe("control-plane product proof", () => {
         const execute = vi.fn(async () => ({ result_text: "must not run" }));
         const app = createControlPlane({
             resolveActor: async () => actor,
-            listMetorialIntegrations: async () => changedCatalog,
-            ...metorialContract,
+            connector: { ...metorialContract, listIntegrations: async () => changedCatalog },
             repository: {
                 listBots: async () => [bot],
                 createBot: async () => bot,

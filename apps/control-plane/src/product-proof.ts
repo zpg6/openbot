@@ -103,6 +103,7 @@ export interface ProductProofBotIntegrationV1 {
 
 export interface ProductProofMetorialSessionIntentV1 {
     readonly intent_version: "openbot_metorial_session_intent_v1";
+    readonly connector_plugin_id: string;
     readonly metorial_api_version: string;
     readonly serialization_identity: string;
     readonly providers: readonly {
@@ -272,26 +273,44 @@ export interface ProductProofTaskExecutorV1 {
     }): Promise<{ readonly result_text: string }>;
 }
 
+export type ProductProofChatAgentDecisionV1 =
+    | { readonly kind: "run_task" }
+    | {
+          readonly kind: "create_routine";
+          readonly name: string;
+          readonly prompt: string;
+          readonly schedule: string;
+      };
+
+export interface ProductProofChatAgentV1 {
+    respond(input: {
+        readonly bot: ProductProofBotV1;
+        readonly message: string;
+        readonly permissions: readonly ProductProofPermissionV1[];
+    }): Promise<ProductProofChatAgentDecisionV1>;
+}
+
+export interface ProductProofConnectorPluginV1 {
+    readonly plugin_id: string;
+    readonly api_version: string;
+    readonly session_serialization_identity: string;
+    listIntegrations(accountId: string, userId: string): Promise<readonly ProductProofMetorialIntegrationV1[]>;
+    listCatalogApps?(): Promise<readonly ProductProofMetorialCatalogAppV1[]>;
+    setOrganizationPermissionEnabled?(input: {
+        readonly account_id: string;
+        readonly user_id: string;
+        readonly integration_id: string;
+        readonly policy_id: string;
+        readonly enabled: boolean;
+    }): Promise<boolean>;
+}
+
 export interface ControlPlaneProductProofDependenciesV1 {
     readonly resolveActor: (request: Request) => Promise<ControlPlaneActorV1 | null>;
-    readonly listMetorialIntegrations: (
-        accountId: string,
-        userId: string
-    ) => Promise<readonly ProductProofMetorialIntegrationV1[]>;
-    readonly listMetorialCatalogApps?: (() => Promise<readonly ProductProofMetorialCatalogAppV1[]>) | undefined;
-    readonly metorial_api_version: string;
-    readonly metorial_session_serialization_identity: string;
+    readonly connector: ProductProofConnectorPluginV1;
     readonly repository: ProductProofRepositoryV1;
     readonly taskExecutor: ProductProofTaskExecutorV1;
-    readonly setOrganizationPermissionEnabled?:
-        | ((input: {
-              readonly account_id: string;
-              readonly user_id: string;
-              readonly integration_id: string;
-              readonly policy_id: string;
-              readonly enabled: boolean;
-          }) => Promise<boolean>)
-        | undefined;
+    readonly chatAgent?: ProductProofChatAgentV1 | undefined;
     readonly now?: (() => number) | undefined;
 }
 
@@ -577,15 +596,17 @@ const compileMetorialSessionIntent = (
     bindings: NonNullable<ReturnType<typeof selectedIntegrationBindings>>
 ): ProductProofMetorialSessionIntentV1 | null => {
     if (
-        !safeConfiguredMetorialIdentity(dependencies.metorial_api_version) ||
-        !safeConfiguredMetorialIdentity(dependencies.metorial_session_serialization_identity)
+        !safeConfiguredMetorialIdentity(dependencies.connector.plugin_id) ||
+        !safeConfiguredMetorialIdentity(dependencies.connector.api_version) ||
+        !safeConfiguredMetorialIdentity(dependencies.connector.session_serialization_identity)
     ) {
         return null;
     }
     return Object.freeze({
         intent_version: "openbot_metorial_session_intent_v1" as const,
-        metorial_api_version: dependencies.metorial_api_version,
-        serialization_identity: dependencies.metorial_session_serialization_identity,
+        connector_plugin_id: dependencies.connector.plugin_id,
+        metorial_api_version: dependencies.connector.api_version,
+        serialization_identity: dependencies.connector.session_serialization_identity,
         providers: Object.freeze(
             bindings.map(binding =>
                 Object.freeze({
@@ -771,12 +792,13 @@ label.choice input { width: 1rem; height: 1rem; margin: .18rem 0 0; accent-color
 .organization-permission { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 1rem; padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: #292928; }
 .organization-permission form { display: block; }
 .organization-permission button { white-space: nowrap; }
-.choice-title { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.choice-title { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.choice-title > :first-child { min-width: 0; overflow-wrap: anywhere; }
 .effect-badge, .status-badge { display: inline-flex; align-items: center; width: fit-content; border-radius: 999px; font-size: .6875rem; line-height: 1.2; font-weight: 600; letter-spacing: .045em; text-transform: uppercase; }
 .effect-badge { padding: .17rem .45rem; background: #40403d; color: var(--muted); }
 .effect-badge.read, .status-badge.good { background: var(--positive-soft); color: var(--positive); }
-.permission-meta { display: grid; gap: .12rem; margin-top: .28rem; color: var(--muted); font-size: .8125rem; line-height: 1.45; font-weight: 400; }
-.technical { color: var(--muted); font-family: var(--font-mono); font-size: .75rem; line-height: 1.45; font-weight: 400; letter-spacing: 0; }
+.permission-meta { min-width: 0; display: grid; gap: .12rem; margin-top: .28rem; color: var(--muted); font-size: .8125rem; line-height: 1.45; font-weight: 400; overflow-wrap: anywhere; }
+.technical { min-width: 0; color: var(--muted); font-family: var(--font-mono); font-size: .75rem; line-height: 1.45; font-weight: 400; letter-spacing: 0; overflow-wrap: anywhere; word-break: break-word; }
 .integration-options { display: grid; gap: .75rem; }
 .integration-card { overflow: hidden; border: 1px solid var(--line); border-radius: .8rem; background: #292928; }
 .integration-card:has(.integration-choice input:checked) { border-color: var(--line-strong); }
@@ -944,6 +966,244 @@ pre.result { margin: 0; max-width: 68ch; white-space: pre-wrap; overflow-wrap: a
 }
 `;
 
+const studioStyles = `
+:root {
+    color-scheme: light;
+    --font-sans: "Instrument Sans", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --canvas: #faf9f7;
+    --surface: #ffffff;
+    --surface-raised: #fbfaf8;
+    --sidebar: #f3f1ed;
+    --sidebar-hover: #ebe8e2;
+    --ink: #1d1b19;
+    --muted: #6e6a63;
+    --faint: #98938a;
+    --line: #e8e5df;
+    --line-strong: #dbd7cf;
+    --signature: #e0498d;
+    --signature-soft: #fdf3f7;
+    --positive: #4e837f;
+    --positive-soft: #edf3ec;
+    --danger: #a14d3c;
+    --danger-soft: #f8e9e5;
+    background: var(--canvas);
+    color: var(--ink);
+}
+body { background: var(--canvas); color: var(--ink); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--signature); outline-offset: 2px; }
+h1 { font-size: 1.625rem; letter-spacing: -.02em; }
+h2 { font-size: .95rem; }
+.shell { grid-template-columns: 14.5rem minmax(0, 1fr); background: var(--canvas); }
+.shell.has-context { grid-template-columns: 14.5rem minmax(0, 1fr) 18.75rem; }
+.sidebar { padding: 1.1rem .875rem; border-right: 1px solid var(--line); background: var(--sidebar); }
+.brand { gap: .55rem; min-height: 2rem; padding: 0 .4rem; font-size: .9375rem; }
+.brand-mark { width: .625rem; height: .625rem; background: var(--signature); color: transparent; }
+.new-bot { margin-top: 1.15rem; padding: .5rem .75rem; border-color: var(--line-strong); border-radius: .625rem; background: transparent; font-size: .8125rem; }
+.new-bot:hover { border-color: #e9bfd3; background: var(--signature-soft); color: #b23a72; }
+.section-label { margin: 1.35rem .4rem .45rem; color: var(--faint); font-size: .625rem; letter-spacing: .09em; }
+.bot-list { gap: .125rem; }
+.bot-list a { padding: .5rem .625rem; border: 1px solid transparent; border-radius: .625rem; }
+.bot-list a:hover { background: var(--sidebar-hover); }
+.bot-list a[aria-current='page'] { border-color: var(--line); background: #fff; }
+.bot-list .bot-row > span:last-child > span { font-size: .8125rem; }
+.bot-list small { color: var(--faint); font-size: .71875rem; }
+.bot-avatar { background: transparent; }
+.bot-avatar.small { width: 1.75rem; height: 1.75rem; }
+.bot-avatar.large { width: 4.5rem; height: 4.5rem; }
+.bot-row { grid-template-columns: 1.75rem minmax(0, 1fr); gap: .625rem; }
+.account { grid-template-columns: 1.75rem 1fr; gap: .55rem; padding: .75rem .35rem .1rem; border-color: var(--line); }
+.account-avatar { width: 1.75rem; height: 1.75rem; background: #dbd7cf; color: var(--muted); font-size: .625rem; }
+.account small { color: var(--faint); font-size: .6875rem; }
+.account-name { font-size: .78125rem; }
+main { padding: 2.75rem clamp(1.5rem, 4vw, 3.5rem); }
+.has-context main { padding: 0 2.25rem 1.5rem; }
+.content { max-width: 55rem; }
+.has-context .content { max-width: 45rem; }
+.context-panel { padding: 1.25rem 1.375rem; border-color: var(--line); background: #fbfaf8; }
+.context-head { padding: .15rem 0 1.05rem; }
+.context-head h2 { font-size: .875rem; }
+.context-section { padding: 1.05rem 0; border-color: var(--line); }
+.context-section h3 { color: var(--faint); font-size: .625rem; letter-spacing: .09em; }
+.context-list dt { color: var(--faint); font-size: .6875rem; }
+.context-list dd { color: #4a463f; font-size: .78125rem; }
+.context-tools { gap: .15rem; margin: .35rem 0 0 2.15rem; }
+.context-tools li { padding: .1rem 0; border: 0; background: transparent; color: var(--muted); font-size: .71875rem; }
+.context-tools li > * { min-width: 0; overflow-wrap: anywhere; }
+.context-tools li strong { font-weight: 500; }
+.context-integration + .context-integration { margin-top: .65rem; padding-top: .65rem; border-color: var(--line); }
+.context-integration, .context-integration-head, .context-integration-head > span { min-width: 0; }
+.context-integration-head strong, .context-integration-head .muted { overflow-wrap: anywhere; }
+.context-integration-head { grid-template-columns: 1.55rem minmax(0, 1fr) auto; gap: .5rem; }
+.context-integration-head .integration-mark { width: 1.55rem; height: 1.55rem; }
+.context-integration-head .integration-mark img { width: 1rem; height: 1rem; }
+.context-integration-head strong { font-size: .78125rem; }
+.context-integration-count { color: var(--faint); font-size: .625rem; white-space: nowrap; }
+.routine-empty { border-color: var(--line-strong); color: var(--faint); font-size: .75rem; }
+.routine-list a { border-color: var(--line); background: #fff; font-size: .75rem; }
+.chat-header { min-height: 4.25rem; padding: .75rem 0; border-color: #eeebe5; background: rgba(250,249,247,.96); }
+.chat-header h1 { font-size: .9375rem; }
+.chat-header p { font-size: .75rem; }
+.chat-empty { padding: 3rem 1rem 2rem; }
+.chat-empty h2 { margin-top: 1rem; font-size: 1.25rem; }
+.chat-composer { margin-bottom: 1.5rem; padding: .75rem .875rem; border-color: var(--line); border-radius: .875rem; background: #fff; box-shadow: 0 8px 24px rgba(54,46,35,.06); }
+.chat-composer:focus-within { border-color: var(--positive); box-shadow: 0 0 0 4px rgba(111,179,174,.13); }
+.chat-composer textarea { min-height: 4.5rem; padding: .4rem; }
+.composer-note { color: var(--faint); }
+.composer-actions { display: flex; align-items: center; gap: .75rem; }
+.composer-actions .composer-note { margin-right: auto; }
+.send-message { width: 2.15rem; height: 2.15rem; min-height: 2.15rem; padding: 0; border-radius: 50%; font-size: 1.1rem; }
+.routine-builder { border-color: var(--line); }
+.routine-fields input { background: #fff; }
+.page-head { margin-bottom: 1.6rem; }
+.eyebrow { color: var(--faint); font-size: .625rem; letter-spacing: .1em; }
+.card, fieldset { border-color: var(--line); background: #fff; box-shadow: 0 1px 3px rgba(54,46,35,.04); }
+input[type='text'], input[type='search'], textarea, select { border-color: var(--line-strong); background: #fff; color: var(--ink); }
+input[type='text']:focus, input[type='search']:focus, textarea:focus, select:focus { border-color: var(--positive); box-shadow: 0 0 0 3px rgba(111,179,174,.13); }
+button, .button { min-height: 2.35rem; border-color: var(--ink); border-radius: .625rem; background: var(--ink); color: #fff; }
+button:hover, .button:hover { background: #34312d; }
+.button.secondary, .button.tertiary { border-color: var(--line-strong); background: #fff; color: var(--ink); }
+.button.secondary:hover, .button.tertiary:hover { background: var(--surface-raised); }
+.new-bot-form { max-width: 55rem; margin: 0 auto; }
+.setup-stack { gap: .5rem; }
+.setup-section { border-color: var(--line); border-radius: .75rem; background: #fff; }
+.setup-section.open { border-color: var(--line-strong); }
+button.setup-section-toggle { min-height: 3.5rem; padding: .7rem 1rem; color: var(--ink); }
+button.setup-section-toggle:hover { background: #fbfaf8; }
+.setup-step { width: 1.4rem; height: 1.4rem; border-color: var(--line-strong); color: var(--faint); }
+.setup-step.complete { border: 0; background: var(--positive-soft); color: #4a6b46; }
+.setup-section-copy { display: flex; align-items: baseline; gap: .65rem; }
+.setup-section-copy strong { font-size: .8125rem; }
+.setup-section-copy small { color: var(--muted); font-size: .75rem; }
+.setup-section-panel { padding: 1rem; border-color: var(--line); background: #fbfaf8; }
+.identity-details { border-top: 1px solid var(--line); padding-top: .75rem; }
+.identity-details summary { color: var(--muted); font-size: .75rem; cursor: pointer; }
+.identity-details .compact-field-grid { padding-top: .75rem; }
+.setup-form-actions { border-color: var(--line); }
+.create-bot-button { border-color: var(--signature); background: var(--signature); box-shadow: 0 2px 8px rgba(224,73,141,.25); }
+.create-bot-button:hover { border-color: #ca3d7d; background: #ca3d7d; }
+.color-choice, .shape-choice, .face-choice { border-color: var(--line); background: #fff; color: var(--muted); }
+.color-choice:has(input:checked), .shape-choice:has(input:checked), .face-choice:has(input:checked) { border-color: var(--positive); background: #fbfdfc; box-shadow: 0 0 0 1px var(--positive); color: var(--ink); }
+.swatch { border-color: #fff; }
+.shape-sample { background: #6fb3ae; }
+.face-preview { background: transparent; }
+.app-picker { position: relative; grid-template-columns: 1fr; gap: .75rem; transition: padding 150ms ease; }
+.app-picker.detail-open { padding-right: 20rem; }
+.app-catalog, .selected-apps, .app-detail { border: 0; background: transparent; }
+.app-catalog { order: 2; }
+.app-section-head { min-height: 2.75rem; padding: 0 0 .65rem; border: 0; }
+.app-section-head h2 { font-size: .78125rem; }
+.app-section-head p { display: none; }
+.app-search { width: 12rem; }
+.app-search input { min-height: 2rem; border-radius: 999px; background: #fff; font-size: .75rem; }
+.featured-app-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .45rem; padding: 0; }
+button.app-tile.compact { min-height: 3.25rem; display: flex; justify-content: flex-start; gap: .5rem; padding: .45rem .625rem; border-color: var(--line); border-radius: .65rem; background: #fff; text-align: left; }
+button.app-tile.compact:hover { border-color: var(--line-strong); background: #fbfaf8; }
+button.app-tile.compact.selected { border-color: var(--positive); background: #fbfdfc; box-shadow: inset 0 0 0 1px var(--positive); }
+button.app-tile.compact .integration-mark { width: 1.6rem; height: 1.6rem; flex: none; }
+button.app-tile.compact .integration-mark img { width: 1.05rem; height: 1.05rem; }
+button.app-tile.compact .app-tile-copy { min-width: 0; display: block; }
+button.app-tile.compact .app-tile-copy strong { overflow: hidden; font-size: .6875rem; text-overflow: ellipsis; white-space: nowrap; }
+button.app-tile.compact .app-tile-action { margin-left: auto; color: var(--positive); font-size: .625rem; }
+.app-search-results { grid-template-columns: 1fr; padding: .5rem 0; }
+button.app-tile { border-color: var(--line); background: #fff; color: var(--ink); }
+.selected-apps { order: 1; padding: 0 0 .25rem; border: 0; }
+.selected-apps.empty { display: none; }
+.selected-apps .app-section-head { min-height: 2.25rem; padding-bottom: .45rem; }
+.selected-apps .app-section-head p { display: block; }
+.app-count { background: var(--sidebar); color: var(--muted); }
+.selected-app-list { grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); padding: 0; }
+.selected-app-row { border-color: var(--line); background: #fff; }
+.selected-app-row.active { border-color: var(--positive); box-shadow: none; }
+button.selected-app-open { color: var(--ink); }
+button.selected-app-open:hover { background: #fbfaf8; }
+button.remove-app:hover { background: var(--sidebar); color: var(--ink); }
+.inline-app-detail { position: absolute; top: 0; right: 0; bottom: 0; width: 19rem; margin: 0; overflow: auto; border: 1px solid var(--line); border-radius: .75rem; background: #fff; box-shadow: 0 10px 30px rgba(54,46,35,.08); }
+.inline-app-detail .app-detail-head { grid-template-columns: 2rem minmax(0, 1fr) auto; }
+.inline-app-detail .status-badge { display: none; }
+.app-detail-close { width: 1.75rem; min-height: 1.75rem; padding: 0; border: 0; border-radius: 50%; background: var(--sidebar); color: var(--muted); font-size: 1.1rem; }
+.app-detail-close:hover { background: var(--sidebar-hover); color: var(--ink); }
+.app-detail-head, .app-detail-copy { border-color: var(--line); }
+.permission-levels { display: grid; grid-template-columns: repeat(3, 1fr); gap: .2rem; margin: 0 .75rem .75rem; padding: .2rem; border: 1px solid var(--line); border-radius: .625rem; background: var(--sidebar); }
+.permission-levels button { min-height: 1.8rem; padding: .35rem .25rem; border: 0; border-radius: .45rem; background: transparent; color: var(--muted); font-size: .6875rem; }
+.permission-levels button.active { background: #fff; color: var(--ink); box-shadow: 0 1px 2px rgba(54,46,35,.08); }
+label.choice { border-color: var(--line); background: #fff; }
+label.choice:has(input:checked) { border-color: var(--positive); background: #fbfdfc; box-shadow: none; }
+label.choice:has(input:disabled) { background: #f7f5f1; }
+.effect-badge { background: #f3f1ed; color: var(--muted); }
+.effect-badge.read, .status-badge.good { background: var(--positive-soft); color: #4a6b46; }
+.effect-badge.write { background: #f7efdf; color: #8a6425; }
+.effect-badge.destructive { background: var(--danger-soft); color: var(--danger); }
+.permission-meta { color: var(--muted); }
+.integration-mark { border-color: var(--line); background: #f3f1ed; }
+.conversation { gap: 1.35rem; }
+.message-copy { font-size: .875rem; line-height: 1.55; }
+.message.user .message-copy { background: #eeebe5; }
+.review-card, .result-card { border-color: var(--line); background: #fff; }
+.result-card { padding: 1rem 1.15rem; border: 1px solid var(--line); border-radius: .75rem; }
+.result-card .eyebrow { margin-bottom: .4rem; }
+.result-card h2 { margin-bottom: .5rem; }
+.result-badges { display: flex; flex-wrap: wrap; gap: .35rem; margin-top: .75rem; }
+.status-badge { background: #f3f1ed; color: var(--muted); }
+pre.result { color: var(--ink); font-size: .875rem; line-height: 1.55; }
+.routine-access-disclosure { margin-top: 1rem; padding-top: .75rem; border-top: 1px solid var(--line); }
+.routine-access-disclosure summary { color: var(--muted); font-size: .75rem; cursor: pointer; }
+.routine-created-conversation { flex: 1; align-content: end; padding: 2rem 0; }
+.routine-created-card { padding: 1rem 1.15rem; border: 1px solid var(--line); border-radius: .75rem; background: #fff; }
+.routine-created-card .eyebrow { margin-bottom: .4rem; color: var(--positive); }
+.routine-created-details { display: grid; grid-template-columns: 4rem 1fr; gap: .35rem .75rem; margin: .75rem 0; }
+.routine-created-details dt { color: var(--faint); font-size: .75rem; }
+.routine-created-details dd { margin: 0; font-size: .8125rem; }
+.org-page-head { max-width: 58rem; }
+.organization-layout { display: grid; grid-template-columns: minmax(0, 1fr) 17.5rem; gap: 1.6rem; align-items: start; }
+.integration-options { gap: .625rem; }
+.integration-card { border-color: var(--line); background: #fff; }
+.organization-integration summary { list-style: none; }
+.organization-integration summary::-webkit-details-marker { display: none; }
+.organization-integration .integration-choice { display: grid; grid-template-columns: 2.2rem minmax(0, 1fr) auto auto; padding: .9rem 1.1rem; }
+.organization-integration .integration-choice > span:nth-child(2) { min-width: 0; display: grid; }
+.organization-integration .integration-choice strong { font-size: .875rem; }
+.organization-integration .integration-choice small { overflow: hidden; color: var(--muted); font-size: .75rem; text-overflow: ellipsis; white-space: nowrap; }
+.org-tool-summary { padding: .2rem .55rem; border-radius: 999px; background: var(--sidebar); color: var(--muted); font-size: .6875rem; white-space: nowrap; }
+.disclosure-chevron { color: var(--faint); transform: rotate(0deg); transition: transform 120ms ease; }
+.organization-integration[open] .disclosure-chevron { transform: rotate(90deg); }
+.organization-permission { border-width: 1px 0 0; border-color: #eeebe5; border-radius: 0; background: #fff; }
+.organization-permission > span { min-width: 0; }
+.permission-switch { width: 2.2rem; min-height: 1.3rem; padding: .125rem; justify-content: flex-start; border: 0; border-radius: 999px; background: var(--line-strong); }
+.permission-switch span { width: 1rem; height: 1rem; border-radius: 50%; background: #fff; }
+.permission-switch.on { justify-content: flex-end; background: var(--ink); }
+.integration-footer { display: flex; align-items: center; padding: .6rem 1.1rem; border-top: 1px solid #eeebe5; background: #fbfaf8; color: var(--faint); font-size: .6875rem; }
+.disconnect-label { margin-left: auto; color: var(--danger); }
+.org-policy-note, .catalog-note { color: var(--faint); font-size: .71875rem; line-height: 1.5; }
+.org-policy-note { padding: 0 .25rem; }
+.integration-catalog-sidebar { position: sticky; top: 1.5rem; }
+.integration-catalog-sidebar .section-label { margin: 0 0 .6rem; }
+.org-app-search input { min-height: 2.15rem; border-radius: 999px; font-size: .75rem; }
+.available-app-list { display: grid; gap: .4rem; margin-top: .55rem; }
+.available-app-list a { display: grid; grid-template-columns: 1.65rem minmax(0,1fr) auto; align-items: center; gap: .55rem; padding: .55rem .65rem; border: 1px dashed var(--line-strong); border-radius: .65rem; background: #fff; font-size: .75rem; text-decoration: none; }
+.available-app-list .integration-mark { width: 1.65rem; height: 1.65rem; }
+.available-app-list .integration-mark img { width: 1.05rem; height: 1.05rem; }
+.available-app-list strong { color: var(--positive); font-size: .6875rem; }
+.catalog-note { margin-top: .75rem; }
+.error-summary { border-color: #e7c4bc; background: var(--danger-soft); color: var(--danger); }
+@media (max-width: 1080px) and (min-width: 761px) {
+    .shell, .shell.has-context { grid-template-columns: 13rem minmax(22rem, 1fr); }
+    .context-panel { position: static; grid-column: 2; width: auto; height: auto; border-top: 1px solid var(--line); border-left: 0; }
+    .organization-layout { grid-template-columns: 1fr; }
+    .integration-catalog-sidebar { position: static; }
+}
+@media (max-width: 760px) {
+    .shell, .shell.has-context { grid-template-columns: 1fr; }
+    .sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
+    .has-context main { padding: 0 1rem 1rem; }
+    .featured-app-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .app-picker.detail-open { padding-right: 0; }
+    .inline-app-detail { position: static; width: auto; max-height: 30rem; order: 3; }
+    .selected-apps { padding-left: 0; }
+    .organization-layout { grid-template-columns: 1fr; }
+    .integration-catalog-sidebar { position: static; }
+}
+`;
+
 const serializeClientPage = (value: unknown): string =>
     JSON.stringify(value).replaceAll("<", "\\u003c").replaceAll("\u2028", "\\u2028").replaceAll("\u2029", "\\u2029");
 
@@ -1072,7 +1332,7 @@ const document = (input: {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(input.title)} · OpenBot</title>
-<style>${styles}</style>
+<style>${styles}${studioStyles}</style>
 </head>
 <body><div id="root"><div class="login-shell" aria-busy="true"><p class="muted">Opening OpenBot…</p></div></div>
 <script id="openbot-page" type="application/json">${serializeClientPage(clientPage)}</script>
@@ -1082,7 +1342,7 @@ const document = (input: {
 };
 
 const loginDocument = (): string =>
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · OpenBot</title><style>${styles}</style></head><body><div class="login-shell"><div class="login-card"><span class="brand-mark" aria-hidden="true">OB</span><h1>Sign in</h1><p class="muted">Authentication is not configured for this installation.</p></div></div></body></html>`;
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · OpenBot</title><style>${styles}${studioStyles}</style></head><body><div class="login-shell"><div class="login-card"><span class="brand-mark" aria-hidden="true"></span><h1>Sign in</h1><p class="muted">Authentication is not configured for this installation.</p></div></div></body></html>`;
 
 const renderNewBot = async (
     actor: ControlPlaneActorV1,
@@ -1225,6 +1485,8 @@ export const registerProductProofRoutesV1 = (
         const actor = await requireActor(context.req.raw, dependencies);
         if (actor === null) return context.redirect("/login", 302);
         const bots = await dependencies.repository.listBots(actor.account_id);
+        const firstBot = bots[0];
+        if (firstBot !== undefined) return context.redirect(`/bots/${encodeURIComponent(firstBot.bot_id)}`, 302);
         return context.html(
             document({
                 title: "Bots",
@@ -1239,9 +1501,10 @@ export const registerProductProofRoutesV1 = (
         if (dependencies === undefined) return context.redirect("/login", 302);
         const actor = await requireActor(context.req.raw, dependencies);
         if (actor === null) return context.redirect("/login", 302);
-        const [bots, integrations] = await Promise.all([
+        const [bots, integrations, catalog] = await Promise.all([
             dependencies.repository.listBots(actor.account_id),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listCatalogApps?.() ?? Promise.resolve([]),
         ]);
         if (!validIntegrationCatalog(integrations)) return context.text("Organization catalog unavailable", 409);
         return context.html(
@@ -1254,6 +1517,7 @@ export const registerProductProofRoutesV1 = (
                     csrf_token: actor.csrf_token,
                     organization_name: actor.organization_name,
                     integrations: integrations.map(clientIntegration),
+                    catalog_apps: clientCatalogApps(integrations, catalog),
                     can_manage: actor.role === "owner",
                 },
             })
@@ -1261,7 +1525,7 @@ export const registerProductProofRoutesV1 = (
     });
 
     app.post("/actions/organization-permissions", async context => {
-        if (dependencies === undefined || dependencies.setOrganizationPermissionEnabled === undefined) {
+        if (dependencies === undefined || dependencies.connector.setOrganizationPermissionEnabled === undefined) {
             return unavailable(context);
         }
         const actor = await requireActor(context.req.raw, dependencies);
@@ -1282,13 +1546,13 @@ export const registerProductProofRoutesV1 = (
         ) {
             return context.text("Invalid organization permission", 422);
         }
-        const integrations = await dependencies.listMetorialIntegrations(actor.account_id, actor.user_id);
+        const integrations = await dependencies.connector.listIntegrations(actor.account_id, actor.user_id);
         if (!validIntegrationCatalog(integrations)) return context.text("Organization catalog unavailable", 409);
         const permission = integrations
             .find(integration => integration.integration_id === integrationId)
             ?.permissions.find(candidate => candidate.policy_id === policyId);
         if (permission === undefined) return context.text("Organization permission unavailable", 409);
-        const updated = await dependencies.setOrganizationPermissionEnabled({
+        const updated = await dependencies.connector.setOrganizationPermissionEnabled({
             account_id: actor.account_id,
             user_id: actor.user_id,
             integration_id: integrationId,
@@ -1305,8 +1569,8 @@ export const registerProductProofRoutesV1 = (
         if (actor === null) return context.redirect("/login", 302);
         if (actor.role !== "owner") return context.text("Forbidden", 403);
         const [integrations, catalog] = await Promise.all([
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
-            dependencies.listMetorialCatalogApps?.() ?? Promise.resolve([]),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listCatalogApps?.() ?? Promise.resolve([]),
         ]);
         return context.html(await renderNewBot(actor, dependencies.repository, integrations, catalog));
     });
@@ -1327,8 +1591,8 @@ export const registerProductProofRoutesV1 = (
         const avatarShape = form.get("avatar_shape_id");
         const avatarFace = form.get("avatar_face_id");
         const [integrations, catalog] = await Promise.all([
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
-            dependencies.listMetorialCatalogApps?.() ?? Promise.resolve([]),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listCatalogApps?.() ?? Promise.resolve([]),
         ]);
         const integrationSelections = formIntegrationSelections(form, integrations);
         if (
@@ -1381,15 +1645,20 @@ export const registerProductProofRoutesV1 = (
         const [bot, bots, integrations, routines] = await Promise.all([
             dependencies.repository.getBot(actor.account_id, botId),
             dependencies.repository.listBots(actor.account_id),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
             dependencies.repository.listRoutines(actor.account_id, botId),
         ]);
         if (bot === null) return context.notFound();
         const bindings = selectedIntegrationBindings(bot, integrations);
         if (bindings === null) return context.text("Bot integrations unavailable", 409);
         const currentSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (currentSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (currentSessionIntent === null) return context.text("App connection unavailable", 409);
         const currentPermissions = bindings.flatMap(binding => binding.permissions);
+        const createdRoutineId = context.req.query("routine_created");
+        const createdRoutine =
+            createdRoutineId !== undefined && safeId(createdRoutineId)
+                ? (routines.find(routine => routine.routine_id === createdRoutineId) ?? null)
+                : null;
         return context.html(
             document({
                 title: bot.name,
@@ -1404,6 +1673,14 @@ export const registerProductProofRoutesV1 = (
                         bindings,
                         clientRoutineBindings(routines, bot, currentPermissions, currentSessionIntent)
                     ),
+                    routine_created:
+                        createdRoutine === null
+                            ? null
+                            : {
+                                  name: createdRoutine.name,
+                                  prompt: createdRoutine.prompt,
+                                  schedule: createdRoutine.schedule,
+                              },
                 },
             })
         );
@@ -1424,14 +1701,14 @@ export const registerProductProofRoutesV1 = (
         }
         const [bot, integrations] = await Promise.all([
             dependencies.repository.getBot(actor.account_id, botId),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
         ]);
         const bindings = bot === null ? null : selectedIntegrationBindings(bot, integrations);
         if (bot === null || bindings === null) {
             return context.text("Bot unavailable", 409);
         }
         const metorialSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (metorialSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (metorialSessionIntent === null) return context.text("App connection unavailable", 409);
         const permissionsSnapshot = freezePermissionSnapshot(bindings.flatMap(binding => binding.permissions));
         const metorialAuthoritySnapshot = freezeBotAuthoritySnapshot(bot.integrations);
         const now = (dependencies.now ?? Date.now)();
@@ -1448,6 +1725,101 @@ export const registerProductProofRoutesV1 = (
         return context.redirect(`/run-confirmations/${encodeURIComponent(confirmation.confirmation_id)}`, 303);
     });
 
+    app.post("/actions/chat-messages", async context => {
+        if (dependencies === undefined) return unavailable(context);
+        const actor = await requireActor(context.req.raw, dependencies);
+        if (actor === null) return context.text("Unauthorized", 401);
+        if (actor.role !== "owner") return context.text("Forbidden", 403);
+        if (!validOrigin(context.req.raw)) return context.text("Invalid origin", 403);
+        const form = await context.req.formData();
+        if (!validCsrf(form, actor)) return context.text("Invalid CSRF token", 403);
+        const botId = form.get("bot_id");
+        const message = safeText(form.get("prompt"), MAX_PROMPT_BYTES, true);
+        if (typeof botId !== "string" || !safeId(botId) || message === null) {
+            return context.text("Invalid message", 422);
+        }
+        const [bot, integrations] = await Promise.all([
+            dependencies.repository.getBot(actor.account_id, botId),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
+        ]);
+        const bindings = bot === null ? null : selectedIntegrationBindings(bot, integrations);
+        if (bot === null || bindings === null) return context.text("Bot unavailable", 409);
+        const metorialSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
+        if (metorialSessionIntent === null) return context.text("App connection unavailable", 409);
+        const permissions = bindings.flatMap(binding => binding.permissions);
+        const decision =
+            (await dependencies.chatAgent?.respond({ bot, message, permissions })) ?? ({ kind: "run_task" } as const);
+        const now = (dependencies.now ?? Date.now)();
+        if (decision.kind === "create_routine") {
+            const name = safeText(decision.name, MAX_NAME_BYTES);
+            const prompt = safeText(decision.prompt, MAX_PROMPT_BYTES, true);
+            const schedule = safeText(decision.schedule, MAX_SCHEDULE_BYTES);
+            if (name === null || prompt === null || schedule === null) {
+                return context.text("The routine tool returned invalid fields", 502);
+            }
+            const proposal = await dependencies.repository.createRoutineProposal({
+                account_id: actor.account_id,
+                bot_id: bot.bot_id,
+                name,
+                prompt,
+                schedule,
+                metorial_session_intent: metorialSessionIntent,
+                metorial_authority_snapshot: freezeBotAuthoritySnapshot(bot.integrations),
+                permissions_snapshot: freezePermissionSnapshot(permissions),
+                created_at_ms: now,
+                expires_at_ms: now + CONFIRMATION_LIFETIME_MS,
+            });
+            const routine = await dependencies.repository.saveRoutineProposal({
+                account_id: actor.account_id,
+                proposal_id: proposal.proposal_id,
+                saved_at_ms: now,
+            });
+            if (routine === null) return context.text("Routine conflict", 409);
+            return context.redirect(
+                `/bots/${encodeURIComponent(bot.bot_id)}?routine_created=${encodeURIComponent(routine.routine_id)}`,
+                303
+            );
+        }
+        const confirmation = await dependencies.repository.createConfirmation({
+            account_id: actor.account_id,
+            bot_id: bot.bot_id,
+            prompt: message,
+            metorial_session_intent: metorialSessionIntent,
+            metorial_authority_snapshot: freezeBotAuthoritySnapshot(bot.integrations),
+            permissions_snapshot: freezePermissionSnapshot(permissions),
+            created_at_ms: now,
+            expires_at_ms: now + CONFIRMATION_LIFETIME_MS,
+        });
+        const run = await dependencies.repository.claimConfirmation({
+            account_id: actor.account_id,
+            confirmation_id: confirmation.confirmation_id,
+            claimed_at_ms: now,
+        });
+        if (run === null) return context.text("Run conflict", 409);
+        const execution = await dependencies.taskExecutor.execute({
+            account_id: actor.account_id,
+            user_id: actor.user_id,
+            run_id: run.run_id,
+            bot,
+            prompt: message,
+            permissions,
+            metorial_session_intent: metorialSessionIntent,
+        });
+        const resultText = safeText(execution.result_text, 128 * 1024, true);
+        if (resultText === null) return context.text("Task result unavailable", 502);
+        const completed = await dependencies.repository.completeRun({
+            account_id: actor.account_id,
+            run_id: run.run_id,
+            result_text: resultText,
+            completed_at_ms: (dependencies.now ?? Date.now)(),
+        });
+        if (completed === null) return context.text("Run conflict", 409);
+        return context.redirect(
+            `/bots/${encodeURIComponent(completed.bot_id)}/runs/${encodeURIComponent(completed.run_id)}`,
+            303
+        );
+    });
+
     app.get("/run-confirmations/:confirmationId", async context => {
         if (dependencies === undefined) return context.redirect("/login", 302);
         const actor = await requireActor(context.req.raw, dependencies);
@@ -1459,14 +1831,14 @@ export const registerProductProofRoutesV1 = (
         const [bot, bots, integrations, routines] = await Promise.all([
             dependencies.repository.getBot(actor.account_id, confirmation.bot_id),
             dependencies.repository.listBots(actor.account_id),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
             dependencies.repository.listRoutines(actor.account_id, confirmation.bot_id),
         ]);
         if (bot === null) return context.notFound();
         const bindings = selectedIntegrationBindings(bot, integrations);
         if (bindings === null) return context.text("Bot integrations unavailable", 409);
         const currentSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (currentSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (currentSessionIntent === null) return context.text("App connection unavailable", 409);
         const currentPermissions = bindings.flatMap(binding => binding.permissions);
         const drifted = !authorityMatchesConfirmation(confirmation, bot, currentPermissions, currentSessionIntent);
         const permissions = confirmation.permissions_snapshot;
@@ -1501,7 +1873,7 @@ export const registerProductProofRoutesV1 = (
                         : expired
                           ? "This confirmation expired."
                           : drifted
-                            ? "Metorial access changed after review. Return to chat and review again."
+                            ? "App access changed. Return to chat and try again."
                             : "This confirmation already started a run.",
                 },
             })
@@ -1525,12 +1897,12 @@ export const registerProductProofRoutesV1 = (
         }
         const [bot, integrations] = await Promise.all([
             dependencies.repository.getBot(actor.account_id, botId),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
         ]);
         const bindings = bot === null ? null : selectedIntegrationBindings(bot, integrations);
         if (bot === null || bindings === null) return context.text("Bot unavailable", 409);
         const metorialSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (metorialSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (metorialSessionIntent === null) return context.text("App connection unavailable", 409);
         const now = (dependencies.now ?? Date.now)();
         const proposal = await dependencies.repository.createRoutineProposal({
             account_id: actor.account_id,
@@ -1558,14 +1930,14 @@ export const registerProductProofRoutesV1 = (
         const [bot, bots, integrations, routines] = await Promise.all([
             dependencies.repository.getBot(actor.account_id, proposal.bot_id),
             dependencies.repository.listBots(actor.account_id),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
             dependencies.repository.listRoutines(actor.account_id, proposal.bot_id),
         ]);
         if (bot === null) return context.notFound();
         const bindings = selectedIntegrationBindings(bot, integrations);
         if (bindings === null) return context.text("Bot integrations unavailable", 409);
         const currentSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (currentSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (currentSessionIntent === null) return context.text("App connection unavailable", 409);
         const currentPermissions = bindings.flatMap(binding => binding.permissions);
         const drifted = !authorityMatchesSnapshot(proposal, bot, currentPermissions, currentSessionIntent);
         const expired = proposal.expires_at_ms <= (dependencies.now ?? Date.now)();
@@ -1595,7 +1967,7 @@ export const registerProductProofRoutesV1 = (
                         : expired
                           ? "This routine draft expired."
                           : drifted
-                            ? "Metorial access changed after review. Return to chat and create the draft again."
+                            ? "App access changed. Return to chat and try again."
                             : "This routine draft was already saved.",
                 },
             })
@@ -1619,16 +1991,16 @@ export const registerProductProofRoutesV1 = (
         }
         const [bot, integrations] = await Promise.all([
             dependencies.repository.getBot(actor.account_id, proposal.bot_id),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
         ]);
         if (bot === null) return context.text("Bot unavailable", 409);
         const bindings = selectedIntegrationBindings(bot, integrations);
         if (bindings === null) return context.text("Bot integrations unavailable", 409);
         const currentSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (currentSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (currentSessionIntent === null) return context.text("App connection unavailable", 409);
         const currentPermissions = bindings.flatMap(binding => binding.permissions);
         if (!authorityMatchesSnapshot(proposal, bot, currentPermissions, currentSessionIntent)) {
-            return context.text("Metorial access changed after review", 409);
+            return context.text("App access changed", 409);
         }
         const routine = await dependencies.repository.saveRoutineProposal({
             account_id: actor.account_id,
@@ -1650,14 +2022,14 @@ export const registerProductProofRoutesV1 = (
             dependencies.repository.getBot(actor.account_id, botId),
             dependencies.repository.getRoutine(actor.account_id, botId, routineId),
             dependencies.repository.listBots(actor.account_id),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
             dependencies.repository.listRoutines(actor.account_id, botId),
         ]);
         if (bot === null || routine === null) return context.notFound();
         const bindings = selectedIntegrationBindings(bot, integrations);
         if (bindings === null) return context.text("Bot integrations unavailable", 409);
         const currentSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (currentSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (currentSessionIntent === null) return context.text("App connection unavailable", 409);
         const currentPermissions = bindings.flatMap(binding => binding.permissions);
         const routineBindings = clientRoutineBindings(routines, bot, currentPermissions, currentSessionIntent);
         const blocked = !authorityMatchesSnapshot(routine, bot, currentPermissions, currentSessionIntent);
@@ -1712,13 +2084,13 @@ export const registerProductProofRoutesV1 = (
         const [bot, routine, integrations] = await Promise.all([
             dependencies.repository.getBot(actor.account_id, botId),
             dependencies.repository.getRoutine(actor.account_id, botId, routineId),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
         ]);
         if (bot === null || routine === null) return context.text("Routine unavailable", 409);
         const bindings = selectedIntegrationBindings(bot, integrations);
         if (bindings === null) return context.text("Bot integrations unavailable", 409);
         const currentSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (currentSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (currentSessionIntent === null) return context.text("App connection unavailable", 409);
         const updated = await dependencies.repository.updateRoutine({
             account_id: actor.account_id,
             bot_id: bot.bot_id,
@@ -1753,16 +2125,16 @@ export const registerProductProofRoutesV1 = (
         }
         const [bot, integrations] = await Promise.all([
             dependencies.repository.getBot(actor.account_id, confirmation.bot_id),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
         ]);
         if (bot === null) return context.text("Bot unavailable", 409);
         const bindings = selectedIntegrationBindings(bot, integrations);
         if (bindings === null) return context.text("Bot integrations unavailable", 409);
         const metorialSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (metorialSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (metorialSessionIntent === null) return context.text("App connection unavailable", 409);
         const permissions = bindings.flatMap(binding => binding.permissions);
         if (!authorityMatchesConfirmation(confirmation, bot, permissions, metorialSessionIntent)) {
-            return context.text("Metorial access changed after review", 409);
+            return context.text("App access changed", 409);
         }
         const run = await dependencies.repository.claimConfirmation({
             account_id: actor.account_id,
@@ -1805,14 +2177,14 @@ export const registerProductProofRoutesV1 = (
             dependencies.repository.getBot(actor.account_id, botId),
             dependencies.repository.getRun(actor.account_id, botId, runId),
             dependencies.repository.listBots(actor.account_id),
-            dependencies.listMetorialIntegrations(actor.account_id, actor.user_id),
+            dependencies.connector.listIntegrations(actor.account_id, actor.user_id),
             dependencies.repository.listRoutines(actor.account_id, botId),
         ]);
         if (bot === null || run === null) return context.notFound();
         const bindings = selectedIntegrationBindings(bot, integrations);
         if (bindings === null) return context.text("Bot integrations unavailable", 409);
         const currentSessionIntent = compileMetorialSessionIntent(dependencies, bindings);
-        if (currentSessionIntent === null) return context.text("Metorial configuration unavailable", 409);
+        if (currentSessionIntent === null) return context.text("App connection unavailable", 409);
         const currentPermissions = bindings.flatMap(binding => binding.permissions);
         const completed = run.execution_state === "completed" && run.result_text !== null;
         return context.html(
@@ -1823,6 +2195,7 @@ export const registerProductProofRoutesV1 = (
                 selectedBotId: bot.bot_id,
                 view: {
                     kind: "run_result",
+                    csrf_token: actor.csrf_token,
                     bot: clientBotDetail(
                         bot,
                         bindings,
