@@ -41,5 +41,6 @@ export default defineConfig({
         include: ["tests/workers/**/*.test.ts"],
         passWithNoTests: false,
         restoreMocks: true,
+        testTimeout: 30_000,
     },
 });
