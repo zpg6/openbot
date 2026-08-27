@@ -3,10 +3,11 @@
 interface __BaseEnv_Env {
 	CONTROL_DB_FRESH: D1Database;
 	ORCHESTRATOR: Fetcher /* openbot-orchestrator-preview */;
+	CAPABILITY_GATEWAY: Fetcher /* openbot-capability-gateway-preview */;
 }
 declare namespace Cloudflare {
 	interface GlobalProps {
-		mainModule: typeof import("./entry.d1");
+		mainModule: typeof import("./src/entry.d1");
 	}
 	interface Env extends __BaseEnv_Env {}
 }

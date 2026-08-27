@@ -7,7 +7,7 @@ import {
     createDestroyRequestFixtureV1,
     createExecuteJavaScriptRequestFixtureV1,
     createKillRequestFixtureV1,
-} from "../../packages/sandbox-protocol/src/test-fixtures.ts";
+} from "../../packages/sandbox-protocol/tests/test-fixtures.ts";
 import { lifecyclePostCallOutcomeUnknownV1 } from "../../apps/sandbox-runner/src/services.ts";
 
 interface SandboxRunnerExports {

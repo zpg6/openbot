@@ -1,4 +1,4 @@
-import { createD1ReadinessRepository } from "@openbot/db-d1";
+import { checkD1Readiness } from "@openbot/db-d1";
 import { Hono } from "hono";
 
 import { registerProductProofRoutesV1, type ControlPlaneProductProofDependenciesV1 } from "./product-proof.js";
@@ -6,11 +6,17 @@ import { registerProductProofRoutesV1, type ControlPlaneProductProofDependencies
 export interface ControlPlaneBindings {
     readonly CONTROL_DB_FRESH: D1Database;
     readonly ORCHESTRATOR: Fetcher;
+    readonly CAPABILITY_GATEWAY: Fetcher;
     readonly ASSETS: Fetcher;
 }
 
+export interface ControlPlaneRuntimeV1 {
+    readonly authHandler?: ((request: Request) => Promise<Response>) | undefined;
+}
+
 export function createControlPlane(
-    productProofDependencies?: ControlPlaneProductProofDependenciesV1
+    productProofDependencies?: ControlPlaneProductProofDependenciesV1,
+    runtime: ControlPlaneRuntimeV1 = {}
 ): Hono<{ Bindings: ControlPlaneBindings }> {
     const app = new Hono<{ Bindings: ControlPlaneBindings }>();
 
@@ -28,9 +34,13 @@ export function createControlPlane(
 
     app.get("/assets/*", context => context.env.ASSETS.fetch(context.req.raw));
 
+    app.on(["GET", "POST"], ["/api/auth/*"], async context => {
+        if (runtime.authHandler === undefined) return context.text("Authentication unavailable", 503);
+        return await runtime.authHandler(context.req.raw);
+    });
+
     app.get("/healthz", async context => {
-        const readiness = createD1ReadinessRepository(context.env.CONTROL_DB_FRESH);
-        await readiness.check();
+        await checkD1Readiness(context.env.CONTROL_DB_FRESH);
         return context.json({ profile: "d1", status: "ok" as const });
     });
 

@@ -525,9 +525,9 @@ export const readAndCheckCloudflareWorkerApiCanaryFixture = async () => {
             "vitest run --config ../../vitest.base-layer.e2e.config.ts" ||
         operatorManifest.scripts?.["bench:base-layer"] !==
             "OPENBOT_BASE_E2E_REPORT=1 vitest run --config ../../vitest.base-layer.e2e.config.ts --reporter=verbose" ||
-        !unitConfig.includes('exclude: [...configDefaults.exclude, "packages/**/*.e2e.test.ts"]') ||
+        !unitConfig.includes('exclude: [...configDefaults.exclude, "packages/*/tests/**/*.e2e.test.ts"]') ||
         !baseE2EConfig.includes(
-            'include: ["packages/d1-probe-operator/src/cloudflare-worker-canary-base.e2e.test.ts"]'
+            'include: ["packages/d1-probe-operator/tests/cloudflare-worker-canary-base.e2e.test.ts"]'
         ) ||
         !baseE2EConfig.includes("fileParallelism: false") ||
         !baseE2EConfig.includes("maxWorkers: 1") ||

@@ -5,5 +5,8 @@
     "type": "module",
     "scripts": {
         "build": "wrangler deploy --dry-run --outdir ../../.build/workers/orchestrator --config wrangler.d1.jsonc --env preview"
+    },
+    "dependencies": {
+        "@openbot/contracts": "workspace:*"
     }
 }

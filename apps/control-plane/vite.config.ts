@@ -9,7 +9,7 @@ export default defineConfig({
         outDir: "../../.build/client/control-plane",
         sourcemap: true,
         lib: {
-            entry: "client/main.tsx",
+            entry: "src/client/main.tsx",
             formats: ["es"],
             fileName: () => "openbot-client.js",
         },

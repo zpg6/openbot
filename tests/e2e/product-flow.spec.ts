@@ -55,7 +55,7 @@ test("an owner creates a Bot, selects permission, runs a task, and reads the res
     await expect(page.getByRole("heading", { name: "Popular apps" })).toBeVisible();
     const appSearch = page.getByLabel("Find an app");
     await appSearch.fill("1password");
-    await expect(page.getByRole("button", { name: "Connect 1password" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Connect 1 Password" })).toBeVisible();
     await appSearch.fill("");
     await expect(page.getByRole("button", { name: "Add Linear" })).toBeVisible();
     await expect(page.getByRole("button", { name: "Add Slack" })).toBeVisible();

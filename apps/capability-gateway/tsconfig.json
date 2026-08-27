@@ -5,5 +5,5 @@
         "rootDir": ".",
         "types": ["@cloudflare/workers-types"]
     },
-    "include": ["entry.d1.ts"]
+    "include": ["src/**/*.ts"]
 }

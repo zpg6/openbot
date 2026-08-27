@@ -1,0 +1,38 @@
+{
+    "extends": "./tsconfig.base.json",
+    "compilerOptions": {
+        "composite": true,
+        "lib": ["ES2024", "DOM", "DOM.Iterable"],
+        "outDir": "./.build/types/tests/packages",
+        "rootDir": ".",
+        "types": ["node", "vitest"]
+    },
+    "include": [
+        "packages/contracts/src/**/*.ts",
+        "packages/contracts/tests/**/*.ts",
+        "packages/d1-probe-driver/src/**/*.ts",
+        "packages/d1-probe-driver/tests/**/*.ts",
+        "packages/d1-probe-operator/src/**/*.ts",
+        "packages/d1-probe-operator/tests/**/*.ts",
+        "packages/d1-probe-rpc/src/**/*.ts",
+        "packages/d1-probe-rpc/tests/**/*.ts",
+        "packages/domain/src/**/*.ts",
+        "packages/domain/tests/**/*.ts",
+        "packages/gate-attestation/src/**/*.ts",
+        "packages/gate-attestation/tests/**/*.ts",
+        "packages/gate-evidence/src/**/*.ts",
+        "packages/gate-evidence/tests/**/*.ts",
+        "packages/gate-signer/src/**/*.ts",
+        "packages/gate-signer/tests/**/*.ts",
+        "packages/sandbox-protocol/src/**/*.ts",
+        "packages/sandbox-protocol/tests/**/*.ts"
+    ],
+    "exclude": ["packages/d1-probe-operator/tests/**/*.e2e.test.ts"],
+    "references": [
+        { "path": "./packages/contracts" },
+        { "path": "./packages/d1-probe-rpc" },
+        { "path": "./packages/gate-attestation" },
+        { "path": "./packages/gate-evidence" },
+        { "path": "./packages/sandbox-protocol" }
+    ]
+}

@@ -93,7 +93,7 @@ Every run writes seven full-page screenshots and `openbot-product-flow.webm` und
 
 Authentication, storage, and task execution are bounded local substitutions; this command is not provider, model, production-database, or deployment evidence. On macOS it uses installed Google Chrome when available. Elsewhere, install Playwright Chromium or set `OPENBOT_E2E_CHROME_PATH` to a compatible browser executable.
 
-The pinned Metorial provider/type and theSVG icon catalog generator is documented in [docs/metorial-provider-catalog.md](docs/metorial-provider-catalog.md). It requires a server-side Metorial key and a reviewed theSVG commit SHA; generated provider metadata never grants runtime access.
+The [Metorial catalog generator](docs/metorial-provider-catalog.md) builds a checked-in catalog from the pinned official integration source, Metorial's published current provider versions, and a reviewed top-20 theSVG icon manifest. The remaining published apps stay searchable. A server-side Metorial key is required only for the optional environment-specific SDK cross-check. Generated metadata never grants runtime access.
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. Security reports belong in the private channel described in [SECURITY.md](SECURITY.md).
 

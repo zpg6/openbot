@@ -5,6 +5,6 @@
         "rootDir": ".",
         "types": ["@cloudflare/workers-types"]
     },
-    "include": ["entry.ts", "src/**/*.ts"],
+    "include": ["src/**/*.ts"],
     "references": [{ "path": "../../packages/sandbox-protocol" }]
 }

@@ -1,12 +1,12 @@
 {
     "$schema": "../../node_modules/wrangler/config-schema.json",
     "name": "openbot-control-plane",
-    "main": "entry.d1.ts",
+    "main": "src/entry.d1.ts",
     "compatibility_date": "2026-08-22",
     "compatibility_flags": ["nodejs_compat"],
     "preview_urls": false,
     "workers_dev": false,
-    "observability": { "enabled": false },
+    "observability": { "enabled": true },
     "assets": {
         "binding": "ASSETS",
         "directory": "../../.build/client/control-plane",
@@ -26,6 +26,10 @@
                     "binding": "ORCHESTRATOR",
                     "service": "openbot-orchestrator-preview",
                 },
+                {
+                    "binding": "CAPABILITY_GATEWAY",
+                    "service": "openbot-capability-gateway-preview",
+                },
             ],
         },
         "production": {
@@ -41,6 +45,10 @@
                 {
                     "binding": "ORCHESTRATOR",
                     "service": "openbot-orchestrator-production",
+                },
+                {
+                    "binding": "CAPABILITY_GATEWAY",
+                    "service": "openbot-capability-gateway-production",
                 },
             ],
         },

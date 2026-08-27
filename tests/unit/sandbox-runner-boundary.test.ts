@@ -29,7 +29,7 @@ describe("sandbox runner authority boundary", () => {
     });
 
     it("keeps the pre-adoption shell free of a Sandbox SDK, database, or vendor client", async () => {
-        const entrySource = await readFile(new URL("entry.ts", appUrl), "utf8");
+        const entrySource = await readFile(new URL("src/entry.ts", appUrl), "utf8");
         const serviceSource = await readFile(new URL("src/services.ts", appUrl), "utf8");
         expect(`${entrySource}\n${serviceSource}`).not.toMatch(/@cloudflare\/sandbox|drizzle|metorial|openrouter/iu);
         expect(serviceSource).not.toMatch(/fetch\s*\(/iu);

@@ -27,6 +27,7 @@ export interface OpenBotAuthFactoryInputV1 {
 
 export interface OpenBotAuthV1 {
     readonly handler: (request: Request) => Promise<Response>;
+    readonly api: ReturnType<typeof betterAuth>["api"];
     readonly options: BetterAuthOptions;
 }
 

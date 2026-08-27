@@ -196,13 +196,13 @@ describe("deployed D1 probe private RPC boundary", () => {
             entrypoint: "D1ProbeSinkService",
         });
         expect(parsed[2]?.services?.[0]).toEqual(parsed[1]?.services?.[0]);
-        expect(parsed.map(config => config.main)).toEqual(["entry.ts", "entry.a.ts", "entry.b.ts"]);
+        expect(parsed.map(config => config.main)).toEqual(["src/entry.ts", "src/entry.a.ts", "src/entry.b.ts"]);
 
         const [sinkEntry, writerAEntry, writerBEntry, sinkRecord, sinkReadback, writerForward, writerHttp] =
             await Promise.all([
-                readFile(new URL("../../apps/d1-probe-sink/entry.ts", import.meta.url), "utf8"),
-                readFile(new URL("../../apps/d1-probe-writer/entry.a.ts", import.meta.url), "utf8"),
-                readFile(new URL("../../apps/d1-probe-writer/entry.b.ts", import.meta.url), "utf8"),
+                readFile(new URL("../../apps/d1-probe-sink/src/entry.ts", import.meta.url), "utf8"),
+                readFile(new URL("../../apps/d1-probe-writer/src/entry.a.ts", import.meta.url), "utf8"),
+                readFile(new URL("../../apps/d1-probe-writer/src/entry.b.ts", import.meta.url), "utf8"),
                 readFile(new URL("../../apps/d1-probe-sink/src/record.ts", import.meta.url), "utf8"),
                 readFile(new URL("../../apps/d1-probe-sink/src/readback.ts", import.meta.url), "utf8"),
                 readFile(new URL("../../apps/d1-probe-writer/src/forward.ts", import.meta.url), "utf8"),

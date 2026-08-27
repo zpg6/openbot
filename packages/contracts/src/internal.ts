@@ -7,3 +7,4 @@ export * from "./limits.js";
 export * from "./manifest-extensions.js";
 export * from "./primitives.js";
 export * from "./states.js";
+export * from "./execution.js";

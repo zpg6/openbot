@@ -176,11 +176,15 @@ export const safeSvg = bytes => {
     if (!(bytes instanceof Uint8Array)) throw new Error("integration icon must be bytes");
     if (bytes.byteLength > MAX_ICON_BYTES) throw new Error("integration icon exceeded 64 KiB");
     const svg = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    const withoutLocalPaintReferences = svg.replaceAll(
+        /url\(\s*(["']?)#[A-Za-z_][A-Za-z0-9_.:-]*\1\s*\)/gu,
+        "local-fragment"
+    );
     if (
         !/^\s*<svg\b/iu.test(svg) ||
         !/\bviewBox\s*=\s*["'][^"']+["']/iu.test(svg) ||
         /<!DOCTYPE|<!ENTITY|<\/?(?:script|foreignObject|iframe|object|embed|image|use|style|animate|set|a)\b|\bon[a-z]+\s*=|\b(?:href|src)\s*=|javascript:|data:|url\s*\(/iu.test(
-            svg
+            withoutLocalPaintReferences
         )
     ) {
         throw new Error("integration icon failed the static SVG policy");

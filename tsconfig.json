@@ -20,6 +20,8 @@
         { "path": "./apps/runtime" },
         { "path": "./apps/sandbox-runner" },
         { "path": "./tsconfig.tests.node.json" },
+        { "path": "./tsconfig.tests.apps.json" },
+        { "path": "./tsconfig.tests.packages.json" },
         { "path": "./tsconfig.tests.worker.json" },
         { "path": "./tsconfig.tests.e2e.json" }
     ]

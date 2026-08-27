@@ -26,3 +26,26 @@ jobs:
               env:
                   WRANGLER_LOG_PATH: .wrangler/logs/ci-workers.log
                   WRANGLER_SEND_METRICS: "false"
+
+    browser-proof:
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+            - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+              with:
+                  node-version-file: .node-version
+            - run: corepack enable
+            - run: corepack prepare pnpm@11.22.0 --activate
+            - run: pnpm install --frozen-lockfile
+            - run: pnpm exec playwright install --with-deps chromium
+            - run: pnpm test:app:e2e
+            - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+              if: always()
+              with:
+                  name: openbot-browser-proof
+                  path: |
+                      test-results/app-e2e/walkthrough
+                      playwright-report
+                  if-no-files-found: error
+                  retention-days: 14

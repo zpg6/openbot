@@ -80,6 +80,10 @@ export interface ProductProofMetorialCatalogAppV1 {
     readonly description: string;
     readonly categories: readonly string[];
     readonly icon_url: string | null;
+    readonly featured_rank: number | null;
+    readonly icon_data_uri: string | null;
+    readonly provider_id: string | null;
+    readonly provider_version_id: string | null;
 }
 
 export interface ProductProofBotPermissionPinV1 {
@@ -150,9 +154,10 @@ export interface ProductProofRunV1 {
     readonly confirmation_id: string;
     readonly prompt: string;
     readonly result_text: string | null;
-    readonly execution_state: "running" | "completed";
-    readonly cleanup_state: "not_required";
-    readonly evidence_state: "synthetic_test_only";
+    readonly execution_state: "running" | "completed" | "failed";
+    readonly cleanup_state: "not_required" | "completed";
+    readonly evidence_state: "synthetic_test_only" | "metorial_verified";
+    readonly metorial_tool_call_count: number;
     readonly created_at_ms: number;
     readonly completed_at_ms: number | null;
 }
@@ -223,6 +228,14 @@ export interface ProductProofRepositoryV1 {
         readonly account_id: string;
         readonly run_id: string;
         readonly result_text: string;
+        readonly cleanup_state: ProductProofRunV1["cleanup_state"];
+        readonly evidence_state: ProductProofRunV1["evidence_state"];
+        readonly metorial_tool_call_count: number;
+        readonly completed_at_ms: number;
+    }): Promise<ProductProofRunV1 | null>;
+    failRun?(input: {
+        readonly account_id: string;
+        readonly run_id: string;
         readonly completed_at_ms: number;
     }): Promise<ProductProofRunV1 | null>;
     getRun(accountId: string, botId: string, runId: string): Promise<ProductProofRunV1 | null>;
@@ -270,7 +283,12 @@ export interface ProductProofTaskExecutorV1 {
         readonly prompt: string;
         readonly permissions: readonly ProductProofPermissionV1[];
         readonly metorial_session_intent: ProductProofMetorialSessionIntentV1;
-    }): Promise<{ readonly result_text: string }>;
+    }): Promise<{
+        readonly result_text: string;
+        readonly cleanup_state?: ProductProofRunV1["cleanup_state"];
+        readonly evidence_state?: ProductProofRunV1["evidence_state"];
+        readonly metorial_tool_call_count?: number;
+    }>;
 }
 
 export type ProductProofChatAgentDecisionV1 =
@@ -296,6 +314,16 @@ export interface ProductProofConnectorPluginV1 {
     readonly session_serialization_identity: string;
     listIntegrations(accountId: string, userId: string): Promise<readonly ProductProofMetorialIntegrationV1[]>;
     listCatalogApps?(): Promise<readonly ProductProofMetorialCatalogAppV1[]>;
+    beginIntegrationConnection?(input: {
+        readonly account_id: string;
+        readonly user_id: string;
+        readonly app: ProductProofMetorialCatalogAppV1;
+    }): Promise<string | null>;
+    completeIntegrationConnection?(input: {
+        readonly account_id: string;
+        readonly user_id: string;
+        readonly flow_id: string;
+    }): Promise<boolean>;
     setOrganizationPermissionEnabled?(input: {
         readonly account_id: string;
         readonly user_id: string;
@@ -305,12 +333,28 @@ export interface ProductProofConnectorPluginV1 {
     }): Promise<boolean>;
 }
 
+export interface ProductProofIdentityV1 {
+    resolveUser(request: Request): Promise<{
+        readonly user_id: string;
+        readonly display_name: string;
+        readonly email: string;
+        readonly csrf_token: string;
+    } | null>;
+    requestMagicLink(input: { readonly request: Request; readonly email: string }): Promise<boolean>;
+    createOrganization(input: {
+        readonly request: Request;
+        readonly name: string;
+        readonly slug: string;
+    }): Promise<boolean>;
+}
+
 export interface ControlPlaneProductProofDependenciesV1 {
     readonly resolveActor: (request: Request) => Promise<ControlPlaneActorV1 | null>;
     readonly connector: ProductProofConnectorPluginV1;
     readonly repository: ProductProofRepositoryV1;
     readonly taskExecutor: ProductProofTaskExecutorV1;
     readonly chatAgent?: ProductProofChatAgentV1 | undefined;
+    readonly identity?: ProductProofIdentityV1 | undefined;
     readonly now?: (() => number) | undefined;
 }
 
@@ -450,7 +494,7 @@ const validIntegrationCatalogEntry = (integration: ProductProofMetorialIntegrati
                 permission.integration_id !== integration.integration_id ||
                 !safeId(permission.policy_id) ||
                 !safeCatalogDisplayText(permission.display_name, MAX_NAME_BYTES) ||
-                !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,254}$/u.test(permission.tool_key) ||
+                !safeConfiguredMetorialIdentity(permission.tool_key) ||
                 !safeCatalogDisplayText(permission.consequence_summary, MAX_DESCRIPTION_BYTES) ||
                 !safeCatalogDisplayText(permission.resource_scope_summary, MAX_DESCRIPTION_BYTES) ||
                 !safeId(permission.policy_revision) ||
@@ -1101,8 +1145,8 @@ button.app-tile.compact:hover { border-color: var(--line-strong); background: #f
 button.app-tile.compact.selected { border-color: var(--positive); background: #fbfdfc; box-shadow: inset 0 0 0 1px var(--positive); }
 button.app-tile.compact .integration-mark { width: 1.6rem; height: 1.6rem; flex: none; }
 button.app-tile.compact .integration-mark img { width: 1.05rem; height: 1.05rem; }
-button.app-tile.compact .app-tile-copy { min-width: 0; display: block; }
-button.app-tile.compact .app-tile-copy strong { overflow: hidden; font-size: .6875rem; text-overflow: ellipsis; white-space: nowrap; }
+button.app-tile.compact .app-tile-copy { min-width: 0; flex: 1 1 auto; display: block; }
+button.app-tile.compact .app-tile-copy strong { display: block; max-width: 100%; overflow: hidden; font-size: .6875rem; text-overflow: ellipsis; white-space: nowrap; }
 button.app-tile.compact .app-tile-action { margin-left: auto; color: var(--positive); font-size: .625rem; }
 .app-search-results { grid-template-columns: 1fr; padding: .5rem 0; }
 button.app-tile { border-color: var(--line); background: #fff; color: var(--ink); }
@@ -1179,7 +1223,8 @@ pre.result { color: var(--ink); font-size: .875rem; line-height: 1.55; }
 .integration-catalog-sidebar .section-label { margin: 0 0 .6rem; }
 .org-app-search input { min-height: 2.15rem; border-radius: 999px; font-size: .75rem; }
 .available-app-list { display: grid; gap: .4rem; margin-top: .55rem; }
-.available-app-list a { display: grid; grid-template-columns: 1.65rem minmax(0,1fr) auto; align-items: center; gap: .55rem; padding: .55rem .65rem; border: 1px dashed var(--line-strong); border-radius: .65rem; background: #fff; font-size: .75rem; text-decoration: none; }
+.available-app-list button { width: 100%; display: grid; grid-template-columns: 1.65rem minmax(0,1fr) auto; align-items: center; gap: .55rem; padding: .55rem .65rem; border: 1px dashed var(--line-strong); border-radius: .65rem; background: #fff; color: var(--ink); font: inherit; font-size: .75rem; text-align: left; }
+.available-app-list button:hover { border-style: solid; background: var(--surface-raised); }
 .available-app-list .integration-mark { width: 1.65rem; height: 1.65rem; }
 .available-app-list .integration-mark img { width: 1.05rem; height: 1.05rem; }
 .available-app-list strong { color: var(--positive); font-size: .6875rem; }
@@ -1224,6 +1269,32 @@ const safeIntegrationIconDataUri = (value: string | null | undefined): string | 
         ? value
         : null;
 
+const safeMetorialCatalogIconUrl = (value: string | null): string | null => {
+    if (value === null || value.length > 4_096) return null;
+    let parsed: URL;
+    try {
+        parsed = new URL(value);
+    } catch {
+        return null;
+    }
+    if (
+        parsed.protocol !== "https:" ||
+        ![
+            "avatar-cdn.metorial.com",
+            "camo.metorial-cdn.com",
+            "cdn.metorial.com",
+            "provider-logos.metorial-cdn.com",
+        ].includes(parsed.hostname) ||
+        parsed.username !== "" ||
+        parsed.password !== "" ||
+        parsed.port !== "" ||
+        parsed.hash !== ""
+    ) {
+        return null;
+    }
+    return parsed.toString();
+};
+
 const clientIntegration = (integration: ProductProofMetorialIntegrationV1): OpenBotClientIntegrationV1 => ({
     integration_id: integration.integration_id,
     provider_identifier: integration.provider_identifier,
@@ -1248,6 +1319,10 @@ const clientCatalogApps = (
         description: integration.description,
         categories: [],
         icon_url: null,
+        featured_rank: null,
+        icon_data_uri: safeIntegrationIconDataUri(integration.icon_data_uri),
+        provider_id: null,
+        provider_version_id: null,
     }));
     const catalogIds = new Set<string>();
     return (catalog.length === 0 ? fallbackCatalog : catalog).flatMap(entry => {
@@ -1258,13 +1333,24 @@ const clientCatalogApps = (
             !safeCatalogDisplayText(entry.description, 2_048) ||
             entry.categories.length > 32 ||
             !entry.categories.every(category => /^[a-z0-9][a-z0-9-]{0,127}$/u.test(category)) ||
-            (entry.icon_url !== null &&
-                !/^https:\/\/provider-logos\.metorial-cdn\.com\/[A-Za-z0-9%._-]+$/u.test(entry.icon_url))
+            (entry.featured_rank !== null &&
+                (!Number.isInteger(entry.featured_rank) || entry.featured_rank < 0 || entry.featured_rank >= 20)) ||
+            (entry.provider_id !== null && !/^pro_[A-Za-z0-9]+$/u.test(entry.provider_id)) ||
+            (entry.provider_version_id !== null && !/^prv_[A-Za-z0-9]+$/u.test(entry.provider_version_id)) ||
+            (entry.icon_url !== null && safeMetorialCatalogIconUrl(entry.icon_url) === null) ||
+            (entry.icon_data_uri !== null && safeIntegrationIconDataUri(entry.icon_data_uri) === null)
         ) {
             return [];
         }
         catalogIds.add(entry.identifier);
-        return [{ ...entry, connected_integration_id: connectedByIdentifier.get(entry.identifier) ?? null }];
+        return [
+            {
+                ...entry,
+                icon_url: safeMetorialCatalogIconUrl(entry.icon_url),
+                icon_data_uri: safeIntegrationIconDataUri(entry.icon_data_uri),
+                connected_integration_id: connectedByIdentifier.get(entry.identifier) ?? null,
+            },
+        ];
     });
 };
 
@@ -1341,8 +1427,23 @@ const document = (input: {
 </html>`;
 };
 
-const loginDocument = (): string =>
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · OpenBot</title><style>${styles}${studioStyles}</style></head><body><div class="login-shell"><div class="login-card"><span class="brand-mark" aria-hidden="true"></span><h1>Sign in</h1><p class="muted">Authentication is not configured for this installation.</p></div></div></body></html>`;
+const loginDocument = (configured: boolean, sent: boolean): string =>
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · OpenBot</title><style>${styles}${studioStyles}</style></head><body><div class="login-shell"><div class="login-card"><span class="brand-mark" aria-hidden="true"></span><h1>Sign in</h1>${
+        configured
+            ? sent
+                ? '<p>Check your email for a secure sign-in link.</p><p class="muted">You can close this tab after the message arrives.</p>'
+                : '<p class="muted">We will email you a secure sign-in link.</p><form method="post" action="/actions/auth/magic-link"><label>Email<input type="email" name="email" autocomplete="email" required></label><button type="submit">Continue</button></form>'
+            : '<p class="muted">Authentication is not configured for this installation.</p>'
+    }</div></div></body></html>`;
+
+const onboardingDocument = (input: {
+    readonly displayName: string;
+    readonly csrfToken: string;
+    readonly error: string | null;
+}): string =>
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Create organization · OpenBot</title><style>${styles}${studioStyles}</style></head><body><div class="login-shell"><div class="login-card"><span class="brand-mark" aria-hidden="true"></span><p class="eyebrow">Welcome, ${escapeHtml(input.displayName)}</p><h1>Create your organization</h1><p class="muted">Apps, permissions, bots, and routines belong to an organization.</p>${
+        input.error === null ? "" : `<div class="error-summary" role="alert">${escapeHtml(input.error)}</div>`
+    }<form method="post" action="/actions/organizations"><input type="hidden" name="_csrf" value="${escapeHtml(input.csrfToken)}"><label>Organization name<input type="text" name="name" maxlength="128" required></label><label>Organization URL<input type="text" name="slug" maxlength="64" pattern="[a-z0-9][a-z0-9-]*" placeholder="acme" required></label><button type="submit">Create organization</button></form></div></div></body></html>`;
 
 const renderNewBot = async (
     actor: ControlPlaneActorV1,
@@ -1472,12 +1573,75 @@ export const registerProductProofRoutesV1 = (
     app: Hono<{ Bindings: ControlPlaneBindings }>,
     dependencies: ControlPlaneProductProofDependenciesV1 | undefined
 ): void => {
-    app.get("/login", context => context.html(loginDocument()));
+    app.get("/login", context =>
+        context.html(loginDocument(dependencies?.identity !== undefined, context.req.query("sent") === "1"))
+    );
+
+    app.post("/actions/auth/magic-link", async context => {
+        if (dependencies?.identity === undefined) return unavailable(context);
+        if (!validOrigin(context.req.raw)) return context.text("Invalid origin", 403);
+        const form = await context.req.formData();
+        const email = safeText(form.get("email"), 320)?.toLocaleLowerCase() ?? null;
+        if (email === null || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) {
+            return context.text("Enter a valid email address", 422);
+        }
+        const accepted = await dependencies.identity.requestMagicLink({ request: context.req.raw, email });
+        if (!accepted) return context.text("Sign-in request could not be started", 503);
+        return context.redirect("/login?sent=1", 303);
+    });
+
+    app.get("/onboarding", async context => {
+        if (dependencies?.identity === undefined) return context.redirect("/login", 302);
+        const actor = await requireActor(context.req.raw, dependencies);
+        if (actor !== null) return context.redirect("/bots", 302);
+        const user = await dependencies.identity.resolveUser(context.req.raw);
+        if (user === null) return context.redirect("/login", 302);
+        return context.html(
+            onboardingDocument({ displayName: user.display_name, csrfToken: user.csrf_token, error: null })
+        );
+    });
+
+    app.post("/actions/organizations", async context => {
+        if (dependencies?.identity === undefined) return unavailable(context);
+        if (!validOrigin(context.req.raw)) return context.text("Invalid origin", 403);
+        const user = await dependencies.identity.resolveUser(context.req.raw);
+        if (user === null) return context.text("Unauthorized", 401);
+        const form = await context.req.formData();
+        if (form.get("_csrf") !== user.csrf_token) return context.text("Invalid CSRF token", 403);
+        const name = safeText(form.get("name"), MAX_NAME_BYTES);
+        const slug = safeText(form.get("slug"), 64)?.toLocaleLowerCase() ?? null;
+        if (name === null || slug === null || !/^[a-z0-9][a-z0-9-]{0,62}$/u.test(slug)) {
+            return context.html(
+                onboardingDocument({
+                    displayName: user.display_name,
+                    csrfToken: user.csrf_token,
+                    error: "Enter an organization name and a URL using lowercase letters, numbers, and hyphens.",
+                }),
+                422
+            );
+        }
+        const created = await dependencies.identity.createOrganization({ request: context.req.raw, name, slug });
+        if (!created) {
+            return context.html(
+                onboardingDocument({
+                    displayName: user.display_name,
+                    csrfToken: user.csrf_token,
+                    error: "That organization URL is unavailable.",
+                }),
+                409
+            );
+        }
+        return context.redirect("/bots", 303);
+    });
 
     app.get("/", async context => {
         if (dependencies === undefined) return context.redirect("/login", 302);
         const actor = await requireActor(context.req.raw, dependencies);
-        return actor === null ? context.redirect("/login", 302) : context.redirect("/bots", 302);
+        if (actor !== null) return context.redirect("/bots", 302);
+        const user = await dependencies.identity?.resolveUser(context.req.raw);
+        return user === undefined || user === null
+            ? context.redirect("/login", 302)
+            : context.redirect("/onboarding", 302);
     });
 
     app.get("/bots", async context => {
@@ -1561,6 +1725,49 @@ export const registerProductProofRoutesV1 = (
         });
         if (!updated) return context.text("Organization permission conflict", 409);
         return context.redirect("/organization/settings", 303);
+    });
+
+    app.post("/actions/integration-connections", async context => {
+        if (dependencies === undefined || dependencies.connector.beginIntegrationConnection === undefined) {
+            return unavailable(context);
+        }
+        const actor = await requireActor(context.req.raw, dependencies);
+        if (actor === null) return context.json({ error: "unauthorized" }, 401);
+        if (actor.role !== "owner") return context.json({ error: "forbidden" }, 403);
+        if (!validOrigin(context.req.raw)) return context.json({ error: "invalid_origin" }, 403);
+        const form = await context.req.formData();
+        if (!validCsrf(form, actor)) return context.json({ error: "invalid_csrf" }, 403);
+        const identifier = form.get("provider_identifier");
+        if (typeof identifier !== "string" || !/^[a-z0-9][a-z0-9-]{0,127}$/u.test(identifier)) {
+            return context.json({ error: "invalid_provider" }, 422);
+        }
+        const catalog = await (dependencies.connector.listCatalogApps?.() ?? Promise.resolve([]));
+        const appEntry = catalog.find(app => app.identifier === identifier && app.provider_id !== null);
+        if (appEntry === undefined) return context.json({ error: "provider_unavailable" }, 404);
+        const url = await dependencies.connector.beginIntegrationConnection({
+            account_id: actor.account_id,
+            user_id: actor.user_id,
+            app: appEntry,
+        });
+        return url === null ? context.json({ error: "connection_unavailable" }, 502) : context.json({ url });
+    });
+
+    app.get("/integrations/metorial/callback", async context => {
+        if (dependencies === undefined || dependencies.connector.completeIntegrationConnection === undefined) {
+            return unavailable(context);
+        }
+        const actor = await requireActor(context.req.raw, dependencies);
+        if (actor === null) return context.redirect("/login", 302);
+        if (actor.role !== "owner") return context.text("Forbidden", 403);
+        const flowId = context.req.query("flow");
+        if (flowId === undefined || !safeMetorialId(flowId)) return context.text("Invalid connection flow", 422);
+        const completed = await dependencies.connector.completeIntegrationConnection({
+            account_id: actor.account_id,
+            user_id: actor.user_id,
+            flow_id: flowId,
+        });
+        if (!completed) return context.text("App connection was not completed", 409);
+        return context.redirect("/organization/settings?connected=true", 303);
     });
 
     app.get("/bots/new", async context => {
@@ -1796,21 +2003,34 @@ export const registerProductProofRoutesV1 = (
             claimed_at_ms: now,
         });
         if (run === null) return context.text("Run conflict", 409);
-        const execution = await dependencies.taskExecutor.execute({
-            account_id: actor.account_id,
-            user_id: actor.user_id,
-            run_id: run.run_id,
-            bot,
-            prompt: message,
-            permissions,
-            metorial_session_intent: metorialSessionIntent,
-        });
+        let execution: Awaited<ReturnType<ProductProofTaskExecutorV1["execute"]>>;
+        try {
+            execution = await dependencies.taskExecutor.execute({
+                account_id: actor.account_id,
+                user_id: actor.user_id,
+                run_id: run.run_id,
+                bot,
+                prompt: message,
+                permissions,
+                metorial_session_intent: metorialSessionIntent,
+            });
+        } catch {
+            await dependencies.repository.failRun?.({
+                account_id: actor.account_id,
+                run_id: run.run_id,
+                completed_at_ms: (dependencies.now ?? Date.now)(),
+            });
+            return context.text("Task execution failed", 502);
+        }
         const resultText = safeText(execution.result_text, 128 * 1024, true);
         if (resultText === null) return context.text("Task result unavailable", 502);
         const completed = await dependencies.repository.completeRun({
             account_id: actor.account_id,
             run_id: run.run_id,
             result_text: resultText,
+            cleanup_state: execution.cleanup_state ?? "not_required",
+            evidence_state: execution.evidence_state ?? "synthetic_test_only",
+            metorial_tool_call_count: execution.metorial_tool_call_count ?? 0,
             completed_at_ms: (dependencies.now ?? Date.now)(),
         });
         if (completed === null) return context.text("Run conflict", 409);
@@ -2142,21 +2362,34 @@ export const registerProductProofRoutesV1 = (
             claimed_at_ms: now,
         });
         if (run === null) return context.text("Run conflict", 409);
-        const execution = await dependencies.taskExecutor.execute({
-            account_id: actor.account_id,
-            user_id: actor.user_id,
-            run_id: run.run_id,
-            bot,
-            prompt: confirmation.prompt,
-            permissions,
-            metorial_session_intent: metorialSessionIntent,
-        });
+        let execution: Awaited<ReturnType<ProductProofTaskExecutorV1["execute"]>>;
+        try {
+            execution = await dependencies.taskExecutor.execute({
+                account_id: actor.account_id,
+                user_id: actor.user_id,
+                run_id: run.run_id,
+                bot,
+                prompt: confirmation.prompt,
+                permissions,
+                metorial_session_intent: metorialSessionIntent,
+            });
+        } catch {
+            await dependencies.repository.failRun?.({
+                account_id: actor.account_id,
+                run_id: run.run_id,
+                completed_at_ms: (dependencies.now ?? Date.now)(),
+            });
+            return context.text("Task execution failed", 502);
+        }
         const resultText = safeText(execution.result_text, 128 * 1024, true);
         if (resultText === null) return context.text("Task result unavailable", 502);
         const completedRun = await dependencies.repository.completeRun({
             account_id: actor.account_id,
             run_id: run.run_id,
             result_text: resultText,
+            cleanup_state: execution.cleanup_state ?? "not_required",
+            evidence_state: execution.evidence_state ?? "synthetic_test_only",
+            metorial_tool_call_count: execution.metorial_tool_call_count ?? 0,
             completed_at_ms: (dependencies.now ?? Date.now)(),
         });
         if (completedRun === null) return context.text("Run conflict", 409);

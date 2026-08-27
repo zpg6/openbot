@@ -8,6 +8,6 @@
         "rootDir": ".",
         "types": ["@cloudflare/workers-types", "react", "react-dom"]
     },
-    "include": ["entry.d1.ts", "src/**/*.ts", "client/**/*.tsx", "vite.config.ts"],
+    "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.json", "vite.config.ts"],
     "references": [{ "path": "../../packages/db-d1" }]
 }

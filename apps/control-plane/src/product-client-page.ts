@@ -33,6 +33,9 @@ export interface OpenBotClientCatalogAppV1 {
     readonly description: string;
     readonly categories: readonly string[];
     readonly icon_url: string | null;
+    readonly featured_rank: number | null;
+    readonly icon_data_uri: string | null;
+    readonly provider_id: string | null;
     readonly connected_integration_id: string | null;
 }
 

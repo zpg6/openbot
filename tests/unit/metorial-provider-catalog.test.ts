@@ -126,6 +126,13 @@ describe("Metorial provider catalog icon generation", () => {
         const bytes = (value: string): Uint8Array => new TextEncoder().encode(value);
 
         expect(safeSvg(bytes('<svg viewBox="0 0 16 16"><path d="M0 0h16v16z"/></svg>'))).toContain("<path");
+        expect(
+            safeSvg(
+                bytes(
+                    '<svg viewBox="0 0 16 16"><defs><linearGradient id="paint"><stop offset="0"/></linearGradient></defs><path fill="url(#paint)"/></svg>'
+                )
+            )
+        ).toContain("url(#paint)");
         expect(() => safeSvg(bytes('<svg viewBox="0 0 16 16"><script>alert(1)</script></svg>'))).toThrow(
             "static SVG policy"
         );
@@ -134,6 +141,9 @@ describe("Metorial provider catalog icon generation", () => {
         );
         expect(() =>
             safeSvg(bytes('<svg viewBox="0 0 16 16"><use href="https://evil.invalid/a.svg#x"/></svg>'))
+        ).toThrow("static SVG policy");
+        expect(() =>
+            safeSvg(bytes('<svg viewBox="0 0 16 16"><path fill="url(https://evil.invalid/paint.svg)"/></svg>'))
         ).toThrow("static SVG policy");
     });
 });

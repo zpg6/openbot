@@ -33,6 +33,10 @@ describe("control-plane route inventory", () => {
         "POST /actions/bots",
         "POST /actions/run-confirmations",
         "POST /actions/runs",
+        "POST /api/auth/sign-in/email",
+        "GET /api/auth/get-session",
+        "POST /api/auth/change-password",
+        "POST /api/auth/sign-out",
     ]);
 
     it("matches the committed core route fixture", async () => {
@@ -101,12 +105,16 @@ describe("Worker exposure defaults", () => {
     } as const;
 
     for (const [worker, configFile] of Object.entries(workerConfigs)) {
-        it(`${worker} disables platform URLs and logs`, async () => {
+        it(`${worker} disables platform URLs and declares its logging boundary`, async () => {
             const config = await readFile(new URL(`../../apps/${worker}/${configFile}`, import.meta.url), "utf8");
 
             expect(config).toMatch(/"workers_dev": false/u);
             expect(config).toMatch(/"preview_urls": false/u);
-            expect(config).toMatch(/"observability": \{ "enabled": false \}/u);
+            expect(config).toMatch(
+                worker === "sandbox-runner"
+                    ? /"observability": \{ "enabled": false \}/u
+                    : /"observability": \{ "enabled": true \}/u
+            );
             expect(config).not.toMatch(/"routes?":/u);
             expect(config).not.toMatch(/"queues":|"triggers":/u);
         });

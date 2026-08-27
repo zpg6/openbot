@@ -1,0 +1,25 @@
+{
+    "schema_version": 1,
+    "integrations": [
+        { "identifier": "slack", "thesvg_slug": "slack" },
+        { "identifier": "google-gmail", "thesvg_slug": "gmail" },
+        { "identifier": "google-calendar", "thesvg_slug": "google-calendar" },
+        { "identifier": "google-drive", "thesvg_slug": "google-drive" },
+        { "identifier": "microsoft-outlook", "thesvg_slug": "microsoft-outlook" },
+        { "identifier": "microsoft-teams", "thesvg_slug": "microsoft-teams" },
+        { "identifier": "notion", "thesvg_slug": "notion" },
+        { "identifier": "linear", "thesvg_slug": "linear" },
+        { "identifier": "github", "thesvg_slug": "github" },
+        { "identifier": "atlassian-jira", "thesvg_slug": "jira" },
+        { "identifier": "asana", "thesvg_slug": "asana" },
+        { "identifier": "airtable", "thesvg_slug": "airtable" },
+        { "identifier": "salesforce", "thesvg_slug": "salesforce" },
+        { "identifier": "hubspot", "thesvg_slug": "hubspot" },
+        { "identifier": "apolloio", "thesvg_slug": "apollodotio" },
+        { "identifier": "microsoft-sharepoint", "thesvg_slug": "microsoft-sharepoint" },
+        { "identifier": "stripe", "thesvg_slug": "stripe" },
+        { "identifier": "zendesk", "thesvg_slug": "zendesk" },
+        { "identifier": "dropbox", "thesvg_slug": "dropbox" },
+        { "identifier": "discord", "thesvg_slug": "discord" }
+    ]
+}

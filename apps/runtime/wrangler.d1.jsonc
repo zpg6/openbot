@@ -1,11 +1,11 @@
 {
     "$schema": "../../node_modules/wrangler/config-schema.json",
     "name": "openbot-runtime",
-    "main": "entry.d1.ts",
+    "main": "src/entry.d1.ts",
     "compatibility_date": "2026-08-22",
     "preview_urls": false,
     "workers_dev": false,
-    "observability": { "enabled": false },
+    "observability": { "enabled": true },
     "durable_objects": {
         "bindings": [
             {

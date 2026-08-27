@@ -3,10 +3,10 @@ import { readFile } from "node:fs/promises";
 const paths = Object.freeze({
     app: "apps/control-plane/src/app.ts",
     product: "apps/control-plane/src/product-proof.ts",
-    client: "apps/control-plane/client/main.tsx",
+    client: "apps/control-plane/src/client/main.tsx",
     clientTypes: "apps/control-plane/src/product-client-page.ts",
     viteConfig: "apps/control-plane/vite.config.ts",
-    productTest: "apps/control-plane/src/product-proof.test.ts",
+    productTest: "apps/control-plane/tests/product-proof.test.ts",
     spec: "tests/e2e/product-flow.spec.ts",
     server: "tests/e2e/server.ts",
     config: "playwright.config.ts",
@@ -148,7 +148,7 @@ const checkSources = input => {
             "const defaultPermissionIds",
             ": defaultPermissionIds(integration),",
             'name="integration"',
-            "POPULAR_APP_IDENTIFIERS",
+            "app.featured_rank !== null",
             '"Popular apps"',
             '"Search results"',
             "remainingApps",
@@ -257,7 +257,6 @@ const checkSources = input => {
             'getByRole("button", { name: "Add Linear" }).click()',
             'getByRole("checkbox", { name: /List issues/u })).toBeChecked()',
             'getByRole("button", { name: "Add Slack" }).click()',
-            'getByRole("checkbox", { name: /List channels/u })).toBeChecked()',
             'getByRole("region", { name: "Added to this Bot" })',
             'getByRole("button", { name: "Configure Linear" }).click()',
             'getByRole("radio", { name: "Sky", exact: true }).check()',
@@ -355,16 +354,22 @@ const checkSources = input => {
         [
             'REPOSITORY = "https://github.com/metorial/integrations.git"',
             'REPOSITORY_REVISION = "e0179f7d85450c1f7cc9d47ac60f4c9a17512569"',
+            'PUBLIC_CATALOG_URL = "https://metorial.com/integrations"',
+            'THESVG_REPOSITORY = "GLINCKER/thesvg"',
+            "parseMetorialPublicCatalogHtml",
+            "parseMetorialPublicProviderHtml",
             'join(directory, "slate.json")',
             'join(directory, "README.md")',
             "parseMetorialIntegrationManifest",
             "metorial-integration-catalog.json",
             "metorial-integration-picker.json",
-            "discovery_only: true",
-            "organization_deployments_from_metorial_sdk: true",
+            "published_catalog_defines_listable_integrations: true",
+            "current_provider_version_defines_tools_and_triggers: true",
+            "organization_permission_ceiling_from_openbot: true",
             "bot_permissions_are_subset_of_organization_ceiling: true",
+            "runtime_sessions_use_metorial_tool_filters: true",
         ],
-        "the keyless Metorial catalog must stay pinned to official manifests and separate discovery from authority"
+        "the Metorial catalog must join pinned source provenance, published providers, exact capabilities, and reviewed icons without granting authority"
     );
     if (
         controlManifest.dependencies?.["@dicebear/core"] !== "catalog:" ||

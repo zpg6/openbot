@@ -2,6 +2,7 @@ import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 process.env["WRANGLER_LOG_PATH"] ??= path.resolve(".wrangler/logs/vitest-d1-probe-writer.log");
@@ -9,11 +10,9 @@ process.env["WRANGLER_LOG_PATH"] ??= path.resolve(".wrangler/logs/vitest-d1-prob
 const writerBBundleDirectory = path.resolve(".build", "vitest-d1-probe-writer-b");
 mkdirSync(writerBBundleDirectory, { recursive: true });
 const writerBBuild = spawnSync(
-    "corepack",
+    process.execPath,
     [
-        "pnpm",
-        "exec",
-        "wrangler",
+        fileURLToPath(import.meta.resolve("wrangler")),
         "deploy",
         "--config",
         "apps/d1-probe-writer/wrangler.b.local.jsonc",

@@ -34,15 +34,33 @@ const pickerCatalog = JSON.parse(
         description: string,
         categories: readonly string[],
         iconUrl: string | null,
+        featuredRank: number | null,
+        iconDataUri: string | null,
+        providerId: string,
+        providerVersionId: string,
     ])[];
 };
 const metorialCatalogApps: readonly ProductProofMetorialCatalogAppV1[] = pickerCatalog.integrations.map(
-    ([identifier, displayName, description, categories, iconUrl]) => ({
+    ([
+        identifier,
+        displayName,
+        description,
+        categories,
+        iconUrl,
+        featuredRank,
+        iconDataUri,
+        providerId,
+        providerVersionId,
+    ]) => ({
         identifier,
         display_name: displayName,
         description,
         categories,
         icon_url: iconUrl,
+        featured_rank: featuredRank,
+        icon_data_uri: iconDataUri,
+        provider_id: providerId,
+        provider_version_id: providerVersionId,
     })
 );
 
@@ -234,6 +252,7 @@ const createMemoryRepository = (): ProductProofRepositoryV1 => {
                 execution_state: "running",
                 cleanup_state: "not_required",
                 evidence_state: "synthetic_test_only",
+                metorial_tool_call_count: 0,
                 created_at_ms: input.claimed_at_ms,
                 completed_at_ms: null,
             });

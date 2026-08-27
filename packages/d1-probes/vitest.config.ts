@@ -19,7 +19,7 @@ export default defineConfig({
         }),
     ],
     test: {
-        include: ["src/**/*.worker.spec.ts"],
+        include: ["tests/**/*.worker.spec.ts"],
         passWithNoTests: false,
         restoreMocks: true,
         sequence: { concurrent: false },

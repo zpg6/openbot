@@ -45,9 +45,9 @@ const WorkerBuildProjectionV1Schema = z
     .object({
         role: WorkerRoleV1Schema,
         source_entrypoint: z.enum([
-            "apps/d1-probe-sink/entry.ts",
-            "apps/d1-probe-writer/entry.a.ts",
-            "apps/d1-probe-writer/entry.b.ts",
+            "apps/d1-probe-sink/src/entry.ts",
+            "apps/d1-probe-writer/src/entry.a.ts",
+            "apps/d1-probe-writer/src/entry.b.ts",
         ]),
         main_module: z.literal(D1_PROBE_WORKER_MAIN_MODULE_V1),
         selected_entrypoint: z.enum(["D1ProbeSinkService", "D1ProbeWriterAService", "D1ProbeWriterBService"]),
@@ -198,19 +198,19 @@ const safeParse = <T>(
 
 const expectedBuildProjection = Object.freeze({
     sink: Object.freeze({
-        source_entrypoint: "apps/d1-probe-sink/entry.ts" as const,
+        source_entrypoint: "apps/d1-probe-sink/src/entry.ts" as const,
         selected_entrypoint: "D1ProbeSinkService" as const,
         public_fetch_contract: "access_readback_v1" as const,
         exports: Object.freeze(["D1ProbeSinkService", "default"]),
     }),
     writer_a: Object.freeze({
-        source_entrypoint: "apps/d1-probe-writer/entry.a.ts" as const,
+        source_entrypoint: "apps/d1-probe-writer/src/entry.a.ts" as const,
         selected_entrypoint: "D1ProbeWriterAService" as const,
         public_fetch_contract: "access_writer_a_trigger_v1" as const,
         exports: Object.freeze(["D1ProbeWriterAService", "default"]),
     }),
     writer_b: Object.freeze({
-        source_entrypoint: "apps/d1-probe-writer/entry.b.ts" as const,
+        source_entrypoint: "apps/d1-probe-writer/src/entry.b.ts" as const,
         selected_entrypoint: "D1ProbeWriterBService" as const,
         public_fetch_contract: "access_writer_b_trigger_v1" as const,
         exports: Object.freeze(["D1ProbeWriterBService", "default"]),

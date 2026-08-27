@@ -5,5 +5,5 @@
         "noEmit": true,
         "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types", "@types/node", "vitest"]
     },
-    "include": ["src/**/*.ts"]
+    "include": ["tests/**/*.ts"]
 }
