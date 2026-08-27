@@ -1,7 +1,5 @@
 import { createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { chmod, link, lstat, readFile, readdir, rename, symlink, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 import { canonicalizeJsonV1, type CanonicalJsonValueV1 } from "@openbot/gate-attestation/internal";
 import { afterEach, describe, expect, it } from "vitest";
@@ -658,7 +656,7 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
         const symlinkClaim = await observedClaim(response);
         const symlinkPath = pathFor(symlinkClaim);
         await archive(symlinkClaim, response, key);
-        const target = join(tmpdir(), `openbot-response-archive-${randomUUID()}.target`);
+        const target = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1}/openbot-response-archive-${randomUUID()}.target`;
         cleanupPaths.add(target);
         await writeFile(target, await readFile(symlinkPath), { mode: 0o600 });
         await unlink(symlinkPath);
@@ -679,7 +677,7 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
         const linkClaim = await observedClaim(response);
         const linkPath = pathFor(linkClaim);
         await archive(linkClaim, response, key);
-        const unexplained = `/private/tmp/openbot-response-archive-${randomUUID()}.foreign`;
+        const unexplained = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1}/openbot-response-archive-${randomUUID()}.foreign`;
         cleanupPaths.add(unexplained);
         await link(linkPath, unexplained);
         await expect(archive(linkClaim, response, key)).resolves.toEqual({
@@ -861,7 +859,7 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
         const symlinkClaim = await observedClaim(response);
         expect((await archive(symlinkClaim, response, key)).success).toBe(true);
         const symlinkPath = pathFor(symlinkClaim);
-        const target = join(tmpdir(), `openbot-response-inventory-${randomUUID()}.target`);
+        const target = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1}/openbot-response-inventory-${randomUUID()}.target`;
         cleanupPaths.add(target);
         await writeFile(target, await readFile(symlinkPath), { mode: 0o600 });
         await unlink(symlinkPath);
@@ -873,7 +871,7 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
 
         const hardlinkClaim = await observedClaim(response);
         expect((await archive(hardlinkClaim, response, key)).success).toBe(true);
-        const foreign = `/private/tmp/openbot-response-inventory-${randomUUID()}.foreign`;
+        const foreign = `${D1_PROBE_CLOUDFLARE_WORKER_CANARY_RESPONSE_ARCHIVE_ROOT_V1}/openbot-response-inventory-${randomUUID()}.foreign`;
         cleanupPaths.add(foreign);
         await link(pathFor(hardlinkClaim), foreign);
         expect(
