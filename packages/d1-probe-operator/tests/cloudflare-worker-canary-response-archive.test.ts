@@ -1,5 +1,7 @@
 import { createDecipheriv, createHash, createHmac, hkdfSync, randomBytes, randomUUID } from "node:crypto";
 import { chmod, link, lstat, readFile, readdir, rename, symlink, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { canonicalizeJsonV1, type CanonicalJsonValueV1 } from "@openbot/gate-attestation/internal";
 import { afterEach, describe, expect, it } from "vitest";
@@ -656,7 +658,7 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
         const symlinkClaim = await observedClaim(response);
         const symlinkPath = pathFor(symlinkClaim);
         await archive(symlinkClaim, response, key);
-        const target = `/private/tmp/openbot-response-archive-${randomUUID()}.target`;
+        const target = join(tmpdir(), `openbot-response-archive-${randomUUID()}.target`);
         cleanupPaths.add(target);
         await writeFile(target, await readFile(symlinkPath), { mode: 0o600 });
         await unlink(symlinkPath);
@@ -859,7 +861,7 @@ describe("Cloudflare Worker canary encrypted response-preimage archive", () => {
         const symlinkClaim = await observedClaim(response);
         expect((await archive(symlinkClaim, response, key)).success).toBe(true);
         const symlinkPath = pathFor(symlinkClaim);
-        const target = `/private/tmp/openbot-response-inventory-${randomUUID()}.target`;
+        const target = join(tmpdir(), `openbot-response-inventory-${randomUUID()}.target`);
         cleanupPaths.add(target);
         await writeFile(target, await readFile(symlinkPath), { mode: 0o600 });
         await unlink(symlinkPath);
