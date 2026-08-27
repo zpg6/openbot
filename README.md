@@ -1,16 +1,30 @@
 # OpenBot
 
-OpenBot is an open source, self-hosted agent control plane for narrow, reviewable access to external tools. It is in design and early implementation. The repository does not yet contain a production-ready release.
+OpenBot is an open source control plane for personal AI agents. A Bot is a chat. Connect apps once for your organization, choose the tools each Bot may use, then talk to it to run work and manage routines.
 
-The first target is deliberately small. An authenticated organization owner reviews one task, then starts one short read-only run through one reviewed Metorial connector. The Bot may execute one bounded JavaScript function in a fresh Cloudflare Sandbox owned by that run. OpenBot records the allowed provider tools, code profile, limits, data classes, disclosure destinations, model route, run state, cleanup state, and redacted audit evidence.
+![OpenBot chat with compact app access and routine settings](docs/assets/openbot-bot-chat.png)
 
-OpenBot treats a connection as a credential reference, not permission. A Bot can use a tool only when the organization policy, Bot revision, connector contract, capability grant, filtered Metorial session, and signed run manifest agree. Unsupported resource mappings deny the run.
+OpenBot is under active development. Do not connect production accounts or use real organization data yet.
+
+## Create a Bot
+
+Name the Bot, choose its appearance, and add the apps it needs. App access starts read-only. Write and destructive tools stay hidden until you open those levels. Clicking an added app opens its permission drawer; closing the drawer gives the catalog its full width again.
+
+![OpenBot Bot setup with selected apps and a permission drawer](docs/assets/openbot-bot-setup.png)
+
+Organizations own app connections and set the maximum tool allowance. A Bot receives an explicit subset of that allowance. Tightening the organization limit removes the tool from every Bot.
+
+## Work in chat
+
+There is no separate task launcher or routine builder. Send a message with the up-arrow button. The agent can run the task or use an internal tool call to create and edit one or more routines. Existing routines appear in the chat sidebar.
+
+Every run binds the exact app versions, tool policies, resource scopes, and connection references that were current when the message was handled. A connection identifies credentials. It does not grant authority by itself.
 
 ## Current status
 
-The build order and security contracts live in [PLAN.md](PLAN.md). The plan is the source of truth while the first implementation is taking shape.
+The browser walkthrough now covers Bot creation, progressive app permissions, a task result, routine creation and editing, and organization permission changes. It records seven screenshots and a video on every run.
 
-Do not deploy OpenBot for real data yet. Authentication, policy enforcement, vendor cleanup, runtime isolation, audit verification, and release checks are not complete.
+The build order and security contracts live in [PLAN.md](PLAN.md). Authentication, production persistence, vendor cleanup, runtime isolation, and release checks are not complete.
 
 ## Intended first release
 
@@ -28,7 +42,7 @@ The first release excludes provider business-data writes, arbitrary MCP servers,
 
 ## Product shape
 
-The main interface is a Bot roster, the active Bot's chat, and a settings rail for Bot configuration, exact Metorial access, and routines. A Bot is a chat. Starting a task opens a five-minute confirmation that shows the exact prompt, each provider and connected account label, and every literal tool allow-list before execution. A chat message can also become a reviewed routine draft; saved routines appear in the rail and edits rebind them to the Bot's current exact authority. Routine scheduling and unattended execution remain disabled. Confirming a task creates an independent run and reserves a random run-owned Sandbox identity when code is enabled. Prior runs do not silently become model context.
+The main interface is a Bot roster, the active Bot's chat, and a settings rail for Bot configuration, app access, and routines. A message can request immediate work or manage a routine. The agent decides which internal tool to call. Routine edits rebind the routine to the Bot's current exact authority. Routine scheduling and unattended execution remain disabled. Each task creates an independent run and reserves a random run-owned Sandbox identity when code is enabled. Prior runs do not silently become model context.
 
 The planned R2 artifact workspace is separate from the read-only core. It uses versioned collections and snapshot-bound Bot reads instead of a shared cloud computer. Artifact routes stay absent until their security and storage gate passes.
 
@@ -65,13 +79,17 @@ corepack pnpm verify
 
 `corepack pnpm test:integration` runs the local Worker RPC tests. Later database and preview checks use separate commands because they require Docker or disposable platform and vendor resources. Never substitute real organization data in a test account.
 
-The first real-app browser proof runs with:
+Run the real-app browser proof with:
 
 ```sh
 corepack pnpm test:app:e2e
 ```
 
-It opens the production React + Hono application in a headless browser, creates a Bot, adds two organization-scoped Metorial apps from the app grid, verifies their safe read-tool defaults, and opens one app to inspect its exact tool controls. It then chats a task, reviews both connected-account/tool disclosures, starts one claimed run, and reads its plain-text result. The walkthrough also proposes and saves a routine from chat, edits it from the sidebar, and changes the organization's exact permission ceiling. The server-owned authority snapshot binds each opaque connection grant, provider version and specification, policy revision and digest, tool key and effect, and input/output schema digests. A separate semantic session intent pins the configured Metorial API version and serializer identity without pretending to be an unversioned vendor wire body. The private capability gateway must resolve opaque user grants to auth configs and serialize that intent for the pinned Metorial version; authless and deployment-auth providers remain explicit modes, never ambient fallback. Every run writes nine full-page screenshots and `openbot-product-flow.webm` under `test-results/app-e2e/walkthrough`. The HTML report at `playwright-report/index.html` includes the same attachments.
+It opens the production React and Hono application in a headless browser, creates a Bot, adds two organization-scoped apps, and checks the progressive Read, Write, and Destructive permission views. Adding an app leaves the permission drawer closed. Clicking an added app opens it. The walkthrough sends a task in chat and reads the result, asks the Bot to create a routine, edits that routine from the sidebar, and changes the organization's permission ceiling.
+
+The server-owned authority snapshot binds each opaque connection grant, provider version and specification, policy revision and digest, tool key and effect, and input and output schema digests. A separate session intent pins the configured Metorial API version and serializer identity. The private capability gateway must resolve opaque user grants to auth configs and serialize that intent for the pinned Metorial version. Authless and deployment-auth providers remain explicit modes.
+
+Every run writes seven full-page screenshots and `openbot-product-flow.webm` under `test-results/app-e2e/walkthrough`. The HTML report at `playwright-report/index.html` includes the same attachments.
 
 Authentication, storage, and task execution are bounded local substitutions; this command is not provider, model, production-database, or deployment evidence. On macOS it uses installed Google Chrome when available. Elsewhere, install Playwright Chromium or set `OPENBOT_E2E_CHROME_PATH` to a compatible browser executable.
 
