@@ -163,6 +163,7 @@ const runChild = async (options: {
         }
         child.stdout.on("data", chunk => stdout.push(Buffer.from(chunk)));
         child.stderr.on("data", chunk => stderr.push(Buffer.from(chunk)));
+        child.stdin.on("error", () => undefined);
         child.on("message", message => {
             messages.push(message);
             if (options.go !== undefined && child.connected) child.send(options.go(message) as never);
@@ -183,6 +184,7 @@ const runChild = async (options: {
                 reject(new Error("missing child service-token stream"));
                 return;
             }
+            secretStream.on("error", () => undefined);
             secretStream.end(options.secret ?? "");
         }
     });

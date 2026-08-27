@@ -108,6 +108,7 @@ const runParent = async (options: {
         }
         child.stdout.on("data", chunk => stdout.push(Buffer.from(chunk)));
         child.stderr.on("data", chunk => stderr.push(Buffer.from(chunk)));
+        child.stdin.on("error", () => undefined);
         child.once("error", reject);
         child.once("close", code =>
             resolve({
@@ -122,6 +123,9 @@ const runParent = async (options: {
             reject(new Error("missing parent service-token stream"));
             return;
         }
+        // Early-denial cases intentionally close the credential descriptor
+        // without reading it. Linux reports that peer close as ECONNRESET.
+        secretStream.on("error", () => undefined);
         secretStream.end(options.secret ?? "");
     });
 

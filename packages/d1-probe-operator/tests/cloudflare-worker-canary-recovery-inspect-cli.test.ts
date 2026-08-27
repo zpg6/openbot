@@ -100,6 +100,7 @@ const runCli = async (
         }
         child.stdout.on("data", chunk => stdout.push(Buffer.from(chunk)));
         child.stderr.on("data", chunk => stderr.push(Buffer.from(chunk)));
+        child.stdin.on("error", () => undefined);
         child.once("error", reject);
         child.once("close", code => {
             resolve({
@@ -111,7 +112,13 @@ const runCli = async (
         child.stdin.end(input);
         for (const descriptor of [3, 4] as const) {
             const stream = child.stdio[descriptor];
-            if (stream !== null && stream !== undefined && "end" in stream) stream.end(`fd-${descriptor}-sentinel`);
+            if (stream !== null && stream !== undefined && "end" in stream) {
+                // A short-lived child may close an unused descriptor before Linux
+                // finishes the parent-side pipe read. That disconnect is expected;
+                // the asserted process result remains authoritative.
+                stream.on("error", () => undefined);
+                stream.end(`fd-${descriptor}-sentinel`);
+            }
         }
     });
 

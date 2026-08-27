@@ -231,6 +231,7 @@ const runCli = async (
         }
         child.stdout.on("data", chunk => stdout.push(Buffer.from(chunk)));
         child.stderr.on("data", chunk => stderr.push(Buffer.from(chunk)));
+        child.stdin.on("error", () => undefined);
         child.once("error", reject);
         child.once("close", code =>
             resolve({
@@ -246,6 +247,7 @@ const runCli = async (
                 reject(new Error("missing child commitment-key stream"));
                 return;
             }
+            keyStream.on("error", () => undefined);
             keyStream.end(keyInput);
         }
     });
@@ -275,6 +277,7 @@ const runRouteCli = async (
         }
         child.stdout.on("data", chunk => stdout.push(Buffer.from(chunk)));
         child.stderr.on("data", chunk => stderr.push(Buffer.from(chunk)));
+        child.stdin.on("error", () => undefined);
         child.once("error", reject);
         child.once("close", code =>
             resolve({
